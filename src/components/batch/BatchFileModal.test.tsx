@@ -8,6 +8,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { WHOLE_BOOK } from "@/lib/review/batch-scope"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
 import { BatchFileModal } from "./BatchFileModal"
@@ -63,41 +64,53 @@ describe("BatchFileModal — validation", () => {
   it("leaves untouched AI drafts out until a reviewer includes them, and keeps a second pass in the ready set", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal()
-    expect(screen.getByRole("checkbox", { name: /2 cells ready for your check/ })).toBeChecked()
-    const ai = screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ })
+    expect(screen.getByRole("checkbox", { name: "Include cells nobody has validated" })).toBeChecked()
+    expect(screen.getByText("1 cell nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Include cells someone else has validated" })).toBeChecked()
+    expect(screen.getByText("1 cell someone else has validated.")).toBeInTheDocument()
+    const ai = screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ })
     expect(ai).not.toBeChecked()
-    expect(screen.getByText(/left for individual review/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Validate text" }))
+    expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
+    expect(screen.queryByText(/can be batch-validated/)).toBeNull()
+    expect(screen.queryByText(/left for individual review/)).toBeNull()
+    expect(screen.queryByText(/Skipped \d+ cells/)).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith({
       includeReadyCells: true,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 
   it("sends the AI drafts when a reviewer turns that option on", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal()
-    await user.click(screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ }))
-    await user.click(screen.getByRole("button", { name: "Validate text" }))
+    await user.click(screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ }))
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith({
       includeReadyCells: true,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: true,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 
   it("keeps a contributor from bulk-validating untouched AI drafts", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal({ canIncludeUntouchedAi: false })
-    const ai = screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ })
+    const ai = screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ })
     expect(ai).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByText(/one at a time/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Validate text" }))
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith({
       includeReadyCells: true,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 })
@@ -115,33 +128,55 @@ describe("BatchFileModal — open check flags (AQU-2507)", () => {
     hasOpenFlags: (cellId: string) => ids.includes(cellId),
   })
 
-  it("counts flagged cells in their own box, leaves it off, and keeps them out of the promise", () => {
-    renderModal({ validateOptions: flagged(["human"]) })
-    const box = screen.getByRole("checkbox", { name: /1 cell with an open check flag/ })
+  const namedFlag = [
+    cell({ id: "human", group: "GEN 2:5" }),
+    cell({ id: "ai", aiDrafted: true }),
+    cell({ id: "second", aiDrafted: true, activeValidators: ["joy"] }),
+  ]
+
+  it("lists every flagged cell under the unresolved-checks choice and leaves them out of the run", async () => {
+    const user = userEvent.setup()
+    renderModal({
+      validateOptions: flagged(["human"]),
+      validateCandidates: namedFlag,
+      flagIssue: (id) => id === "human" ? "Number integrity — Number from source missing in translation" : undefined,
+    })
+    const box = screen.getByRole("checkbox", { name: "Include cells with unresolved checks" })
     expect(box).not.toBeChecked()
-    // The flagged cell is still counted as "ready for your check" — the boxes
-    // describe the file, and ticking the flag box is what adds it to the run.
-    expect(screen.getByRole("checkbox", { name: /2 cells ready for your check/ })).toBeChecked()
-    expect(screen.getByText(/This validates 1 eligible cell/)).toBeInTheDocument()
-    expect(screen.getByText(/has an open check flag/)).toBeInTheDocument()
+    expect(screen.getByText("These cells are flagged based on your project checks and rules.")).toBeInTheDocument()
+    expect(screen.queryByRole("listitem")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Show 1 flagged cell" }))
+    const row = screen.getByRole("listitem")
+    expect(row).toHaveTextContent("GEN 2:5")
+    expect(row).toHaveTextContent("Number from source missing in translation")
+    expect(screen.getByRole("checkbox", { name: "Include cells nobody has validated" })).toBeChecked()
+    expect(screen.getByText("Validate 1 cell?")).toBeInTheDocument()
   })
 
   it("adds them to the run, and records the choice, when the reader ticks the box", async () => {
     const user = userEvent.setup()
-    const { onConfirmValidate } = renderModal({ validateOptions: flagged(["human"]) })
-    await user.click(screen.getByRole("checkbox", { name: /1 cell with an open check flag/ }))
-    expect(screen.getByText(/This validates 2 eligible cells/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Validate text" }))
+    const { onConfirmValidate } = renderModal({
+      validateOptions: flagged(["human"]),
+      validateCandidates: namedFlag,
+    })
+    await user.click(screen.getByRole("checkbox", { name: "Include cells with unresolved checks" }))
+    expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith({
       includeReadyCells: true,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: true,
+      chapter: WHOLE_BOOK,
     })
   })
 
-  it("shows no flag box on a file nothing has flagged", () => {
+  it("keeps the unresolved-checks choice when nothing is flagged, grayed so it changes nothing", () => {
     renderModal()
-    expect(screen.queryByRole("checkbox", { name: /check flag/ })).toBeNull()
+    const box = screen.getByRole("checkbox", { name: "Include cells with unresolved checks" })
+    expect(box).toHaveAttribute("aria-disabled", "true")
+    expect(box).not.toBeChecked()
+    expect(screen.getByText("0 cells with open check flags")).toBeInTheDocument()
   })
 })
 
@@ -157,7 +192,7 @@ describe("BatchFileModal — the run finishes the file (AQU-2507)", () => {
     // Two eligible cells, one per batch: the dialog states the whole count and
     // explains how it gets there. It must NEVER read "run again to continue" —
     // the reported defect was five books' worth of re-clicking.
-    expect(screen.getByText(/This validates 2 eligible cells/)).toBeInTheDocument()
+    expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
     expect(screen.getByText(/keeps going until the file is done/)).toBeInTheDocument()
     expect(screen.queryByText(/run again to continue/)).toBeNull()
     expect(screen.queryByText(/At most/)).toBeNull()
@@ -188,6 +223,7 @@ describe("BatchFileModal — drafting", () => {
       refreshAiDrafts: true,
       scope: "all",
       batchSize: 10,
+      chapter: WHOLE_BOOK,
     })
   })
 
@@ -203,5 +239,219 @@ describe("BatchFileModal — drafting", () => {
     })
     expect(screen.getByRole("radio", { name: "Next 1" })).toBeChecked()
     expect(screen.getByText(/This drafts 1 cell/)).toBeInTheDocument()
+  })
+})
+
+describe("BatchFileModal — a teammate's signature", () => {
+  it("keeps a cell that is still short of two signatures on the first box", async () => {
+    const user = userEvent.setup()
+    const { onConfirmValidate } = renderModal({
+      validateOptions: { ...baseOptions, validationCount: 2 },
+      validateCandidates: [
+        cell({ id: "none" }),
+        cell({ id: "one", activeValidators: ["joy"] }),
+        cell({ id: "two", activeValidators: ["joy", "sam"] }),
+      ],
+    })
+    expect(screen.getByRole("checkbox", { name: "Include cells that still need a signature" })).toBeChecked()
+    expect(screen.getByText("2 cells that still need a signature.")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Include cells that already have enough signatures" })).toBeChecked()
+    expect(screen.getByText("1 cell that already has enough signatures.")).toBeInTheDocument()
+    expect(screen.getByText("Validate 3 cells?")).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "Include cells that already have enough signatures" }))
+    expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
+    expect(onConfirmValidate).toHaveBeenCalledWith({
+      includeReadyCells: true,
+      includeSignedByOthers: false,
+      includeUntouchedAiDrafts: false,
+      includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
+    })
+  })
+})
+
+describe("BatchFileModal — nothing checked", () => {
+  it("drops the empty-run sentence and keeps the plain title", async () => {
+    const user = userEvent.setup()
+    renderModal({
+      chapters: ["GEN 1"],
+      initialChapter: "GEN 1",
+      validateCandidates: [
+        cell({ id: "a", group: "GEN 1:1", activeValidators: ["me"] }),
+        cell({ id: "b", group: "GEN 1:2" }),
+      ],
+    })
+    expect(screen.getByText("Validate 1 cell?")).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "Include cells nobody has validated" }))
+    expect(screen.getByText("Batch validate this file")).toBeInTheDocument()
+    expect(screen.queryByText(/can be batch-validated/)).toBeNull()
+    expect(screen.queryByText(/you left unchecked/)).toBeNull()
+    expect(screen.queryByText(/you had already validated/)).toBeNull()
+    expect(screen.getByRole("button", { name: "Validate text cells" })).toBeDisabled()
+  })
+})
+
+describe("BatchFileModal — a chapter with nothing left to validate", () => {
+  it("explains why, keeps the empty choices grayed, and leaves confirm visible but disabled", async () => {
+    const user = userEvent.setup()
+    const { onConfirmValidate } = renderModal({
+      bookName: "Berean Standard Bible (BSB)",
+      chapters: ["GEN 1", "GEN 2"],
+      initialChapter: "GEN 1",
+      validateCandidates: [
+        cell({ id: "a", group: "GEN 1:1", activeValidators: ["me"] }),
+        cell({ id: "b", group: "GEN 1:2", activeValidators: ["me"] }),
+        cell({ id: "c", group: "GEN 2:1", translated: "" }),
+      ],
+    })
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent("Nothing to validate in GEN 1")
+    expect(status).toHaveTextContent("All 2 cells here are already validated.")
+    for (const name of [
+      "Include cells nobody has validated",
+      "Include cells someone else has validated",
+      "0 unvalidated AI drafts",
+      "Include cells with unresolved checks",
+    ]) {
+      expect(screen.getByRole("checkbox", { name })).toHaveAttribute("aria-disabled", "true")
+    }
+    expect(screen.queryByText("What this run includes")).toBeNull()
+    const confirm = screen.getByRole("button", { name: "Validate text cells" })
+    expect(confirm).toBeDisabled()
+    await user.click(confirm)
+    expect(onConfirmValidate).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("combobox", { name: "Chapter" }))
+    await user.click(await screen.findByRole("option", { name: "GEN 2" }))
+    const next = screen.getByRole("status")
+    expect(next).toHaveTextContent("Nothing to validate in GEN 2")
+    expect(next).toHaveTextContent("1 still needs a translation")
+    expect(next).not.toHaveTextContent("already validated")
+    expect(screen.getByRole("button", { name: "Validate text cells" })).toBeDisabled()
+  })
+})
+
+describe("BatchFileModal — chapter of the open book", () => {
+  it("keeps choices from other chapters on screen, grayed, when this chapter has none", () => {
+    renderModal({
+      bookName: "Genesis",
+      chapters: ["GEN 1", "GEN 2"],
+      initialChapter: "GEN 2",
+      validateOptions: {
+        ...baseOptions,
+        hasOpenFlags: (cellId: string) => cellId === "flagged",
+      },
+      validateCandidates: [
+        cell({ id: "ready", group: "GEN 1:1" }),
+        cell({ id: "ai", aiDrafted: true, group: "GEN 1:2" }),
+        cell({ id: "flagged", group: "GEN 2:1" }),
+      ],
+    })
+    const unvalidated = screen.getByRole("checkbox", { name: "Include cells nobody has validated" })
+    const signed = screen.getByRole("checkbox", { name: "Include cells someone else has validated" })
+    const drafts = screen.getByRole("checkbox", { name: "0 unvalidated AI drafts" })
+    const unresolved = screen.getByRole("checkbox", { name: "Include cells with unresolved checks" })
+    expect(unvalidated).toBeChecked()
+    expect(unvalidated).toHaveAttribute("aria-disabled", "true")
+    expect(signed).toBeChecked()
+    expect(signed).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("0 cells nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByText("0 cells someone else has validated.")).toBeInTheDocument()
+    expect(drafts).not.toBeChecked()
+    expect(drafts).toHaveAttribute("aria-disabled", "true")
+    expect(unresolved).not.toBeChecked()
+    expect(unresolved).not.toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("keeps the counts, the unresolved list, and the title on the chosen chapter", async () => {
+    const user = userEvent.setup()
+    const { onConfirmValidate } = renderModal({
+      bookName: "Ruth",
+      chapters: ["RUT 1", "RUT 2"],
+      initialChapter: "RUT 2",
+      validateOptions: {
+        ...baseOptions,
+        hasOpenFlags: (cellId: string) => cellId === "flagged-ai" || cellId === "flagged-other",
+      },
+      flagIssue: (id) => id === "flagged-ai"
+        ? "End punctuation — Terminal punctuation differs from source"
+        : undefined,
+      validateCandidates: [
+        cell({ id: "ready", group: "RUT 2:1" }),
+        cell({ id: "plain-ai", aiDrafted: true, group: "RUT 2:3" }),
+        cell({ id: "flagged-ai", aiDrafted: true, group: "RUT 2:4" }),
+        cell({ id: "flagged-other", group: "RUT 1:1" }),
+      ],
+    })
+    expect(screen.getByText("1 cell nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "1 unvalidated AI draft" })).toBeInTheDocument()
+    expect(screen.getByText("Validate 1 cell?")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show 1 flagged cell" }))
+    const row = screen.getByRole("listitem")
+    expect(row).toHaveTextContent("RUT 2:4")
+    expect(row).toHaveTextContent("Terminal punctuation differs from source")
+    expect(screen.queryByText("RUT 1:1")).toBeNull()
+
+    await user.click(screen.getByRole("checkbox", { name: "1 unvalidated AI draft" }))
+    expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "Include cells with unresolved checks" }))
+    expect(screen.getByText("Validate 3 cells?")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("combobox", { name: "Chapter" }))
+    await user.click(await screen.findByRole("option", { name: "RUT 1" }))
+    expect(screen.getByText("0 cells nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "0 unvalidated AI drafts" })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("Validate 1 cell?")).toBeInTheDocument()
+    expect(screen.getByRole("listitem")).toHaveTextContent("RUT 1:1")
+    expect(screen.queryByText("RUT 2:4")).toBeNull()
+
+    await user.click(screen.getByRole("combobox", { name: "Chapter" }))
+    await user.click(await screen.findByRole("option", { name: "Whole book" }))
+    expect(screen.getByText("1 cell nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Show 2 flagged cells" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
+    expect(onConfirmValidate).toHaveBeenCalledWith({
+      includeReadyCells: true,
+      includeSignedByOthers: true,
+      includeUntouchedAiDrafts: true,
+      includeFlaggedCells: true,
+      chapter: WHOLE_BOOK,
+    })
+  })
+
+  it("opens on the chapter in view and can widen to the whole book", async () => {
+    const user = userEvent.setup()
+    const { onConfirmValidate } = renderModal({
+      bookName: "Genesis",
+      chapters: ["GEN 1", "GEN 2"],
+      initialChapter: "GEN 2",
+      validateCandidates: [
+        cell({ id: "a", group: "GEN 1:1" }),
+        cell({ id: "b", group: "GEN 2:1" }),
+        cell({ id: "c", group: "GEN 2:2" }),
+      ],
+    })
+    expect(screen.getByText("Genesis")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("GEN 2")
+    expect(screen.getByText("2 cells nobody has validated.")).toBeInTheDocument()
+    await user.click(screen.getByRole("combobox", { name: "Chapter" }))
+    await user.click(await screen.findByRole("option", { name: "Whole book" }))
+    expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("Whole book")
+    expect(screen.getByText("3 cells nobody has validated.")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Validate text cells" }))
+    expect(onConfirmValidate).toHaveBeenCalledWith(expect.objectContaining({ chapter: WHOLE_BOOK }))
+  })
+
+  it("mounts a window of a whole-Bible chapter list", async () => {
+    const user = userEvent.setup()
+    const chapters = Array.from({ length: 1200 }, (_, index) => `CH ${index + 1}`)
+    renderModal({ chapters, initialChapter: "CH 1", validateCandidates: [] })
+    await user.click(screen.getByRole("combobox", { name: "Chapter" }))
+    const options = await screen.findAllByRole("option")
+    expect(options.length).toBeLessThan(80)
+    expect(screen.getByRole("option", { name: "CH 1" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "CH 1200" })).toBeNull()
+    expect(screen.queryByRole("option", { name: "Whole book" })).toBeNull()
   })
 })

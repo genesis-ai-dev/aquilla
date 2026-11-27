@@ -4547,11 +4547,19 @@ function CellSourceMenu({
 }) {
   const t = useT()
   const [timesOpen, setTimesOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
+  // `anchored` rides with `open` so the button anchor does not add a state
+  // call. The editor table is at its state ceiling.
+  const [menu, setMenu] = useState({ open: false, anchored: false })
+  const menuOpen = menu.open
+  const anchoredToButton = menu.anchored
   // Was the menu open when this press began? Pressing the button while its
   // menu is open dismisses the menu first (an outside press), so the click
   // that follows must not open it again — the button toggles, as it used to.
   const openAtPressRef = useRef(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  // Set before the synthetic contextmenu event, which opens the menu in the
+  // same turn. A right-click leaves it false, so that path stays on the pointer.
+  const openedFromButtonRef = useRef(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
   // AQU-1422: the park entry sits with the structural block below (it changes
@@ -4576,13 +4584,14 @@ function CellSourceMenu({
   }
 
   /**
-   * Open the context menu from the button, at the button.
+   * Open the context menu from the button.
    *
    * The context menu has no "open here" call of its own: its trigger places
-   * the popup from the `contextmenu` event it is handed. So the button hands it
-   * one, aimed at its own lower corner — the trigger is the source column this
-   * button sits inside, and the event bubbles to it. That is the same path a
-   * right-click takes, which is what keeps the two ways in from drifting.
+   * the popup from the `contextmenu` event it is handed. The button hands it
+   * one so the event bubbles to the source column, the same path a right-click
+   * takes. The popup itself is then anchored to the button — below it, right
+   * edges flush — rather than to that event's point, which would hang the list
+   * off the button's lower-left and spill into the target column.
    */
   const openFromButton = (event: React.MouseEvent<HTMLButtonElement>) => {
     // The row selects itself on a click; reaching for the menu is not that.
@@ -4592,12 +4601,16 @@ function CellSourceMenu({
     // `detail` is 0 for a keyboard press, which has no pointer-down of its own
     // and so must not inherit the last one's answer.
     if (closedByThisPress && event.detail !== 0) return
+    openedFromButtonRef.current = true
+    // Schedule before the event. The trigger opens the menu synchronously, and
+    // a flush during that open must already see the button anchor.
+    setMenu((cur) => ({ ...cur, anchored: true }))
     const rect = event.currentTarget.getBoundingClientRect()
     event.currentTarget.dispatchEvent(
       new MouseEvent("contextmenu", {
         bubbles: true,
         cancelable: true,
-        clientX: rect.left,
+        clientX: rect.right,
         clientY: rect.bottom,
       }),
     )
@@ -4606,6 +4619,7 @@ function CellSourceMenu({
   const anchor = (
     <>
       <button
+        ref={buttonRef}
         type="button"
         data-testid={`cell-menu-button-${cellId}`}
         data-selection-ignore=""
@@ -4656,12 +4670,26 @@ function CellSourceMenu({
 
   return (
     <CellMenuAnchorContext.Provider value={anchor}>
-      <ContextMenu onOpenChange={(open) => setMenuOpen(open)}>
+      <ContextMenu
+        onOpenChange={(open) => {
+          // Read the ref now. The state update runs later, after this reset.
+          const anchored = openedFromButtonRef.current
+          openedFromButtonRef.current = false
+          setMenu((cur) => ({ open, anchored: open ? anchored : cur.anchored }))
+        }}
+      >
         <ContextMenuTrigger
           data-testid={`cell-menu-${cellId}`}
           render={children}
         />
-        <ContextMenuContent className="min-w-[13rem]">
+        <ContextMenuContent
+          className="min-w-[13rem]"
+          // The button hangs the list off its own right edge, opening downward.
+          // A right-click keeps the pointer: left edge on the click, still below it.
+          anchor={anchoredToButton ? buttonRef : undefined}
+          align={anchoredToButton ? "end" : "start"}
+          side="bottom"
+        >
           {copyText ? (
             <RowInsertItem
               testId="cell-menu-copy-source"

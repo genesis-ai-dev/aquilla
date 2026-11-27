@@ -40,6 +40,7 @@ import {
   BINARY_PARSE_FILE_TYPES,
   CLIENT_ONLY_FORMATS,
   CLIENT_ONLY_HINT,
+  FILE_TYPE_ALIASES,
   SERVER_PARSEABLE_FILE_TYPES,
   type ServerParseFileType,
 } from './import-parse-formats'
@@ -58,15 +59,6 @@ export {
   CLIENT_ONLY_HINT,
   SERVER_PARSEABLE_FILE_TYPES,
   type ServerParseFileType,
-}
-
-/** Caller-supplied fileType spellings → canonical parse types. */
-const FILE_TYPE_ALIASES: Record<string, ServerParseFileType> = {
-  sfm: 'usfm',
-  markdown: 'md',
-  plaintext: 'txt',
-  text: 'txt',
-  word: 'docx',
 }
 
 /** /inspect's detectedFormat values → canonical parse types. Formats absent

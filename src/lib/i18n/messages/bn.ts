@@ -2994,6 +2994,7 @@ export const bn: Catalog = {
   "org.access.scope.project": "প্রকল্প",
   "org.access.scope.lane": "লেন",
   "org.access.page.title": "মানুষ ও অ্যাক্সেস",
+  "org.access.manage": "অ্যাক্সেস পরিচালনা",
   "org.access.page.treeView": "পরিসর অনুসারে",
   "org.access.page.noDirect": "কোনো সরাসরি অনুমতি নেই",
   "org.access.page.chip": "{path}-এ {role}",

@@ -15,6 +15,7 @@ import {
   type ExternalCollaborator,
 } from "@/lib/frontier/external-collaborators"
 import { RoleLabel } from "@/components/RoleLabel"
+import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -106,6 +107,10 @@ export function ExternalCollaboratorsSection({
       data-testid="external-collaborators"
       title={t("org.externalCollaborators.title")}
       description={t("org.externalCollaborators.description")}
+      // AQU-2324: the People lens's Guests filter is the same people with
+      // every grant they hold. Inline revoke stays here until that lens can
+      // be shown to cover every row this list derives.
+      action={<ManageAccessLink orgId={orgId} open={{ people: "guests" }} />}
       contentClassName="space-y-2"
     >
       {error && <p className="text-xs text-destructive">{error}</p>}

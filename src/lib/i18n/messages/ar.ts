@@ -2524,6 +2524,7 @@ export const ar: Catalog = {
   "org.access.scope.project": "المشروع",
   "org.access.scope.lane": "المسار",
   "org.access.page.title": "الأشخاص والوصول",
+  "org.access.manage": "إدارة الوصول",
   "org.access.page.treeView": "حسب النطاق",
   "org.access.page.noDirect": "لا منح مباشرة",
   "org.access.page.loadError": "تعذّر تحميل الأشخاص والوصول لهذه المؤسسة.",

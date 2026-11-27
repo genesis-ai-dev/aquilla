@@ -5136,7 +5136,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10257,7 +10258,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -15363,7 +15365,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -20497,7 +20500,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26905,7 +26909,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -33315,7 +33320,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -39795,7 +39801,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -46324,7 +46331,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -52766,7 +52774,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -61155,7 +61164,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -69548,7 +69558,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -78340,7 +78351,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -86790,7 +86802,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -95601,7 +95614,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -104408,7 +104422,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -113250,7 +113265,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -122079,7 +122095,8 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -130900,6 +130917,7 @@
     "org.access.person.history.changedNoActor": "418be8781a87ba97",
     "org.access.person.history.removed": "c94998c7861c072b",
     "org.access.person.history.removedNoActor": "d3ac4be43eea47b5",
-    "workspace.statusBar.checking": "33a5696abd42cb54"
+    "workspace.statusBar.checking": "33a5696abd42cb54",
+    "org.access.manage": "a90527b63530c612"
   }
 }

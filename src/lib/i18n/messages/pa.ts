@@ -2990,6 +2990,7 @@ export const pa: Catalog = {
   "org.access.scope.project": "ਪ੍ਰੋਜੈਕਟ",
   "org.access.scope.lane": "ਲੇਨ",
   "org.access.page.title": "ਲੋਕ ਅਤੇ ਪਹੁੰਚ",
+  "org.access.manage": "ਪਹੁੰਚ ਸੰਭਾਲੋ",
   "org.access.page.treeView": "ਹੱਦ ਅਨੁਸਾਰ",
   "org.access.page.noDirect": "ਕੋਈ ਸਿੱਧੀ ਇਜਾਜ਼ਤ ਨਹੀਂ",
   "org.access.page.loadError": "ਇਸ ਸੰਸਥਾ ਲਈ ਲੋਕ ਅਤੇ ਪਹੁੰਚ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੇ.",

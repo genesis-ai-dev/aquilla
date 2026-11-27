@@ -2521,6 +2521,7 @@ export const th: Catalog = {
   "org.access.scope.project": "โปรเจกต์",
   "org.access.scope.lane": "เลน",
   "org.access.page.title": "บุคคลและสิทธิ์เข้าถึง",
+  "org.access.manage": "จัดการสิทธิ์เข้าถึง",
   "org.access.page.treeView": "ตามขอบเขต",
   "org.access.page.noDirect": "ไม่มีสิทธิ์ที่ให้โดยตรง",
   "org.access.page.loadError": "โหลดข้อมูลบุคคลและสิทธิ์เข้าถึงขององค์กรนี้ไม่ได้",

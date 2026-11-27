@@ -2549,6 +2549,7 @@ export const ru: Catalog = {
   "org.access.scope.project": "проект",
   "org.access.scope.lane": "дорожка",
   "org.access.page.title": "Люди и доступ",
+  "org.access.manage": "Управление доступом",
   "org.access.page.treeView": "По областям",
   "org.access.page.noDirect": "Нет прямых прав",
   "org.access.page.loadError": "Не удалось загрузить людей и доступ для этой организации.",

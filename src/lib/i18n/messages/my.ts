@@ -2521,6 +2521,7 @@ export const my: Catalog = {
   "org.access.scope.project": "ပရောဂျက်",
   "org.access.scope.lane": "လိုင်း",
   "org.access.page.title": "လူများနှင့် ဝင်ရောက်ခွင့်",
+  "org.access.manage": "ဝင်ရောက်ခွင့် စီမံရန်",
   "org.access.page.treeView": "နယ်ပယ်အလိုက်",
   "org.access.page.noDirect": "တိုက်ရိုက်ခွင့်ပြုချက် မရှိ",
   "org.access.page.loadError": "ဤအဖွဲ့အစည်း၏ လူများနှင့် ဝင်ရောက်ခွင့်ကို မဖွင့်နိုင်ပါ။",

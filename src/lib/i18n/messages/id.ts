@@ -2522,6 +2522,7 @@ export const id: Catalog = {
   "org.access.scope.team": "tim",
   "org.access.scope.project": "proyek",
   "org.access.page.title": "Orang & akses",
+  "org.access.manage": "Kelola akses",
   "org.access.page.treeView": "Menurut cakupan",
   "org.access.page.noDirect": "Tanpa pemberian langsung",
   "org.access.page.loadError": "Gagal memuat orang dan akses untuk organisasi ini.",

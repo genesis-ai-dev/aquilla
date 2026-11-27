@@ -2923,6 +2923,7 @@ export const hi: Catalog = {
   "org.access.scope.project": "परियोजना",
   "org.access.scope.lane": "लेन",
   "org.access.page.title": "लोग और पहुँच",
+  "org.access.manage": "पहुँच प्रबंधित करें",
   "org.access.page.treeView": "दायरे के अनुसार",
   "org.access.page.noDirect": "कोई सीधा अनुदान नहीं",
   "org.access.page.loadError": "इस संगठन के लोग और पहुँच लोड नहीं हो सके।",

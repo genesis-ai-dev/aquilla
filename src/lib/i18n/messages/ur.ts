@@ -2991,6 +2991,7 @@ export const ur: Catalog = {
   "org.access.scope.project": "منصوبہ",
   "org.access.scope.lane": "لین",
   "org.access.page.title": "لوگ اور رسائی",
+  "org.access.manage": "رسائی سنبھالیں",
   "org.access.page.treeView": "دائرے کے حساب سے",
   "org.access.page.noDirect": "کوئی براہ راست اجازت نہیں",
   "org.access.page.loadError": "اس تنظیم کے لوگ اور رسائی لوڈ نہیں ہو سکے۔",

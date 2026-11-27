@@ -2507,6 +2507,7 @@ export const ms: Catalog = {
   "org.access.scope.project": "projek",
   "org.access.scope.lane": "lorong",
   "org.access.page.title": "Orang & akses",
+  "org.access.manage": "Urus akses",
   "org.access.page.treeView": "Mengikut skop",
   "org.access.page.noDirect": "Tiada pemberian langsung",
   "org.access.page.loadError": "Tidak dapat memuatkan orang dan akses untuk organisasi ini.",

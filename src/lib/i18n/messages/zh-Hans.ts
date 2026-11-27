@@ -2522,6 +2522,7 @@ export const zh_Hans: Catalog = {
   "org.access.scope.project": "项目",
   "org.access.scope.lane": "通道",
   "org.access.page.title": "成员与权限",
+  "org.access.manage": "管理权限",
   "org.access.page.treeView": "按范围",
   "org.access.page.noDirect": "无直接授权",
   "org.access.page.loadError": "无法加载此组织的成员与权限。",

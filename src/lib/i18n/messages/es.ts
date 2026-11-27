@@ -2908,6 +2908,7 @@ export const es: Catalog = {
   "org.access.scope.project": "proyecto",
   "org.access.scope.lane": "carril",
   "org.access.page.title": "Personas y acceso",
+  "org.access.manage": "Administrar acceso",
   "org.access.page.treeView": "Por ámbito",
   "org.access.page.noDirect": "Sin concesiones directas",
   "org.access.page.loadError": "No se pudieron cargar las personas y el acceso de esta organización.",

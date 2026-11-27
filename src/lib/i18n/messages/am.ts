@@ -5061,7 +5061,7 @@ export const am: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "የBiblica የጥናት ማስታወሻ ማስመጣት የInDesign .idml ጥቅል ይጠብቃል።",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} በተሳካ ሁኔታ ተተንትኗል ነገር ግን የጥናት ማስታወሻዎች አልያዘም። የBiblica ማስታወሻዎች በ`intro:*` የአንቀጽ ቅጦች ውስጥ ይኖራሉ — ይህ የማስታወሻ ሰነድ መሆኑን ይፈትሹ።",
   "importExport.errors.invalidIdmlPackage": "{fileName} ትክክለኛ የIDML ጥቅል አይደለም። IDML ፋይሎች ZIP ማህደሮች ናቸው እና በ\"PK\" ይጀምራሉ።",
-  "importExport.errors.mediaFileTooLarge": "{fileName} የ{limit} የሚዲያ ማስመጣት ገደብ አልፏል።",
+  "importExport.errors.mediaFileTooLarge": "{fileName} ከ{limit} ስለሚበልጥ ማስመጣት አይቻልም። ትንሽ ቅጂ አስቀምጠው ያንን ያስመጡ።",
   "importExport.errors.couldNotDecodeAudio": "{fileName} መፍታት አልተቻለም — ፋይሉ የተበላሸ ወይም በማይደገፍ ኮዴክ ሊሆን ይችላል። እንደ mp3 ወይም wav እንደገና ለማውጣት ይሞክሩ።",
   "importExport.errors.notAParatextProject": "ይህ የParatext ፕሮጀክት አይመስልም — የUSFM መጽሐፍት ያለው Settings.xml (ወይም .ssf) አልተገኘም።",
   "importExport.notices.basicParserFallback": "Aquilla ይህን የተዋቀረ አቀማመጥ በAI ማረጋገጥ አልቻለም፣ ስለዚህ መሠረታዊ ተንታኙን ተጠቅሟል። ከማስመጣት በፊት ቅድመ እይታውን በጥንቃቄ ይፈትሹ።",

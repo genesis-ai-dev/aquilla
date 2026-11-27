@@ -5067,7 +5067,7 @@ export const bn: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica স্টাডি নোট আমদানি একটি InDesign .idml প্যাকেজ আশা করে।",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} সফলভাবে পড়া হয়েছে কিন্তু কোনো স্টাডি নোট ছিল না। Biblica নোট `intro:*` অনুচ্ছেদ স্টাইলে থাকে — এটি নোট নথি কি না দেখুন।",
   "importExport.errors.invalidIdmlPackage": "{fileName} একটি বৈধ IDML প্যাকেজ নয়। IDML ফাইল ZIP আর্কাইভ এবং \"PK\" দিয়ে শুরু।",
-  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} মিডিয়া আমদানি সীমা ছাড়িয়ে।",
+  "importExport.errors.mediaFileTooLarge": "{fileName} {limit}-এর চেয়ে বড়, তাই এটি আমদানি করা যাবে না। একটি ছোট কপি সংরক্ষণ করে সেটি আমদানি করুন।",
   "importExport.errors.couldNotDecodeAudio": "{fileName} ডিকোড হয়নি — ফাইল নষ্ট বা অসমর্থিত কোডেক হতে পারে। mp3 বা wav হিসেবে আবার রপ্তানি করে দেখুন।",
   "importExport.errors.notAParatextProject": "এটি Paratext প্রকল্প মনে হয় না — USFM বইসহ কোনো Settings.xml (বা .ssf) পাওয়া যায়নি।",
   "importExport.notices.basicParserFallback": "Aquilla এআই দিয়ে এই কাঠামোবদ্ধ লেআউট যাচাই করতে পারেনি, তাই মৌলিক পার্সার ব্যবহার করেছে। আমদানির আগে প্রাকদর্শন মনোযোগ দিয়ে দেখুন।",

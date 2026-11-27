@@ -5056,7 +5056,7 @@ export const ha: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Shigowar bayanan karatu na Biblica tana tsammanin fakiti na InDesign .idml.",
   "importExport.errors.biblicaNoStudyNotes": "An nazarin {fileName} cikin nasara amma ba ya ƙunshi bayanan karatu. Bayanan Biblica suna cikin salo na sakin layi `intro:*` — ku tabbatar wannan takardar bayanai ce.",
   "importExport.errors.invalidIdmlPackage": "{fileName} ba fakiti na IDML mai inganci ba ne. Fayilolin IDML ajiyoyin ZIP ne kuma suna farawa da \"PK\".",
-  "importExport.errors.mediaFileTooLarge": "{fileName} ya wuce iyakar shigowar midiya {limit}.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} ya fi {limit} girma, don haka ba za a iya shigo da shi ba. Ajiye ƙaramin kwafi ka shigo da shi.",
   "importExport.errors.couldNotDecodeAudio": "An kasa kwace {fileName} — fayil na iya lalacewa ko ya kasance a codec da ba a tallafa ba. Ku sake fitar da shi a matsayin mp3 ko wav.",
   "importExport.errors.notAParatextProject": "Wannan ba ya kama da aikin Paratext ba — ba a sami Settings.xml (ko .ssf) mai littattafan USFM ba.",
   "importExport.notices.basicParserFallback": "Aquilla ta kasa tabbatar da wannan tsari tare da AI, don haka ta yi amfani da mai nazari na asali. Ku duba duba da hankali kafin shigowa.",

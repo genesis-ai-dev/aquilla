@@ -4964,7 +4964,7 @@ export const hi: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica अध्ययन नोट आयात एक InDesign .idml पैकेज की अपेक्षा करता है।",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} सफलता से पढ़ी गई पर उसमें कोई अध्ययन नोट नहीं। Biblica नोट `intro:*` अनुच्छेद शैलियों में रहते हैं — जाँचें कि यह नोट दस्तावेज़ है।",
   "importExport.errors.invalidIdmlPackage": "{fileName} मान्य IDML पैकेज नहीं। IDML फ़ाइलें ZIP संग्रह हैं और \"PK\" से शुरू होती हैं।",
-  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} मीडिया आयात सीमा से बड़ा है।",
+  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} से बड़ी है, इसलिए इसे आयात नहीं किया जा सकता। इसकी छोटी कॉपी सहेजें और उसे आयात करें।",
   "importExport.errors.couldNotDecodeAudio": "{fileName} डिकोड नहीं हो सका — फ़ाइल corrupt हो सकती है या असमर्थित कोडेक में। उसे mp3 या wav के रूप में फिर निर्यात करके कोशिश करें।",
   "importExport.errors.notAParatextProject": "वह Paratext परियोजना नहीं लगती — USFM पुस्तकों वाला कोई Settings.xml (या .ssf) नहीं मिला।",
   "importExport.notices.basicParserFallback": "Aquilla इस संरचित लेआउट को एआई से सत्यापित नहीं कर सका, इसलिए उसने मूल पार्सर उपयोग किया। आयात से पहले पूर्वावलोकन ध्यान से जाँचें।",

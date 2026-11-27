@@ -72,6 +72,7 @@ import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
 import { RecordingImportChoiceDialog, type RecordingChoiceFile } from "@/components/import/RecordingImportChoiceDialog"
+import { mediaOverLimitMessage } from "@/lib/audio/media-limit"
 import { localTranscribeChoice, TranscribeChoiceContext, type PrepareTranscribeChoice, type TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
 import { embeddedCaptionsUnread, mayCarryEmbeddedCaptions, prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
@@ -2651,6 +2652,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const list = Array.from(files)
       if (reimportTarget && list.length !== 1) {
         setError(t("importExport.reimport.oneFile"))
+        return
+      }
+      // Work Review question 122: a recording over the media limit is refused
+      // the moment it is picked, before the whole-or-transcribe step and
+      // before anything is read, measured or uploaded (media-limit.ts).
+      const tooLarge = mediaOverLimitMessage(list.filter(isMediaUpload))
+      if (tooLarge) {
+        setError(tooLarge)
         return
       }
       setMediaOnReimport(null)

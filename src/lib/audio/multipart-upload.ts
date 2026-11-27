@@ -142,7 +142,7 @@ export async function uploadCellAudioMultipart(
     // English (import map D#20: one way to say it).
     const gb = MAX_AUDIO_OBJECT_BYTES / (1024 * 1024 * 1024)
     const name = artifactName ?? (blob instanceof File ? blob.name : `${audioId}.${ext}`)
-    throw new Error(`${name} exceeds the ${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB media import limit.`)
+    throw new Error(`${name} is larger than ${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB, so it can't be imported. Save a smaller copy and import that.`)
   }
 
   const fetchFn = args.fetchFn ?? fetch

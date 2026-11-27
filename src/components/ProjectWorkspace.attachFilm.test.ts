@@ -71,3 +71,18 @@ describe("Change film on a video dropped on an empty file", () => {
     expect(source).toMatch(/const activeFilmName = useMemo\(\s*\(\) => uploadedFilmName\(audioMergedCells, activeFile\?\.coreMediaUrl, activeFile\?\.name\),/)
   })
 })
+
+// Work Review question 122 (Nov 27): a recording over the media limit dropped
+// or chosen on a file's card (empty, or a linked film's) is refused before the
+// whole-or-transcribe step: nothing is measured, priced or uploaded first.
+describe("a recording over the media limit on a file's card", () => {
+  it("is refused before the whole-or-transcribe step", () => {
+    const source = readFileSync(join(__dirname, "ProjectWorkspace.tsx"), "utf8")
+    const start = source.indexOf("const handleAttachMediaFile = useCallback(")
+    const body = source.slice(start, source.indexOf("\n  const handleAttachMediaUrl", start))
+    const refusal = body.indexOf("const tooLarge = mediaOverLimitMessage([file])")
+    expect(refusal).toBeGreaterThan(-1)
+    expect(body).toContain("if (tooLarge) throw new Error(tooLarge)")
+    expect(refusal).toBeLessThan(body.indexOf("askAttachChoiceRef.current"))
+  })
+})

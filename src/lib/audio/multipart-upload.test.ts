@@ -223,7 +223,7 @@ describe("uploadCellAudioMultipart", () => {
     const blob = { size: MAX_AUDIO_OBJECT_BYTES + 1, type: "video/mp4" } as Blob
     await expect(
       uploadCellAudioMultipart({ ...baseArgs(blob), fetchFn }),
-    ).rejects.toThrow(/exceeds the 2 GB media import limit\./)
+    ).rejects.toThrow(/is larger than 2 GB, so it can't be imported\./)
     expect(calls).toHaveLength(0)
   })
 
@@ -233,7 +233,7 @@ describe("uploadCellAudioMultipart", () => {
     const blob = { size: MAX_AUDIO_OBJECT_BYTES + 1, type: "video/mp4" } as Blob
     await expect(
       uploadCellAudioMultipart({ ...baseArgs(blob), artifactName: "Episode 101.mov", fetchFn }),
-    ).rejects.toThrow("Episode 101.mov exceeds the 2 GB media import limit.")
+    ).rejects.toThrow("Episode 101.mov is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")
   })
 
   it("refuses a part size that would exceed R2's part limit, before uploading", async () => {

@@ -185,7 +185,7 @@ describe("attachMediaFileToTimeline: over the limit", () => {
     asRole(ROLE.PROJECT_LEAD)
     const huge = new File(["x"], "Episode 101.mov", { type: "video/quicktime" })
     Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
-    await expect(attachMediaFileToTimeline(huge, ctx)).rejects.toThrow("Episode 101.mov exceeds the 2 GB media import limit.")
+    await expect(attachMediaFileToTimeline(huge, ctx)).rejects.toThrow("Episode 101.mov is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")
     expect(emitted.uploads).toBe(0)
   })
 })

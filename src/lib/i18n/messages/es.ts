@@ -4936,7 +4936,7 @@ export const es: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "La importación de notas de estudio de Biblica espera un paquete .idml de InDesign.",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} se procesó correctamente, pero no contenía notas de estudio. Las notas de Biblica están en los estilos de párrafo `intro:*` — revisa que este sea el documento de notas.",
   "importExport.errors.invalidIdmlPackage": "{fileName} no es un paquete IDML válido. Los archivos IDML son archivos ZIP y empiezan con \"PK\".",
-  "importExport.errors.mediaFileTooLarge": "{fileName} supera el límite de {limit} para importar medios.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} pesa más de {limit}, así que no se puede importar. Guarda una copia más pequeña e impórtala.",
   "importExport.errors.couldNotDecodeAudio": "No se pudo decodificar {fileName} — el archivo puede estar dañado o en un códec no admitido. Intenta exportarlo de nuevo como mp3 o wav.",
   "importExport.errors.notAParatextProject": "Eso no parece un proyecto de Paratext — no se encontró un Settings.xml (o .ssf) con libros USFM.",
   "importExport.notices.basicParserFallback": "Aquilla no pudo verificar este diseño estructurado con IA, así que usó el analizador básico. Revisa la vista previa con cuidado antes de importar.",

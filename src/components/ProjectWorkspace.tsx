@@ -452,6 +452,7 @@ import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline, type MadeLine } from "@/lib/timeline/attach-media"
+import { mediaOverLimitMessage } from "@/lib/audio/media-limit"
 import {
   describeVideoSound,
   extractVideoSound,
@@ -4142,6 +4143,10 @@ export function ProjectWorkspace() {
   const applyLinkVideoRef = useRef<((url: string | null, forFileId?: string) => Promise<void>) | null>(null)
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
+    // Work Review question 122: over the media limit, refused before the
+    // whole-or-transcribe step; the card shows the sentence.
+    const tooLarge = mediaOverLimitMessage([file])
+    if (tooLarge) throw new Error(tooLarge)
     const mode = askAttachChoiceRef.current ? await askAttachChoiceRef.current(file) : "whole"
     if (mode === null) return
     const { lines, film } = await attachMediaFileToTimeline(file, {

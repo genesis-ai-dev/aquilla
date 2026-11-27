@@ -5052,7 +5052,7 @@ export const pa: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica ਅਧਿਐਨ ਨੋਟ ਇੰਪੋਰਟ ਇੱਕ InDesign .idml ਪੈਕੇਜ ਮੰਗਦਾ ਹੈ.",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} ਸਫ਼ਲਤਾ ਨਾਲ ਪੜ੍ਹੀ ਗਈ ਪਰ ਇਸ ਵਿੱਚ ਕੋਈ ਅਧਿਐਨ ਨੋਟ ਨਹੀਂ ਸਨ. Biblica ਨੋਟ `intro:*` ਪੈਰਾ ਸ਼ੈਲੀਆਂ ਵਿੱਚ ਰਹਿੰਦੇ ਹਨ — ਜਾਂਚੋ ਕਿ ਇਹ ਨੋਟ ਦਸਤਾਵੇਜ਼ ਹੈ.",
   "importExport.errors.invalidIdmlPackage": "{fileName} ਵੈਧ IDML ਪੈਕੇਜ ਨਹੀਂ. IDML ਫ਼ਾਈਲਾਂ ZIP ਪੁਰਾਲੇਖ ਹਨ ਅਤੇ \"PK\" ਨਾਲ ਸ਼ੁਰੂ ਹੁੰਦੀਆਂ ਹਨ.",
-  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} ਮੀਡੀਆ ਇੰਪੋਰਟ ਹੱਦ ਤੋਂ ਵੱਧ ਹੈ.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} ਤੋਂ ਵੱਡੀ ਹੈ, ਇਸ ਲਈ ਇਸਨੂੰ ਇੰਪੋਰਟ ਨਹੀਂ ਕੀਤਾ ਜਾ ਸਕਦਾ। ਇਸਦੀ ਛੋਟੀ ਕਾਪੀ ਸੇਵ ਕਰੋ ਅਤੇ ਉਸਨੂੰ ਇੰਪੋਰਟ ਕਰੋ।",
   "importExport.errors.couldNotDecodeAudio": "{fileName} ਡੀਕੋਡ ਨਹੀਂ ਹੋ ਸਕੀ — ਫ਼ਾਈਲ ਖ਼ਰਾਬ ਹੋ ਸਕਦੀ ਹੈ ਜਾਂ ਅਸਮਰਥਿਤ ਕੋਡੈਕ ਵਿੱਚ ਹੋ ਸਕਦੀ ਹੈ. ਇਸਨੂੰ mp3 ਜਾਂ wav ਵਜੋਂ ਮੁੜ ਐਕਸਪੋਰਟ ਕਰ ਕੇ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
   "importExport.errors.notAParatextProject": "ਇਹ Paratext ਪ੍ਰੋਜੈਕਟ ਨਹੀਂ ਲੱਗਦਾ — USFM ਕਿਤਾਬਾਂ ਵਾਲੀ ਕੋਈ Settings.xml (ਜਾਂ .ssf) ਨਹੀਂ ਮਿਲੀ.",
   "importExport.notices.basicParserFallback": "Aquilla ਇਸ ਢਾਂਚੇ ਨੂੰ AI ਨਾਲ ਤਸਦੀਕ ਨਹੀਂ ਕਰ ਸਕਿਆ, ਇਸ ਲਈ ਇਸਨੇ ਮੂਲ ਪਾਰਸਰ ਵਰਤਿਆ. ਇੰਪੋਰਟ ਤੋਂ ਪਹਿਲਾਂ ਝਲਕ ਧਿਆਨ ਨਾਲ ਵੇਖੋ.",

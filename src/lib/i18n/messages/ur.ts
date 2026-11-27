@@ -5051,7 +5051,7 @@ export const ur: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica مطالعہ نوٹس درآمد InDesign .idml پیکج مانگتی ہے۔",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} کامیابی سے پڑھی گئی مگر مطالعہ نوٹس نہیں تھے۔ Biblica نوٹس `intro:*` پیراگراف طرز میں رہتے ہیں — دیکھیں یہ نوٹس دستاویز ہو۔",
   "importExport.errors.invalidIdmlPackage": "{fileName} درست IDML پیکج نہیں۔ IDML فائلیں ZIP آرکائیو ہیں اور \"PK\" سے شروع ہوتی ہیں۔",
-  "importExport.errors.mediaFileTooLarge": "{fileName} میڈیا درآمد حد {limit} سے بڑی ہے۔",
+  "importExport.errors.mediaFileTooLarge": "{fileName} {limit} سے بڑی ہے، اس لیے اسے درآمد نہیں کیا جا سکتا۔ اس کی چھوٹی کاپی محفوظ کریں اور اسے درآمد کریں۔",
   "importExport.errors.couldNotDecodeAudio": "{fileName} ڈی کوڈ نہیں ہو سکی — فائل خراب ہو یا غیر معاون کوڈیک میں ہو۔ mp3 یا wav میں دوبارہ برآمد کر کے کوشش کریں۔",
   "importExport.errors.notAParatextProject": "یہ Paratext منصوبہ نہیں لگتا — USFM کتابوں والا Settings.xml (یا .ssf) نہیں ملا۔",
   "importExport.notices.basicParserFallback": "Aquilla اس ساخت والی ترتیب کی اے آئی سے تصدیق نہیں کر سکا، اس لیے بنیادی پارسر استعمال ہوا۔ درآمد سے پہلے پیش منظر غور سے دیکھیں۔",

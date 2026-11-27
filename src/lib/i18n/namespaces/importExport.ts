@@ -1153,7 +1153,7 @@ export const importExport = defineNamespace({
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in \"intro:*\" paragraph styles — check that this is the notes document.",
     "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
-    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the {limit} media import limit.",
+    "importExport.errors.mediaFileTooLarge": "{fileName} is larger than {limit}, so it can't be imported. Save a smaller copy and import that.",
     "importExport.errors.couldNotDecodeAudio":
       "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try re-exporting it as MP3 or WAV.",
     "importExport.errors.notAParatextProject":

@@ -5052,7 +5052,7 @@ export const sw: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Uingizaji wa maelezo ya funzo ya Biblica unatarajia kifurushi cha InDesign .idml.",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} imechambuliwa kwa mafanikio lakini haikuwa na maelezo ya funzo. Maelezo ya Biblica yamo katika mitindo ya vifungu ya `intro:*` — hakikisha hii ndiyo hati ya maelezo.",
   "importExport.errors.invalidIdmlPackage": "{fileName} si kifurushi halali cha IDML. Faili za IDML ni nyaraka za ZIP na huanza na \"PK\".",
-  "importExport.errors.mediaFileTooLarge": "{fileName} inazidi kikomo cha kuingiza midia cha {limit}.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} ni kubwa kuliko {limit}, kwa hivyo haiwezi kuingizwa. Hifadhi nakala ndogo zaidi kisha uiingize.",
   "importExport.errors.couldNotDecodeAudio": "Haikuwezekana kusimbua {fileName} — faili inaweza kuwa imeharibika au iko katika kodeki isiyoungwa mkono. Jaribu kuihamisha tena kama mp3 au wav.",
   "importExport.errors.notAParatextProject": "Haionekani kama mradi wa Paratext — hakuna Settings.xml (au .ssf) yenye vitabu vya USFM iliyopatikana.",
   "importExport.notices.basicParserFallback": "Aquilla haikuweza kuthibitisha mpangilio huu wenye muundo kwa AI, hivyo ilitumia kichambuzi cha msingi. Angalia hakiki kwa makini kabla ya kuingiza.",

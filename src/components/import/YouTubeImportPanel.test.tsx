@@ -240,7 +240,7 @@ Lost words
     Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
     await selectFile(huge)
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
-    expect(await screen.findByText("Episode 101.mov exceeds the 2 GB media import limit.")).toBeInTheDocument()
+    expect(await screen.findByText("Episode 101.mov is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")).toBeInTheDocument()
 
     await selectFile(new File([], "Empty.mov", { type: "video/quicktime" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))

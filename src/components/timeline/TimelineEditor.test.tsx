@@ -1238,10 +1238,26 @@ describe("TimelineEditor", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
         for (const timingMode of ["audioFirst", "dubbing"] as const) {
           const onSeekToTime = vi.fn()
-          const view = render(film({ timingMode, milestoneWindow: { startSec: 750 }, onSeekToTime }))
+          const view = render(film({ timingMode, milestoneWindow: { key: "f:m2", startSec: 750 }, onSeekToTime }))
           expect(onSeekToTime).toHaveBeenCalledWith(750)
           view.unmount()
         }
+      })
+      it("seeks once per milestone opened: its start moving under an edit does not move the playhead", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        const onSeekToTime = vi.fn()
+        const view = render(film({ timingMode: "dubbing", milestoneWindow: { key: "f:m2", startSec: 750 }, onSeekToTime }))
+        expect(onSeekToTime).toHaveBeenCalledTimes(1)
+        view.rerender(film({ timingMode: "dubbing", milestoneWindow: { key: "f:m2", startSec: 740 }, onSeekToTime }))
+        expect(onSeekToTime).toHaveBeenCalledTimes(1)
+        // Another milestone whose stretch already holds the playhead (a jump to
+        // a line in it put it there): left where it is.
+        view.rerender(film({ timingMode: "dubbing", milestoneWindow: { key: "f:m3", startSec: 745 }, onSeekToTime }))
+        expect(onSeekToTime).toHaveBeenCalledTimes(1)
+        // One that does not: to its start.
+        view.rerender(film({ timingMode: "dubbing", milestoneWindow: { key: "f:m4", startSec: 762 }, onSeekToTime }))
+        expect(onSeekToTime).toHaveBeenCalledTimes(2)
+        expect(onSeekToTime).toHaveBeenLastCalledWith(762)
       })
       it("the whole file (no window) leaves the playhead alone and runs to the film's end", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
@@ -1253,7 +1269,7 @@ describe("TimelineEditor", () => {
       it("following the source, it scrolls over the milestone's stretch only, ruler in film time", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
         const onSeekToTime = vi.fn()
-        render(film({ timingMode: "dubbing", milestoneWindow: { startSec: 750 }, onSeekToTime }))
+        render(film({ timingMode: "dubbing", milestoneWindow: { key: "f:m2", startSec: 750 }, onSeekToTime }))
         const px = Number(screen.getByTestId("tl-canvas").dataset.filePx)
         // From 12:30 to the milestone's last line (12:50) and the track's pad.
         expect(px).toBeGreaterThanOrEqual(20 * PX)
@@ -1266,9 +1282,20 @@ describe("TimelineEditor", () => {
         fireEvent.click(ruler, { clientX: 2 * PX })
         expect(onSeekToTime).toHaveBeenLastCalledWith(752)
       })
-      it("following the recordings, the same: its lines laid out from 12:30", () => {
+      it("with an audio cue file, only the milestone's heard lines reach its end, not the whole cue file", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
-        render(film({ timingMode: "audioFirst", milestoneWindow: { startSec: 750 } }))
+        const cue = (id: string, startTime: number, endTime: number) =>
+          cell({ id, original: id, translated: "", medium: "text", startTime, endTime })
+        const heard = [cue("h3", 750, 755), cue("h4", 761, 769)]
+        render(film({
+          timingMode: "dubbing", milestoneWindow: { key: "f:m2", startSec: 750 },
+          audioCues: [cue("h1", 0, 4), ...heard, cue("h9", 1150, 1190)], targetCells: heard,
+        }))
+        expect(Number(screen.getByTestId("tl-canvas").dataset.filePx)).toBeLessThan(30 * PX)
+      })
+            it("following the recordings, the same: its lines laid out from 12:30", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        render(film({ timingMode: "audioFirst", milestoneWindow: { key: "f:m2", startSec: 750 } }))
         const px = Number(screen.getByTestId("tl-canvas").dataset.filePx)
         expect(px).toBeLessThan(120 * PX)
         expect(screen.getByTestId("tl-ruler").textContent).toContain("12:30")

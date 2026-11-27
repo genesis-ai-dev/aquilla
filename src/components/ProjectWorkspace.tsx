@@ -19009,18 +19009,31 @@ export function ProjectWorkspace() {
   // Following the recordings the milestone is laid out from its window's
   // start; everything handed these tracks lays it out the same way.
   const programmeOriginSec = timingMode === "audioFirst" && milestonePartShown ? (milestoneWindowStart ?? 0) : 0
+  // Given, 0 too, whenever a milestone is the window following the
+  // recordings: Play selected reads it as "inside a milestone".
+  const programmeInWindow = timingMode === "audioFirst" && milestonePartShown
   const programmeTracks = useMemo(
-    () => (programmeOriginSec > 0 ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
-    [fileProgrammeTracks, programmeOriginSec],
+    () => (programmeInWindow ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
+    [fileProgrammeTracks, programmeOriginSec, programmeInWindow],
   )
   useEffect(() => {
     setQueueProgrammeOrigin(programmeOriginSec)
   }, [programmeOriginSec])
   useEffect(() => () => setQueueProgrammeOrigin(0), [])
+  // The recorder shows the film at the window's start for a line with no
+  // times, when the line is the open milestone's (opened elsewhere, the
+  // recorder walks the whole cue file, and this window is not its place).
+  const recorderFilmWindowSec = useMemo(() => {
+    if (!milestonePartShown || milestoneWindowStart == null || recordingCellId == null) return 0
+    const inMilestone = playbackCells.some((c) => c.id === recordingCellId) || timelineCells.some((c) => c.id === recordingCellId)
+    return inMilestone ? milestoneWindowStart : 0
+  }, [milestonePartShown, milestoneWindowStart, recordingCellId, playbackCells, timelineCells])
   // The timeline scrolls over the milestone's stretch only (TimelineEditor).
   const timelineMilestoneWindow = useMemo(
-    () => (milestonePartShown && milestoneWindowStart != null ? { startSec: milestoneWindowStart } : null),
-    [milestonePartShown, milestoneWindowStart],
+    () => (milestonePartShown && milestoneWindowStart != null
+      ? { key: `${activeFileId ?? ""}:${timelineMilestoneKey ?? ""}`, startSec: milestoneWindowStart }
+      : null),
+    [milestonePartShown, milestoneWindowStart, activeFileId, timelineMilestoneKey],
   )
   // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
   // into its lines' pieces, laid out by the programme the timeline draws and
@@ -22672,7 +22685,7 @@ export function ProjectWorkspace() {
           // consults the mode, so an audio-first file keeps its picture.
           filmFileId={activeFileId}
           // Sam, Nov 27: the open milestone's window, for a line with no times yet.
-          filmWindowStartSec={milestonePartShown ? (milestoneWindowStart ?? 0) : 0}
+          filmWindowStartSec={recorderFilmWindowSec}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

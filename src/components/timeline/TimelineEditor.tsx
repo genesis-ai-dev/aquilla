@@ -741,7 +741,7 @@ export interface TimelineEditorProps {
    * brings the view and the playhead (and so the film) to its start. Null or
    * absent: the whole file, from 0:00 to the film's end, as always.
    */
-  milestoneWindow?: { startSec: number } | null
+  milestoneWindow?: { key: string; startSec: number } | null
   /**
    * AQU-2664 (boards 71, 74): Even out. `states` is each track's ≈ (only the
    * tracks holding takes are in it); `open` opens the one Even out window on
@@ -2378,8 +2378,9 @@ export function TimelineEditor({
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
     // AQU-1758: the same layout the transport plays and the bottom strip shows.
     const recorded = layOutProgramme(recordedCells, programmeTracks).programme
-    return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
-  }, [cells, recordedCells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
+    // A length, so a milestone laid out from its window's start counts from there.
+    return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: Math.max(0, recorded.totalSec - programmeOriginSec) || null }
+  }, [cells, recordedCells, subtitleFileWithFootage, videoDurationSec, programmeTracks, programmeOriginSec])
   // The lines this file's programme is laid out from: the heard lines of an
   // audio cue file where its takes live on them, else an imported recording's
   // sections, else the subtitles.
@@ -3173,7 +3174,9 @@ export function TimelineEditor({
     if (audioFirst) windowEndSec = layout.totalSec
     else {
       for (const c of cells) if (typeof c.endTime === "number" && Number.isFinite(c.endTime)) windowEndSec = Math.max(windowEndSec, c.endTime)
-      for (const c of audioCues ?? []) if (typeof c.endTime === "number" && Number.isFinite(c.endTime)) windowEndSec = Math.max(windowEndSec, c.endTime)
+      // The milestone's heard lines (`targetCells`, cut to it), never the
+      // whole cue file, which runs to the film's end.
+      for (const c of (audioCues ? targetCells : null) ?? []) if (typeof c.endTime === "number" && Number.isFinite(c.endTime)) windowEndSec = Math.max(windowEndSec, c.endTime)
       windowEndSec += TRACK_PAD_SEC
     }
   }
@@ -3188,6 +3191,12 @@ export function TimelineEditor({
   // Read by the scroll and wheel handlers, which close over older renders.
   const clipRef = useRef({ startSec: clipStartSec, startPx: clipStartPx })
   clipRef.current = { startSec: clipStartSec, startPx: clipStartPx }
+  // The film-length gap label reads the scroll on the film's clock; a new
+  // window or zoom moves it with no scroll event to say so.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el) el.style.setProperty("--tl-scroll-left", `${el.scrollLeft + clipStartPx}px`)
+  }, [clipStartPx])
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
   // 28). Scrolling, following and seeking still go by the file's own width.
@@ -4434,20 +4443,24 @@ export function TimelineEditor({
 
   // Sam, Nov 27: a milestone opened (Split into milestones on) brings the
   // view and the playhead to where it starts on the film's clock, so the film
-  // is there too: the timeline is a window onto the film. Once per new start;
-  // never while something plays (the transport is moving the head), and the
-  // whole file (0) leaves the view where it is.
-  const windowShownRef = useRef<number | null>(null)
-  const windowStart = milestoneWindow ? windowStartSec : null
+  // is there too: the timeline is a window onto the film. Once per milestone
+  // opened (its `key`), never when its start moves under an edit; never while
+  // something plays (the transport is moving the head); and not when the
+  // playhead is already inside it (a remembered line, or a jump to a line in
+  // it, placed it there first). The whole file leaves the view where it is.
+  const windowShownRef = useRef<string | null>(null)
+  const windowKey = milestoneWindow?.key ?? null
   useEffect(() => {
-    if (windowStart === windowShownRef.current) return
-    windowShownRef.current = windowStart
-    if (windowStart == null || queueActive || videoPlaying) return
+    if (windowKey === windowShownRef.current) return
+    windowShownRef.current = windowKey
+    if (windowKey == null || queueActive || videoPlaying) return
+    const head = clock.displaySec()
+    if (head >= windowStartSec && head <= durationSec) return
     // The canvas's left edge is the window's start.
     scrollTrackTo(0)
-    seekTo(windowStart)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per new window start
-  }, [windowStart])
+    seekTo(windowStartSec)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per milestone opened
+  }, [windowKey])
 
   // 2026-08-07: publish the timeline's presence + chip selection to the media
   // cursor store — the table's rows highlight the pointed-at cell through it.
@@ -6524,7 +6537,13 @@ export function TimelineEditor({
                   )}
                 />
               ) : (
-                <TimelineOrigin px={clipStartPx}>{renderLaneColumn(viewStartSec, viewEndSec)}</TimelineOrigin>
+                <TimelineOrigin px={clipStartPx}>
+                  {/* A milestone's window: the film's strip outside it must not
+                      widen the scroll before the columns take over. */}
+                  {milestoneWindow
+                    ? <div style={{ overflowX: "clip", overflowY: "visible" }}>{renderLaneColumn(viewStartSec, viewEndSec)}</div>
+                    : renderLaneColumn(viewStartSec, viewEndSec)}
+                </TimelineOrigin>
               )}
               </FilmFramesContext.Provider>
               {/* The film lanes' one frame grabber (useFilmFrames), after the

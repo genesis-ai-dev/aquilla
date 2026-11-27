@@ -436,7 +436,8 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // it is a run of its lines too, film or not, so each chosen line plays where
   // it sits there and the playhead (and any film) jumps between them; laid
   // back to back they would all start at the milestone's start.
-  const inWindow = freeTiming === true && (programmeTracks?.originSec ?? 0) > 0
+  // (Its start is given, 0 too, whenever a milestone is the window.)
+  const inWindow = freeTiming === true && programmeTracks?.originSec != null
   const fileStops = useMemo(
     () => (anyChosen && (filmCovers || inWindow) && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
     [anyChosen, filmCovers, inWindow, playbackLines, ask],
@@ -456,7 +457,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // Membership by a Set (N11). Where the run starts is the queue's to
       // say: its first chosen stop, in the order it plays them.
       const inList = new Set(playbackLines.map((c) => c.id))
-      const onTimeline = playbackRange.filter((c) => (film ? film.cellIds.has(c.id) : inList.has(c.id))).map((c) => c.id)
+      // With no film, every chosen row counts: one outside the milestone's
+      // lines makes it a run of the chosen lines on their own, none dropped.
+      const onTimeline = playbackRange.filter((c) => (film ? film.cellIds.has(c.id) : true)).map((c) => c.id)
       if (onTimeline.length > 0 && onTimeline.every((id) => inList.has(id))) {
         const only = new Set(onTimeline)
         return { cells: playbackLines, only, stopCount: onTimeline.filter((id) => fileStops.has(id)).length }

@@ -1514,6 +1514,35 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
   })
 
+  it("the first milestone (its window starts at 0:00) does the same", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    const lines = mergeCellsWithAudio(THREE, audio)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+      programmeTracks: { layerSlots: [], layerTrackSlots: [], originSec: 0 },
+    })
+    await userEvent.setup().click(playButton())
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+  })
+
+  it("a chosen line outside the milestone's lines is never dropped: they play on their own", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    const lines = mergeCellsWithAudio(THREE, audio).slice(0, 2)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+      programmeTracks: { layerSlots: [], layerTrackSlots: [], originSec: 750 },
+    })
+    expect(playButton().textContent).toContain("2")
+    await userEvent.setup().click(playButton())
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.only).toBeUndefined()
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
+  })
+
   // The check of the q44 fixes (Nov 12), NOTE C: where a run of chosen lines
   // starts is the queue's to say, from the order it plays them (a book's
   // sequence, a timed file's times), which neither the table's order nor the

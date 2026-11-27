@@ -3153,7 +3153,10 @@ function progSeekTo(sec: number, wantPlay: boolean, explicit = true): void {
   const prog = programme
   if (!prog) return
   progLayersPurge() // AQU-2252: a jump
-  const at = Math.max(0, sec)
+  // Sam, Nov 27: a milestone laid out from its window's start has nothing
+  // before it; a seek there (a start from 0:00) begins its first line.
+  const firstStart = prog.slots[0]?.startSec ?? 0
+  const at = Math.max(0, sec, programmeOriginSec > 0 ? Math.min(firstStart, programmeOriginSec) : 0)
   const slot = slotAtProgrammeSec(prog, at)
   if (!slot) {
     // AQU-2252: past the last line, into a layer that plays on there.
@@ -5420,6 +5423,8 @@ export function stopQueue(): void {
   progLayers = NO_LAYERS
   progIndex = -1
   progSuppressPause = 0
+  // Sam, Nov 27: the milestone window's start was this run's.
+  progForgetWindowStart()
   setState(IDLE)
   activeContext = null
 }

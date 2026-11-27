@@ -47,3 +47,13 @@ describe("useMilestoneWindowStart", () => {
     spy.mockRestore()
   })
 })
+
+describe("useMilestoneWindowStart following the source", () => {
+  it("follows a first line dragged earlier, so it never slides off the timeline", () => {
+    const { result, rerender } = renderHook((p: ReturnType<typeof args>) => useMilestoneWindowStart(p), { initialProps: args() })
+    expect(result.current).toBe(750)
+    const moved = [line("c", 740, 760), whole[3]]
+    rerender(args({ shown: moved, whole: [whole[0], whole[1], ...moved] }))
+    expect(result.current).toBe(740)
+  })
+})

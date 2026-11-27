@@ -1195,6 +1195,27 @@ describe("audio-first transport — a milestone laid out from its place in the f
     expect(getQueueProgress().currentTime).toBeCloseTo(765, 6)
   })
 
+  it("a start from 0:00 (Space with nothing chosen) begins the milestone's first line, not its last", async () => {
+    const cells = [verse("v3", 750, 756, 11_000), verse("v4", 756, 766, 4_000)]
+    setQueueTimingMode("audioFirst")
+    setQueueProgrammeOrigin(750)
+    startQueueAtTime(ctxFor(cells), 0, { play: true })
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(750, 6)
+  })
+
+  it("the bar's window start goes when the queue stops, so a later run is not drawn from it", async () => {
+    const cells = [verse("v3", 750, 756, 11_000)]
+    setQueueTimingMode("audioFirst")
+    setQueueProgrammeOrigin(750)
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().startSec).toBe(750)
+    stopQueue()
+    expect(getQueueProgress().startSec).toBeUndefined()
+  })
+
   it("the whole file is laid out from 0:00, with no span start", async () => {
     const cells = [verse("v1", 0, 6, 11_000)]
     setQueueTimingMode("audioFirst")

@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
-import { MAX_KB_EXTRACT_INPUT_BYTES, MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 import {
   KB_INDEX_STALE_MS,
   KnowledgeBaseApiError,
@@ -123,8 +124,8 @@ describe("KnowledgeBaseSurface", () => {
     render(<KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />)
     await screen.findByText("No knowledge documents yet")
     expect(MAX_KB_ORIGINAL_BYTES).toBe(25 * 1024 * 1024)
-    expect(MAX_KB_EXTRACT_INPUT_BYTES).toBe(2_000_000)
-    expect(screen.getByText("Markdown, TXT, DOCX, or PDF · up to 25 MB (DOCX up to 1.9 MB)")).toBeInTheDocument()
+    expect(MAX_DOCX_BYTES).toBe(2 * 1024 * 1024)
+    expect(screen.getByText("Markdown, TXT, DOCX, or PDF · up to 25 MB (DOCX up to 2 MB)")).toBeInTheDocument()
   })
 
   it("uploads a supported original and renders the returned pending document", async () => {

@@ -20,9 +20,9 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.uploadError": "Could not upload {name}. Try again.",
     // AQU-1763: "up to 25 MB" was the only limit shown, but it is just the
     // upload cap (MAX_KB_ORIGINAL_BYTES). A DOCX is additionally capped at
-    // MAX_KB_EXTRACT_INPUT_BYTES by the server's extractor. AQU-2551: a PDF
-    // is read in the browser and has only the upload cap. Both numbers are
-    // interpolated from those constants (db/shared/knowledge.ts).
+    // MAX_DOCX_BYTES by the server's extractor. AQU-2551: a PDF is read in
+    // the browser and has only the upload cap. Both numbers are interpolated
+    // from those constants (db/shared/knowledge.ts, shared/docx-limit.ts).
     "knowledgeBase.acceptedFormats":
       "Markdown, TXT, DOCX, or PDF · up to {limit} (DOCX up to {docxLimit})",
     "knowledgeBase.emptyTitle": "No knowledge documents yet",

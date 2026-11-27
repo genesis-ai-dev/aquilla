@@ -21,8 +21,10 @@ import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/ra
 import { unzipSync } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 import { hasPdfHeader } from "../../../shared/pdf-header"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
+// The Knowledge Base's DOCX limit too (shared/docx-limit.ts).
+const MAX_FILE_BYTES = MAX_DOCX_BYTES
 // Ceiling on the whole multipart envelope (AQU-1858). The form used to be
 // parsed before MAX_FILE_BYTES was applied, so a caller could make the route
 // materialize an arbitrarily large upload it was always going to refuse. The
@@ -367,7 +369,7 @@ parseDocument.post("/", authMiddleware, async (c) => {
   if (file.size > MAX_FILE_BYTES) {
     return c.json(
       {
-        error: `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 2 MB.`,
+        error: `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${megabytes(MAX_FILE_BYTES)} MB.`,
       },
       413,
     )

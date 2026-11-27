@@ -34,11 +34,11 @@ import {
   kbExtension,
   kbR2Key,
   MAX_KB_ORIGINAL_BYTES,
-  MAX_KB_EXTRACT_INPUT_BYTES,
   MAX_KB_TEXT_CHARS,
   type KnowledgeScopeRef,
   type KnowledgeDocMeta,
 } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 type ErrorCode =
   | "not_found"
@@ -116,11 +116,11 @@ function extractText(fileName: string, bytes: Uint8Array, pdfText: string | null
     }
     text = pdfText ?? ""
   } else if (ext === ".docx") {
-    if (bytes.byteLength > MAX_KB_EXTRACT_INPUT_BYTES) {
+    if (bytes.byteLength > MAX_DOCX_BYTES) {
       return {
         ok: false,
         code: "validation_failed",
-        message: `file exceeds the ${MAX_KB_EXTRACT_INPUT_BYTES}-byte extraction limit`,
+        message: `file exceeds the ${MAX_DOCX_BYTES}-byte extraction limit`,
         status: 400,
       }
     }

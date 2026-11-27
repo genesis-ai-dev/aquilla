@@ -16,6 +16,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it, expect, vi } from "vitest"
 import { zipSync, zlibSync, strToU8 } from "fflate"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 vi.mock("../middleware/auth", () => ({
   authMiddleware: async (
@@ -39,7 +40,7 @@ const parseDocument = {
     parseDocumentApp.request(path, init, { AQUILLA_PG: {} }),
 }
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024
+const MAX_FILE_BYTES = MAX_DOCX_BYTES
 const MAX_UPLOAD_BYTES = MAX_FILE_BYTES + 16 * 1024
 
 function makeDocx(paragraphs: string[]): Uint8Array {

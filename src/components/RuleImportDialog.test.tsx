@@ -19,7 +19,7 @@ import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { MAX_INPUT_BYTES } from "@/lib/rules/rule-extractor"
-import { MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
+import { MAX_DOCX_BYTES } from "../../shared/docx-limit"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
 
@@ -147,7 +147,7 @@ describe("RuleImportDialog — AQU-196", () => {
     renderDialog()
     await openDialog()
     expect(MAX_INPUT_BYTES).toBe(200 * 1024)
-    expect(MAX_PARSE_FILE_BYTES).toBe(2 * 1024 * 1024)
+    expect(MAX_DOCX_BYTES).toBe(2 * 1024 * 1024)
     expect(screen.getByText(
       "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. "
         + "Supports plain text and Markdown (max 200 KB), DOCX (max 2 MB), and PDF. The text read from a document can be up to 200 KB.",

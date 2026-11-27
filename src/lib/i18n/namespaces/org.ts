@@ -633,6 +633,7 @@ export const org = defineNamespace({
     "org.teamsList.noInternalTeams": "No internal teams in this organization",
     "org.teamsList.noTeamsMatchFilters": "No teams match your filters",
     "org.teamsList.publicBadge": "Public",
+    "org.teamsList.memberBadge": "Member",
     "org.teamsList.memberCount": plural({ one: "{count} member", other: "{count} members" }),
     "org.teamsList.createErrorFallback": "Couldn't create team.",
 

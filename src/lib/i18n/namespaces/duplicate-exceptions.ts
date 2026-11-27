@@ -659,9 +659,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "org.membersMatrixView.memberColumnHeader":
     "Table column heading over the whole 'who' column of the members × projects " +
     "matrix (sibling of the project-name column headings beside it) — the NAME " +
-    "OF A CATEGORY of table content. org.access.person.member is a badge in " +
-    "the person page header meaning 'this person holds an organization " +
-    "membership, not a guest' — a STATUS VALUE, not a column name. A table heading and a " +
+    "OF A CATEGORY of table content. org.teamsList.memberBadge is a small pill " +
+    "on a team card meaning 'the current viewer's own role in this team is " +
+    "Member' — a role/STATUS VALUE, not a column name. A table heading and a " +
     "status badge take different grammatical forms in languages that mark that " +
     "distinction, mirroring this catalog's other heading-vs-badge splits.",
   "org.membersPanel.sourceViaGroup":

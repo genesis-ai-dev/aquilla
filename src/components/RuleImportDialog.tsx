@@ -34,7 +34,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
 import { isPdfFile, parseDocumentFile, MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatFileSize } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 const ACCEPTED_TEXT_TYPES = [".txt", ".md"]
@@ -73,6 +74,7 @@ type Stage = "idle" | "extracting" | "review"
 
 export function RuleImportDialog({ completionSettings, onAdd, projectId, open: controlledOpen, onOpenChange }: Props) {
   const t = useT()
+  const { locale } = useI18n()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
@@ -311,7 +313,10 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId, open: c
         {stage === "idle" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {t("rules.importDialog.description")}
+              {t("rules.importDialog.description", {
+                textLimit: formatFileSize(MAX_TEXT_BYTES, locale),
+                docxLimit: formatFileSize(MAX_PARSE_FILE_BYTES, locale),
+              })}
             </p>
 
             {/* Drop zone */}

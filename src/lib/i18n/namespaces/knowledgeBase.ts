@@ -19,12 +19,12 @@ export const knowledgeBase = defineNamespace({
       "Uploaded {name}, but it is very long: only its first 2 million characters were read.",
     "knowledgeBase.uploadError": "Could not upload {name}. Try again.",
     // AQU-1763: "up to 25 MB" was the only limit shown, but it is just the
-    // upload cap (MAX_KB_ORIGINAL_BYTES). DOCX and PDF are additionally capped
-    // at MAX_KB_EXTRACT_INPUT_BYTES (2 MB) by the extractor and rejected above
-    // it, so a 5 MB DOCX failed against a dialog that had promised 25 MB. Both
-    // limits belong here — keep them in step with db/shared/knowledge.ts.
+    // upload cap (MAX_KB_ORIGINAL_BYTES). A DOCX is additionally capped at
+    // MAX_KB_EXTRACT_INPUT_BYTES by the server's extractor. AQU-2551: a PDF
+    // is read in the browser and has only the upload cap. Both numbers are
+    // interpolated from those constants (db/shared/knowledge.ts).
     "knowledgeBase.acceptedFormats":
-      "Markdown, TXT, DOCX, or PDF · up to 25 MB (DOCX and PDF up to 2 MB)",
+      "Markdown, TXT, DOCX, or PDF · up to {limit} (DOCX up to {docxLimit})",
     "knowledgeBase.emptyTitle": "No knowledge documents yet",
     "knowledgeBase.emptyDescription":
       "Upload reference material to make it available to this project and its agents.",
@@ -75,9 +75,13 @@ export const knowledgeBase = defineNamespace({
       "knowledgeBase.acceptedFormats": {
         description:
           "Help text under the knowledge-base upload control. States two "
-          + "different limits: 25 MB is the upload cap for every accepted "
-          + "format, and the 2 MB in parentheses is the lower cap that applies "
-          + "to DOCX and PDF only, because those are unpacked to extract text.",
+          + "different limits: the first is the upload cap for every accepted "
+          + "format, and the one in parentheses is the lower cap that applies "
+          + "to DOCX only, because the server unpacks a DOCX to extract its text.",
+        placeholders: {
+          limit: "The upload cap for every format, e.g. \"25 MB\".",
+          docxLimit: "The lower cap for a DOCX file, e.g. \"1.9 MB\".",
+        },
       },
       "knowledgeBase.status.stalled": {
         description:

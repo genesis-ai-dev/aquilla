@@ -4,6 +4,7 @@ import {
   BIDI_PDI,
   bidiIsolate,
   formatByteLimit,
+  formatFileSize,
   formatBytesProgress,
   formatCount,
   formatDate,
@@ -80,6 +81,18 @@ describe("formatCount (plural-interpolation safety)", () => {
     // "other" category.
     const rendered = formatCount(1234, "ar")
     expect(pluralCountFrom({ count: rendered }, "count")).toBe(1234)
+  })
+})
+
+describe("formatFileSize", () => {
+  it("states bytes, KB and MB with at most one decimal, as the limit lines quote them", () => {
+    expect(formatFileSize(512, "en")).toBe("512 B")
+    expect(formatFileSize(200 * 1024, "en")).toBe("200 KB")
+    expect(formatFileSize(2 * 1024 * 1024, "en")).toBe("2 MB")
+    expect(formatFileSize(2_000_000, "en")).toBe("1.9 MB")
+    expect(formatFileSize(25 * 1024 * 1024, "en")).toBe("25 MB")
+    expect(formatFileSize(25 * 1024 * 1024, "fr")).toBe("25 MB")
+    expect(formatFileSize(2_000_000, "fr")).toBe("1,9 MB")
   })
 })
 

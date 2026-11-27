@@ -358,7 +358,7 @@ const ROUND_TRIP_EXPORT_FORMATS: ReadonlySet<ExportFormat> = new Set<ExportForma
   "json",
 ])
 
-interface ExportDialogProps {
+export interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /**

@@ -50,112 +50,167 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    in separate tasks and `WHOLE_FILE_NOTIFY_MS` cannot merge them. The fix is one pipeline: the
    store computes the audit overlay from the pending records it already reads. That interacts
    with item 1's remaining step, so design the two together.
-3. **Commit and self-validation are two outbox transactions.** The notification is held across
-   both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
-   enqueue path journals differently — read that first.
+3. ~~**Commit and self-validation are two outbox transactions.**~~ *Done (2026-11-20, AQU-2655):*
+   the editor queues both through `emitTargetCellCommitAndValidate` — one IndexedDB transaction,
+   one journal entry (a crash can no longer keep the edit and lose its validation), one
+   notification. No render saving: the hold already gave one notification, and `plain.commit`
+   stayed at 7 workspace renders at 1× CPU and 6 at 4× (two runs each, before and after).
+   *Left:* `holdOutboxNotifications` in `src/lib/sync/outbox.ts` has no caller
+   now. Delete it and its two tests after `claude/perf-active-cell-outbox` merges — that branch
+   edits the lines around it, and deleting it first would conflict.
 4. ~~**`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
    commit for the forecast and glosser corpus. Move the consumer out of the workspace render.~~
    *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
    that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
    components and were left alone.
-5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
-   focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
-6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
-   in 7.5 s with a file open and no cell active.
-7. **Two cell GETs per `cell.audio.*` write** (apparently one for the POST's applied frames and
-   one for the socket echo — inferred from counts, not traced), and the socket echo still asks
-   for a whole-file audio read for the client's own write (the own-echo branch in
-   `src/components/ProjectWorkspace.tsx`).
+5. **Activation is 8 React commits (target 6).** The table's part no longer reproduces: since
+   `EditorTable` compiles (item 8), clicking from one cell into another renders the table 3
+   times — the old editor deactivates on `focusout`, the rail pin moves on `focusin`, the new
+   editor activates on `click` — and the chapter label does not change (traced 2026-11-20).
+   Those three are separate browser events, so React cannot batch them; joining them means
+   keeping the old cell active until the new one claims it, which changes what a mousedown
+   that never becomes a click leaves behind. The other five commits are not traced.
+7. **The socket echo of the client's own `cell.audio.*` write asks for a whole-file audio read**
+   (the own-echo branch in `src/components/ProjectWorkspace.tsx`): one `audio-attachments` GET
+   per transcribe save. It is not a pure duplicate today: `saveTranscript`
+   (`src/lib/transcript-cleanup/save.ts`) only injects an optimistic overlay and relies on that
+   read to reconcile it, while other writers notify themselves. Dropping it needs every audio
+   writer (about 14 call sites) to land or reconcile its own write first. *(2026-11-20: the two
+   cell GETs per write are fixed — row-less frames are refetched once per event,
+   `src/lib/sync/refetch-once-per-event.ts`.)*
 
 ## Editor — tree per commit
 
 Measured after the pass: a workspace render is about 110–270 components (was about 1,000); a row
 render is about 98.
 
-8. **`ProjectWorkspace`, `EditorTable`, `EditorRow` and `TranslatedEditor` are not compiled by the
-   React Compiler** (eight `exhaustive-deps` suppressions and about 27 unsupported constructs in
-   the first; ref reads in render, a `??=`, one suppression in the others). Nothing in them is
-   memoized unless by hand. Making even one compile is a large, permanent gain — and Vitest runs
-   with the compiler off, so verify in a build with the benchmark.
+8. **`ProjectWorkspace` is not compiled by the React Compiler** (eight `exhaustive-deps`
+   suppressions and about 27 unsupported constructs). Nothing in it is memoized unless by hand.
+   *`EditorTable`, `EditorRow` and `TranslatedEditor` compile since 2026-11-20 (AQU-2655)* —
+   keep them compiling: a bailout is silent, so after touching one, check that the function
+   starts with `compiler_runtime.c(` in an unminified build (`.perf/interaction-dist`). What
+   bailed them out, so it does not come back: a ref read or written in render (use a layout
+   effect, state, or a reader hook), `??=`, an `eslint-disable` of a hooks rule, a function
+   that re-schedules itself, a `?.`/`??`/ternary inside `try` (see `attemptAsync`), and a
+   `useCallback`/`useMemo` whose deps miss a value its body reads. Vitest runs with the
+   compiler off; `E2E_REACT_COMPILER=1 pnpm vitest run …` runs it on.
 9. **`AppShell` re-renders with every workspace render**: all eight slot props (`logoAccessory`,
    `leftDock`, `header`, `aboveCard`, `beforeMain`, `main`, `asideEdge`, `statusBar`) are
-   elements built in the workspace's render.
+   elements built in the workspace's render. *Traced 2026-11-20* (`surfaces-probe --why
+   AppShell`): all eight change identity on every workspace render (39 of 40 renders on a file
+   open), and so do `LeftDock`'s four panels and `WorkspaceHeader`'s `onImport`. AppShell's own
+   share is small — it is compiled, so its chrome (version tag, help, history) is cached; what
+   re-renders is AppShell, its `ErrorBoundary` and the resizable panels. The cause is item 8:
+   the workspace is not compiled, so nothing it builds is cached. Fix item 8, not AppShell.
 10. **Per-row overlay roots.** The action rail is about 46 components (three or four buttons, each
     under a full tooltip tree, plus the overflow popover), the source context menu about 18.
     One instance per table, or mount on hover. `AppTooltip` documents that remounting its trigger
     flashes popovers, and a delegated tooltip changes the accessibility wiring — decide the
     design first.
-11. **`ExportDialog` (3.6k lines), `ImportDialog` (5.2k), `AudioRecordingModal` and
-    `CloneVoiceModalHost` still render while closed** — about 12 components per workspace render.
-    Export's effect order picks a format while closed; Import can finish a pending import while
-    closed. Audit each, then skip while closed (`src/components/memoWhileClosed.ts`).
-12. **List wrappers:** every store emit runs five wrapper components for each mounted row, because
-    `extraData` carries the store version by design — about 400 renders per commit.
+12. **List wrappers:** every whole-file store version re-runs `renderListItem` in each mounted
+    row's LegendList container, which renders five wrappers (`Container`, `PositionView`,
+    `CellStoreRow`, `PlayingCueRow`, `RowWithUiState`) before `MemoizedRow`'s compare stops it —
+    about 200 wrapper renders per cell commit (2026-11-20, compiled table: `Container2` 36,
+    `CellStoreRow` 40 in `plain.commit`). Why the version is in `extraData` by design: the item
+    body reads the store across rows at call time (`getFootnoteOffsets`, the previous row's
+    `fileId`, `timestampNeighbours`), and those answers change without the row's own cell
+    changing. Dropping it alone would save nothing, by reading: `renderListItem` itself depends
+    on `healthRibbonByCellId`, whose cache hands out fresh readers on every version, so its
+    identity changes per version anyway. A fix needs both: the row subscribes to its own
+    cross-row answers (a `useSyncExternalStore` over `subscribeAll` returning a primitive key),
+    and per-version maps leave `renderListItem`'s deps (the row reads its ribbon point itself).
 13. **Left dock, file-options menu, header, resizable panels, side rail** re-render with every
-    workspace render (inline callbacks; menu items rebuilt from `actionCtx`).
+    workspace render (inline callbacks; menu items rebuilt from `actionCtx`). *Traced
+    2026-11-20*: `FileChapterToolbar` gets new `historyControl`, `layoutSwitch`,
+    `onCheckToggle`, `menuItems` and `viewSettingsMenu` each render; `ResizablePanelGroup` new
+    `children` and `onLayoutChanged`. Same cause as item 9: hand-memoizing each of these would
+    duplicate, with long hand-kept dependency lists, what compiling the workspace (item 8) does.
 
 ## Editor — glossary
 
 Measured after the pass (664 terms, 12 occurring): open 6.9 s blocked against 5.5 s plain.
-
-14. **A dense first screen compiles its terms synchronously in render.** With 200 of 664 terms
-    occurring in a file: about 1.4 s at 1× for the source highlights the first time. Compile
-    visible-row terms in idle slices and paint highlights when ready.
-15. **Extra renders per highlighted term**: highlight spans, `HighlightedText` pieces, and an
-    `AppTooltip` per rendering chip on the target side. This is the remaining 1.2–1.6× over plain.
-16. **No visible "checking…" state** for the health pass that now finishes in idle slices
-    (`HealthStats.infractionsPending` exists; nothing reads it).
 
 ## File open and tab return
 
 Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
 
 17. **`audio-attachments` ×3 on open** — a default-lane read before the lane resolves (AQU-2160),
-    and instances that mount after first paint. The hook deliberately has no answer cache.
+    and instances that mount after first paint. The hook deliberately has no answer cache. A mount
+    now joins the read already in flight (AQU-2655); what is left needs `ProjectWorkspace.tsx`:
+    the `''`-lane read comes from `useActiveLane` starting at `''` before the lane rows arrive (the
+    callers at PW `audioValidation…` and `EditorTable` read it; they need a "lane resolved" gate),
+    and on the Text lens neither the PW:2375 instance nor EditorTable's needs the map before
+    first paint.
 18. **`sync-token` ×3 on open** for three scopes (the open file, `'any'`, the project's first
     file). The claims differ only in `fileId`; check every project-level route before sharing.
+    Checked (AQU-2655, read-only): the mint's role, scopes and lane grants do not depend on
+    `fileId`, and the sync-worker has no `'any'` wildcard — `verifyTokenForProject` ignores
+    `fileId`, `verifyTokenForFile`/`verifyTokenForDoc` require an exact match. So the
+    first-file mint is only ever used for project-level reads (`/files` via
+    `useOriginalSourceFlags` and `refreshAllFilesProgress`, `useProjectPlan`), and minting
+    `'any'` there instead joins the existing `'any'` mint and *narrows* what those requests
+    carry. That change is in `ProjectWorkspace.tsx` (`progressSnapshotTokenFileId`, and the
+    fetcher passed to `useOriginalSourceFlags`). Do not go further and send the open file's
+    token to project-level routes to reach ×1: that puts file-scoped authority on requests
+    that do not need it — a person's call, not the routine's.
 19. **33 distinct reads to open one file.** Which of them the first screen needs is a product
     question; everything else belongs after first paint.
-20. **`useCellValidators`, `useCellHistory`, `useTimelineTextCells`** still flip `isLoading` on a
-    focus revalidation.
-21. **`useOrgSettings`**: `GET /orgs/:id/settings` ×2 on every org route, ×4 on the projects list.
+20. **`useCellValidators`, `useCellHistory`** still flip `isLoading` on a focus revalidation, but
+    nothing mounts either hook (only their own tests import them), so no screen pays for it.
+    Delete them, or fix them when a caller comes back. (`useTimelineTextCells`: fixed, AQU-2655.)
 
 ## Other surfaces
 
 From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless noted).
 
-22. **Voice studio open:** 2.4 s blocked, 25 commits, 10,800 renders — a tooltip root per slot
-    button (`TimelineSlotButton` ×208).
-23. **Timeline lens open:** 1.5–1.9 s blocked, 19–23 commits, about 6,000 renders.
-24. **Rules surface:** every built-in check row (a Select and a Switch each) re-renders on each
-    of the 10 renders per open (`src/components/RulesSurface.tsx`, `BuiltinChecksList.tsx`); on 20
-    files the quality section is 59 commits and 46 requests and keeps committing for 7.5 s.
-25. **Project overview** (`src/components/org/ProjectOverview.tsx`, 3.1k lines, not compiled): new
-    `columns` and `data` for the lanes table on 7 of 7 renders; 14 commits, 18 requests to open.
-26. **`src/components/ui/data-table.tsx`:** a ContextMenu root and a DropdownMenu root per row.
-27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
-28. **`src/components/SearchDockPanel.tsx`:** one search request per keystroke, no debounce.
+23. **Timeline lens and voice studio open** (re-measured 2026-11-20 after the slot buttons
+    share one tooltip root per lane): lens 18 commits, 4,268 renders; voice studio 27 commits,
+    8,558 renders. What is left is the same pattern as item 10, on the timeline: an overlay root
+    per chip and per track — a `ContextMenu` per take and per track row
+    (`TargetAudioLane.tsx`, `TimelineEditor.tsx`'s track rows), `AppTooltip`s on each take's
+    toolbar, a `DropdownMenu` root per narrow line's slot menu (`TimelineSlotButton` `menu`,
+    49 on open), and 77 `Popover` roots not yet attributed (not in `src/components/timeline/`).
+    The lanes are inline elements of the 6k-line `TimelineEditor` with inline callbacks, so every
+    editor render re-renders every lane. The CPU profile of the lens open is led by
+    `getBoundingClientRect` (88 ms self time at 4×, caller not traced) and
+    `scrollIntoViewIfNeeded` (19 ms) — forced layout, not rendering.
+24. **Rules surface on 20 files:** the quality section is still about 50 commits and 46 requests
+    (19 `sync-token`, 22 cell reads) — a commit per slice of `useProjectInfractions` as the counts
+    fill in (`src/components/ProjectSettings/RulesSection.tsx`). Each built-in row's text part
+    still re-renders on each one (new `rule` objects and `leading` chips from `RulesSurface`);
+    its Select and Switch no longer do (AQU-2655).
+26. **`src/components/ui/data-table.tsx`:** a ContextMenu root per mounted row (the ⋯ menu is one
+    shared root since AQU-2655; Base UI's context menu has no detached triggers).
+27. **Export dialog open:** 27 commits (not re-measured in the drawer pass). The comment and
+    edit-history drawers were measured on 2026-11-20 (21 and 23 commits, 823 and 902 renders):
+    the drawers themselves render 1–4 times; the rest is the row hover and the "More actions"
+    popover with its tooltips that the probe opens them from — item 10. `HistoryDrawer`'s three
+    own renders are `useCellEditHistory`'s loading flips (item 20's family).
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests
     for about 23 projects). Needs an org-level endpoint — escalate, do not fix client-side.
-30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
-    no comments).
-31. **Glossary page:** 664 row mounts remain on open; `GlossaryEditor` is not compiled.
-32. **Members matrix:** a Popover root and a lane-scope editor per populated cell; not virtualized.
-33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
-    `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.
+30. **Comments page** (`src/components/CommentsPage.tsx`), measured 2026-11-20 with 300 threads /
+    600 comments added to a small fixture: open is 382 ms blocked at 4×, 10 commits, 12,300
+    renders. Nearly all of it is mounting — each comment row mounts a `UserChip` avatar and a
+    `DateTooltip` / `AppTooltip` root (about 20 components a row). The cards re-render once per
+    comments page that arrives (three here), but their compiled rows hand back cached children,
+    so letting `CommentsPage` itself compile (its `getToken` memo stops the compiler) moved
+    nothing and was not kept. Left: a design call — window the list (find-in-page, as for the
+    glossary) or mount the date tooltip on hover (item 10's question). Also `useCommentCellPlaces`
+    reads one file's cells twice as the comment pages land.
+31. **Glossary page:** 664 row mounts on open (664 terms: 15 commits, about 10,600 renders).
+    Every row is drawn on purpose — find-in-page is how a glossary is searched
+    (`src/hooks/useProgressiveCount.ts`) — so windowing the list is a product decision, not a perf
+    fix. `GlossaryEditor` compiles since 2026-11-20, which stopped the first 80 rows rendering a
+    second time when the rest arrive (`GlossaryRow` 744 → 664 renders).
+32. **Members matrix:** not virtualized (`src/components/MembersMatrixView.tsx`). Its per-cell
+    popover roots are one shared root each since AQU-2655.
 
 ## Transcribe view
 
 34. A save still renders the workspace about 5 times (about 1,600 components) — items 1–4 above.
-35. `TypedText` ticks every 30 ms during a pass: most of the 407 commits left in "transcribe all".
-36. The quantise loop runs on the main thread (73 ms at 4× for a 60 s window).
 
 ## The harness itself
 
-37. **`plain.open.componentRenders` is not stable enough for its budget.** Five runs of one tree
-    on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
-    and 9,077 was the budget commit itself. Find what makes the open's render count depend on
-    timing before trusting a breach of it.
 38. **A first translation of an empty cell is not measured, and may cost more than it should.**
     The scenario edits the same cells every run. On a newly seeded fixture they are
     untranslated, and `plain.commit` measured 28 row renders, 10 workspace renders and one or
@@ -165,11 +220,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     (2026-11-20), so the budgets describe an edit and a new machine no longer sees a false
     breach. What is left: whether 28 row renders for a first translation is the price of the
     cell changing state or a defect — not traced. Trace it, then give it its own phase.
-39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
-    separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
-    under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
-    one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
-    6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
 
 40. **`plain.commit.requests` counts a one-time corpus load.** One of the commit phase's two
     requests is `GET …/files/<the other file>/cells?limit=500&lane=…`: the forecast corpus

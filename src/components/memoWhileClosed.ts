@@ -23,9 +23,10 @@ import { createElement, memo, useState, type ComponentType, type MemoExoticCompo
  * prop while closed — resets its format when the active file changes, reports
  * analytics when a checklist completes — would get that change late, in the
  * same commit as the open, where effect order can pick a different winner.
- * `ExportDialog`, `ImportDialog` and `AudioRecordingModal` are deliberately not
- * wrapped for that reason; `SetupChecklistDrawer` is, with the two things its
- * closed-state effect reads passed as `unchangedWhileClosed`.
+ * Such a dialog is wrapped with the things its closed-state effects read
+ * passed as `unchangedWhileClosed`: `SetupChecklistDrawer`, and (AQU-2655)
+ * `ExportDialog`, `ImportDialog` and `AudioRecordingModal`, whose lists are in
+ * `closedDialogInputs.ts`.
  */
 export function memoWhileClosed<Props extends object>(
   Component: ComponentType<Props>,

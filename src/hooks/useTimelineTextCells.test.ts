@@ -73,4 +73,34 @@ describe("independent timeline text reads", () => {
     act(() => result.current.refresh("a"))
     await waitFor(() => expect(result.current.cellsByFile.a?.[0].original).toBe("After"))
   })
+
+  // AQU-2655: every focus return re-reads the captions. Flipping isLoading for
+  // it blanked the track counts (they read null while loading) and rendered
+  // the timeline once per file as partial answers landed. The captions on
+  // screen are still right until the new answer is whole.
+  it("revalidates without a loading flash and lands the new answer in one update", async () => {
+    vi.mocked(fetchAllFileCells).mockImplementation(async (_project, fileId) => [row(fileId, `${fileId} before`)])
+    const seen: boolean[] = []
+    const { result } = renderHook(() => {
+      const value = useTimelineTextCells({ projectId: "p", fileIds: ["a", "b"], getToken })
+      seen.push(value.isLoading)
+      return value
+    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const before = result.current.cellsByFile
+    let finishB!: (rows: CellRow[]) => void
+    vi.mocked(fetchAllFileCells).mockImplementation(async (_project, fileId) => fileId === "b"
+      ? new Promise(resolve => { finishB = resolve })
+      : [row("a", "a after")])
+    seen.length = 0
+    act(() => result.current.refresh())
+    await waitFor(() => expect(fetchAllFileCells).toHaveBeenCalledTimes(4))
+    await act(async () => { await Promise.resolve() })
+    // a's answer is back, b's is not: nothing on screen has moved yet.
+    expect(result.current.cellsByFile).toBe(before)
+    await act(async () => { finishB([row("b", "b after")]) })
+    expect(result.current.cellsByFile.a[0].original).toBe("a after")
+    expect(result.current.cellsByFile.b[0].original).toBe("b after")
+    expect(seen).not.toContain(true)
+  })
 })

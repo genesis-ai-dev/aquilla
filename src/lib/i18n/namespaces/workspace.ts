@@ -430,6 +430,9 @@ export const workspace = defineNamespace({
     "workspace.statusBar.bothSummary": "{total} lines · {done} done {pct}",
     "workspace.statusBar.textLeftBadge": "Text left: {count}",
     "workspace.statusBar.audioLeftBadge": "Audio left: {count}",
+    // AQU-2655: the file's checks are still running in the background; {count}
+    // is how many cells they have not reached yet.
+    "workspace.statusBar.checking": "Checking… {count} left",
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
@@ -1934,6 +1937,12 @@ export const workspace = defineNamespace({
           "Badge in the status footer, for a language that delivers text and audio, " +
           "counting lines whose recording is not yet approved.",
         placeholders: { count: "How many lines still need an approved recording." },
+      },
+      "workspace.statusBar.checking": {
+        description:
+          "Status in the editor's footer while the file's checks (glossary terms, rules) are " +
+          "still running in the background. Shown beside a small spinner; disappears when done.",
+        placeholders: { count: "How many cells the checks have not reached yet." },
       },
       "workspace.statusBar.unvalidatedBadge": {
         description:

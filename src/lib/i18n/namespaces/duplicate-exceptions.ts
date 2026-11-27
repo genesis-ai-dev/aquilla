@@ -1033,6 +1033,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "editor.expansion.retrievalSupport is the per-cell health badge inside the " +
     "editor expansion panel. Same settings-heading vs per-cell-badge split " +
     "documented for projectSettings.decay.summary.",
+  "org.access.tree.you":
+    "Standalone tag beside the viewer's own name in the People & access " +
+    "people list, read on its own like a name badge. agent.emptyState.introYou " +
+    "is the pronoun inside a sentence ('a proposal YOU review'), which takes " +
+    "the case and register that sentence needs; many languages inflect it.",
   "paratextBridge.project.status.not-started":
     "Status label for a Paratext desktop project that has not yet been linked or " +
     "imported into Aquilla. autopilot.status.notStarted is a background AI " +

@@ -55,7 +55,7 @@ function renderSettings(path: string) {
         <OrgProvider>
           <Routes>
             <Route path="/orgs/:orgId/teams/:groupId/settings" element={<TeamSettingsIndex />} />
-            <Route path="/orgs/:orgId/teams" element={<div>Teams list</div>} />
+            <Route path="/orgs/:orgId/access" element={<div>People and access</div>} />
           </Routes>
         </OrgProvider>
       </MemoryRouter>
@@ -134,7 +134,7 @@ describe("TeamSettingsIndex", () => {
     expect(toast.add).not.toHaveBeenCalled()
   })
 
-  it("deletes the team after confirm and returns to the teams list", async () => {
+  it("deletes the team after confirm and returns to People & access, where folders live", async () => {
     renderSettings("/orgs/1/teams/10/settings")
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /delete team/i })).toBeInTheDocument(),
@@ -146,7 +146,7 @@ describe("TeamSettingsIndex", () => {
       screen.getByRole("button", { name: /confirm/i }).click()
     })
     await waitFor(() => expect(deleteTeam).toHaveBeenCalledWith("jwt", 1, 10))
-    await waitFor(() => expect(screen.getByText("Teams list")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("People and access")).toBeInTheDocument())
   })
 
   it("hides Danger zone for non-admins", async () => {

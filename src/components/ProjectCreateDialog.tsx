@@ -70,6 +70,14 @@ interface ProjectCreateDialogProps {
   orgId?: number
   /** Reuse a parent/provider project directory instead of fetching it again. */
   linkableProjects?: CloudProjectSummary[]
+  /**
+   * Opened from elsewhere (People & access's "+" on the organization): the
+   * caller owns the open state and the dialog draws no trigger button.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Folders (teams) the new project starts in, e.g. the folder whose "+" opened the dialog. */
+  initialTeamIds?: number[]
 }
 
 /**
@@ -293,7 +301,7 @@ const projectSchema = z
     }
   })
 
-export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
+export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects, open: openProp, onOpenChange, initialTeamIds }: ProjectCreateDialogProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
   const { session } = useFrontierSession()
@@ -302,7 +310,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     error: discoveredProjectsError,
   } = useProjectsForNavigation(suppliedProjects == null)
   const linkableProjects = suppliedProjects ?? discoveredProjects
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const open = openProp ?? ownOpen
+  const setOpen = (next: boolean) => {
+    setOwnOpen(next)
+    onOpenChange?.(next)
+  }
   // AQU-712: one stable project id per dialog session, minted when the dialog
   // opens and re-minted when it closes (or after a successful create that keeps
   // the dialog open). Reusing the same id across submit attempts within a
@@ -341,12 +354,14 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const onLangQuest =
     step.kind === "loading" || step.kind === "org" || step.kind === "connect" || step.kind === "language" || step.kind === "details"
   // AQU-1352 P2: teams to create into; reset whenever the destination changes.
-  const [teamIds, setTeamIds] = useState<number[]>([])
+  // Fixed for the dialog's life: a caller that opens it on a folder mounts a fresh one.
+  const [startingTeams] = useState<number[]>(() => initialTeamIds ?? [])
+  const [teamIds, setTeamIds] = useState<number[]>(startingTeams)
   const [teamsError, setTeamsError] = useState(false)
   const needTeams = teamsRequired(destination?.role, destination?.orgId)
   const onDestination = (next: Destination | null) => {
     setDestination(next)
-    setTeamIds([])
+    setTeamIds(next?.orgId != null && next.orgId === orgId ? startingTeams : [])
     setTeamsError(false)
   }
 
@@ -678,7 +693,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     dispatch({ type: "reset" })
     // Re-ask for connections next time the LangQuest path is picked.
     dispatch({ type: "forgetConnections" })
-    setTeamIds([])
+    setTeamIds(startingTeams)
     setTeamsError(false)
     form.reset()
     clearSubmitError()
@@ -690,7 +705,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     // the next time it opens starts a brand-new project (no false dedup onto a
     // project created in a previous session).
     draftProjectId.current = uuid()
-  }, [open, form, clearSubmitError])
+  }, [open, form, clearSubmitError, startingTeams])
 
   // AQU-1519: arm the overrun escape hatch for exactly as long as the dialog is
   // busy. Disarming is `releaseWork`'s job, not this effect's.
@@ -703,9 +718,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // The page org changed under an open dialog: the old choice is void.
   useEffect(() => {
     setDestination(null)
-    setTeamIds([])
+    setTeamIds(startingTeams)
     setTeamsError(false)
-  }, [orgId])
+  }, [orgId, startingTeams])
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
@@ -732,9 +747,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         setOpen(next)
       }}
     >
-      <DialogTrigger render={<Button />}>
-        {t("projectSettings.create.trigger")}
-      </DialogTrigger>
+      {openProp === undefined && (
+        <DialogTrigger render={<Button />}>
+          {t("projectSettings.create.trigger")}
+        </DialogTrigger>
+      )}
       <DialogContent closeDisabled={!canClose}>
         <DialogHeader className="flex-row items-center gap-2">
           {step.kind !== "source" && (

@@ -8,7 +8,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { membersPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
+import { orgAccessPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsShell } from "./OrgSettingsShell"
@@ -86,9 +86,8 @@ export function OrgSettingsIndex() {
 
         <NavList label={t("billing.settings.peopleProjects")}>
           {canViewRoster && (
-            <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title={t("editor.navTitle.members")} hint={t("projectSettings.hint.rolesInvites")} />
+            <NavRow to={orgAccessPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title={t("org.access.page.title")} hint={t("settings.orgSettingsIndex.hintAccess")} />
           )}
-          <NavRow to={orgPath(activeOrgId, "/teams")} icon={NAV_PAGE_ICONS.teams} title={t("editor.navTitle.teams")} hint={t("settings.orgSettingsIndex.hintTeams")} />
           {/* AQU-1083: values a project follows unless it sets its own. Here
               rather than on Security, whose every other control is about who
               may see or do something. */}

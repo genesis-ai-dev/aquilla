@@ -70,31 +70,9 @@ export interface OrgMember {
   role: OrgRole;
   /** ISO timestamp of last project-context activity by this user in this
    * org. NULL when no activity has been recorded since migration 0018
-   * landed. The Members page surfaces this as "Last active X ago" /
+   * landed. People & access surfaces this as "Last active X ago" /
    * "No recent activity." */
   lastActiveAt?: string | null;
-}
-
-/**
- * One unredeemed, unexpired invite for a project in this org. Returned by
- * `listPendingOrgInvites`. `token` is included so the operator can revoke
- * via DELETE /projects/:id/invites/:token; the listing is owner-gated
- * server-side so token leakage is contained to org admins (who could
- * already revoke anyway).
- */
-export interface PendingOrgInvite {
-  token: string;
-  projectId: string;
-  projectName: string;
-  role: OrgRole;
-  createdBy: { userId: number; username: string };
-  createdAt: string;
-  expiresAt: string | null;
-  /** Non-null when the invite was minted for a specific email recipient.
-   * Null means "anyone with the link can redeem" (open link). The Roster
-   * surfaces this so the operator can distinguish targeted invites from
-   * open shares. */
-  email?: string | null;
 }
 
 export interface OrgMemberProject {
@@ -451,29 +429,6 @@ export async function listOrgMemberProjects(
   );
   if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { projects: OrgMemberProject[] }).projects;
-}
-
-/**
- * GET /api/v2/orgs/:orgId/project-invites — pending invites for projects in
- * this org. Owner-only server-side; returns null on 403 (caller isn't
- * owner) so the Roster can hide the "Pending" section gracefully without
- * surfacing the gate as an error. Throws on other failures.
- *
- * Distinct path from `/invites` (org-level org_invites, see
- * `createOrgInvite`/`listOrgInvites`) — those used to share this path and
- * the org_invites handler (registered first) silently shadowed this one.
- */
-export async function listPendingOrgInvites(
-  jwt: string,
-  orgId: number
-): Promise<PendingOrgInvite[] | null> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/project-invites`, {
-    headers: authHeaders(jwt),
-  });
-  await throwIfElevationRequired(res, "org");
-  if (res.status === 403) return null;
-  if (!res.ok) throw new UserError(res.status, "", "org");
-  return ((await res.json()) as { invites: PendingOrgInvite[] }).invites;
 }
 
 /**

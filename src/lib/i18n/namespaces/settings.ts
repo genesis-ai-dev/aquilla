@@ -517,6 +517,7 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.hintProviders": "Org keys",
     "settings.orgSettingsIndex.hintMonday": "Board sync",
     "settings.orgSettingsIndex.hintTeams": "Groups of members",
+    "settings.orgSettingsIndex.hintAccess": "Folders, roles & invites",
     "settings.orgSettingsIndex.hintProjectDefaults": "Inherited by every project",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
@@ -672,6 +673,11 @@ export const settings = defineNamespace({
       "settings.orgSettingsIndex.hintTeams": {
         description:
           "Short grey hint at the right of the 'Teams' row on the Organization settings index: a team is a named group of org members that can be added to projects together.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintAccess": {
+        description:
+          "Short grey hint at the right of the 'People & access' row on the Organization settings index: the page shows the organization as folders and sets who can open each one, with what role, and sends invites.",
         maxLength: 32,
       },
       "settings.orgSettingsIndex.hintProjectDefaults": {

@@ -1,0 +1,165 @@
+name: i18n fill
+
+# Translates what dev's English has that a locale does not, after the merge
+# (AQU-2792, docs/decisions/0021-translations-are-filled-after-the-merge.md).
+#
+# A pull request adds English and its context notes. It does not translate:
+# `pnpm i18n:check` in ci.yml's lint job no longer fails on a translation gap.
+# When that pull request reaches dev, this workflow runs `pnpm i18n:fill`
+# (packets, a model, the importer), checks the result, and lands it as one pull
+# request that holds only generated catalog files and merges itself once the
+# required preview build has passed.
+#
+# Three ways in:
+#   push      a merge to dev that changed English. This is the normal one, so
+#             translations follow their strings by minutes.
+#   schedule  a retry. A run the model failed leaves strings in English, and
+#             nothing else would start another run until English changes again.
+#             With nothing to translate it ends in about a minute.
+#   dispatch  by hand: gh workflow run i18n-fill.yml
+#
+# Needs, outside this file:
+#   - Settings → Actions → General → "Allow GitHub Actions to create and
+#     approve pull requests". Without it the "Open the pull request" step fails
+#     and says so. The branch is still pushed, so a person can open it.
+#   - TEXT_MODEL_API_KEY, the OpenRouter key adversarial-jev.yml already uses.
+#   - Optional variables I18N_FILL_MODEL and I18N_FILL_BASE_URL.
+#
+# The merge is made with GITHUB_TOKEN, and GitHub starts no push-triggered
+# workflow for it. That is why this workflow does not start itself again, and
+# why it starts dev-deploy.yml by hand at the end.
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'src/lib/i18n/namespaces/**'
+      - 'src/lib/i18n/messages/en.ts'
+      - 'src/lib/i18n/locales.ts'
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+# One at a time. A second merge while a fill is running waits, then starts
+# from the dev that has both: every run translates everything outstanding.
+concurrency:
+  group: i18n-fill
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write # push the i18n/fill branch and merge its pull request
+      pull-requests: write # open, update and merge that pull request
+      actions: write # start dev-deploy.yml after the merge
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FILL_BRANCH: i18n/fill
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Translate
+        env:
+          I18N_FILL_API_KEY: ${{ secrets.TEXT_MODEL_API_KEY }}
+          # Always explicit: an unset base URL once sent the key to the wrong provider (#716).
+          I18N_FILL_BASE_URL: ${{ vars.I18N_FILL_BASE_URL || 'https://openrouter.ai/api/v1' }}
+          I18N_FILL_MODEL: ${{ vars.I18N_FILL_MODEL || 'anthropic/claude-opus-5.5' }}
+        run: pnpm i18n:fill
+
+      - name: See what changed
+        id: changes
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to land."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --cached --stat
+          fi
+
+      # The pull request below merges with no person and no walk because it is
+      # generated catalog data and nothing else (docs/decisions/0014). This is
+      # the same path test the release plan applies, on the same function.
+      - name: Refuse anything but generated catalog files
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git diff --cached --name-only | node --input-type=module -e '
+            import { readFileSync } from "node:fs"
+            import { isLocaleCatalogOnly } from "./scripts/release-plan.mjs"
+            const files = readFileSync(0, "utf8").split("\n").filter(Boolean)
+            if (!isLocaleCatalogOnly(files)) {
+              console.error("::error::The fill changed a file that is not a generated locale catalog:\n" + files.join("\n"))
+              process.exit(1)
+            }
+          '
+
+      # ci.yml does not run on a pull request GITHUB_TOKEN opens, so the suite
+      # that reads the catalogs runs here: placeholders, context, the registry.
+      - name: Test the catalogs
+        if: steps.changes.outputs.changed == 'true'
+        run: pnpm vitest run src/lib/i18n
+
+      - name: Push the branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
+          git commit -m "chore(i18n): translate new and reworded interface strings" -m "Written by the fill job (.github/workflows/i18n-fill.yml). Unreviewed machine translation, generated files only."
+          # Forced: the branch is rebuilt from dev on every run, and replaces
+          # what an earlier run left if its pull request never merged.
+          git push --force origin "HEAD:refs/heads/${FILL_BRANCH}"
+
+      - name: Open the pull request
+        if: steps.changes.outputs.changed == 'true'
+        id: pr
+        run: |
+          title="chore(i18n): translate new and reworded interface strings"
+          number="$(gh pr list --base dev --head "$FILL_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file i18n-todo/fill-summary.md
+          elif ! gh pr create --base dev --head "$FILL_BRANCH" --title "$title" --body-file i18n-todo/fill-summary.md; then
+            echo "::error::Could not open the pull request. If the message above says GitHub Actions is not permitted to create pull requests, turn on Settings → Actions → General → 'Allow GitHub Actions to create and approve pull requests'. The translations are on the ${FILL_BRANCH} branch."
+            exit 1
+          else
+            number="$(gh pr list --base dev --head "$FILL_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      # The repository has auto-merge off, so this waits: branch protection
+      # refuses the merge until "Workers Builds: aquilla-web-preview" has
+      # passed on the branch, and accepts it after. Past the deadline the pull
+      # request stays open for a person, and the next run replaces it.
+      - name: Merge once the preview build has passed
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          deadline=$((SECONDS + 2400))
+          until gh pr merge "${{ steps.pr.outputs.number }}" --merge; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Pull request #${{ steps.pr.outputs.number }} was not mergeable within 40 minutes. Read its checks; the next run rebuilds it from dev."
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Deploy dev with the translations
+        if: steps.changes.outputs.changed == 'true' && vars.AUTO_DEV_DEPLOY == 'on'
+        run: gh workflow run dev-deploy.yml --ref dev
+
+      # Last, and on every run: red while any string outside the baseline is
+      # still English, whether this run had work or not.
+      - name: Every locale is translated
+        run: pnpm i18n:coverage

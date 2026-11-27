@@ -10,6 +10,13 @@ import {
   uploadKnowledgeDocument,
 } from "./knowledge-base"
 import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
+import { readPdfText } from "@/lib/import/pdf-import"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
+
+vi.mock("@/lib/import/pdf-import", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/import/pdf-import")>()
+  return { ...actual, readPdfText: vi.fn(actual.readPdfText) }
+})
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -69,6 +76,23 @@ describe("Knowledge Base API client", () => {
     const sent = form.get("file") as File
     expect(new Uint8Array(await sent.arrayBuffer())).toEqual(new Uint8Array(pdf))
     expect(new Headers(init.headers).get("x-doc-name")).toBe("guide.pdf")
+  })
+
+  // A huge PDF's text is cut in the browser, one past the server's cap, so
+  // the form stays under its byte limit and the server still marks the
+  // document truncated instead of refusing it as too large.
+  it("sends only one character past the text cap for a huge PDF", async () => {
+    const doc = { id: "doc-5", name: "huge.pdf", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc, textTruncated: true }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    vi.mocked(readPdfText).mockResolvedValueOnce("a".repeat(MAX_KB_TEXT_CHARS + 5_000))
+    const file = new File([buildPdf({ pages: [{ runs: [{ text: "x", x: 72, y: 700 }] }] })], "huge.pdf")
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file))
+      .resolves.toEqual({ doc, textTruncated: true })
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(((init.body as FormData).get("text") as string).length).toBe(MAX_KB_TEXT_CHARS + 1)
   })
 
   it("refuses a PDF it cannot read before uploading, in the import's words", async () => {

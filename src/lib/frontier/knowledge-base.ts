@@ -2,6 +2,7 @@ import { AUTH_BASE } from "@/lib/frontier/auth"
 import { t } from "@/lib/i18n/standalone"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 export type KnowledgeIndexStatus = "pending" | "ready" | "failed"
 
@@ -228,7 +229,10 @@ async function pdfUploadBody(file: File): Promise<FormData> {
   }
   const form = new FormData()
   form.append("file", file, file.name)
-  form.append("text", text)
+  // Only the first MAX_KB_TEXT_CHARS are kept. The one character past the cap
+  // lets the server see the text was longer and mark it truncated; without
+  // the cut, a huge PDF's text would push the form past its byte limit.
+  form.append("text", text.slice(0, MAX_KB_TEXT_CHARS + 1))
   return form
 }
 

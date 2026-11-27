@@ -185,6 +185,20 @@ export function formatByteLimit(bytes: number, locale: string = DEFAULT_LOCALE):
 }
 
 /**
+ * A file's size, or a file-size limit, the way the Knowledge Base lists
+ * documents: bytes, then KB or MB with at most one decimal (`"200 KB"`,
+ * `"1.9 MB"`, `"25 MB"`). Same unit-symbol rule as `formatMB`. AQU-2551:
+ * limit lines interpolate their enforcing constant through this, so the
+ * number shown cannot drift from the one checked.
+ */
+export function formatFileSize(bytes: number, locale: string = DEFAULT_LOCALE): string {
+  const safe = Math.max(0, bytes)
+  if (safe < 1024) return `${formatNumber(safe, locale)} B`
+  if (safe < BYTES_PER_MB) return `${formatNumber(safe / 1024, locale, { maximumFractionDigits: 1 })} KB`
+  return `${formatNumber(safe / BYTES_PER_MB, locale, { maximumFractionDigits: 1 })} MB`
+}
+
+/**
  * Human-readable byte-transfer progress.
  *
  * - total known (> 0):  `"12.4 / 40.0 MB (31%)"` — transferred, total, percent.

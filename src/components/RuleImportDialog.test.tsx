@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { MAX_INPUT_BYTES } from "@/lib/rules/rule-extractor"
+import { MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
 
@@ -136,6 +137,21 @@ describe("RuleImportDialog — AQU-196", () => {
 
     expect(await screen.findByText(/file too large/i)).toBeInTheDocument()
     expect(completeCalls).toEqual([])
+  })
+
+  // AQU-2551 (browser pass, finding 7g): the dialog said "PDF/DOCX (max
+  // 2 MB)", but only a DOCX has a file cap; a PDF of any size is read in the
+  // browser, and any document's text is capped by the extractor. The numbers
+  // come from the constants the dialog enforces.
+  it("states the limits it enforces: text files and any document's text by the extractor's cap, DOCX by its upload cap", async () => {
+    renderDialog()
+    await openDialog()
+    expect(MAX_INPUT_BYTES).toBe(200 * 1024)
+    expect(MAX_PARSE_FILE_BYTES).toBe(2 * 1024 * 1024)
+    expect(screen.getByText(
+      "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. "
+        + "Supports plain text and Markdown (max 200 KB), DOCX (max 2 MB), and PDF. The text read from a document can be up to 200 KB.",
+    )).toBeInTheDocument()
   })
 
   // AQU-2551 review findings 1–3: a PDF is read in the browser, so the 2 MB

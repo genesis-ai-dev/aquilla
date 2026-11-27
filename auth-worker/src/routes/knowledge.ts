@@ -360,8 +360,13 @@ export async function readPdfForm(
   if (typeof text !== "string") return { ok: false, reason: "no-text" }
   const bytes = new Uint8Array(await (file as File).arrayBuffer())
   file = null
-  // a form sends its text's line ends as CRLF; the text is stored with LF
-  return { ok: true, bytes, text: text.replace(/\r\n?/g, "\n") }
+  // A form sends its text's line ends as CRLF; the text is stored with LF.
+  // Only the first MAX_KB_TEXT_CHARS + 1 characters are kept (the one past
+  // the cap tells the route the text was cut), so the line-end pass runs
+  // over no more than that. A CRLF shrinks to one character, so a raw prefix
+  // twice that long always holds them, whatever its line ends.
+  const kept = MAX_KB_TEXT_CHARS + 1
+  return { ok: true, bytes, text: text.slice(0, 2 * kept).replace(/\r\n?/g, "\n").slice(0, kept) }
 }
 
 /** AQU-2551 (review findings 1–3): the server no longer reads PDFs. The app

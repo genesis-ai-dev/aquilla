@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
+import { MAX_KB_EXTRACT_INPUT_BYTES, MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
 import {
   KB_INDEX_STALE_MS,
   KnowledgeBaseApiError,
@@ -112,6 +113,18 @@ describe("KnowledgeBaseSurface", () => {
     // AQU-2342: knowledge documents never reach a drafting prompt, so the
     // surface offers no "use in drafting" switch.
     expect(screen.queryByRole("switch")).not.toBeInTheDocument()
+  })
+
+  // AQU-2551 (browser pass, finding 7g): the line said "DOCX and PDF up to
+  // 2 MB", but a PDF is limited only by the upload cap (its text is read in
+  // the browser); only a DOCX has the server's lower extraction cap. The
+  // numbers come from the constants the server enforces.
+  it("states the limits the server enforces: the upload cap for every format, the lower one for DOCX only", async () => {
+    render(<KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />)
+    await screen.findByText("No knowledge documents yet")
+    expect(MAX_KB_ORIGINAL_BYTES).toBe(25 * 1024 * 1024)
+    expect(MAX_KB_EXTRACT_INPUT_BYTES).toBe(2_000_000)
+    expect(screen.getByText("Markdown, TXT, DOCX, or PDF · up to 25 MB (DOCX up to 1.9 MB)")).toBeInTheDocument()
   })
 
   it("uploads a supported original and renders the returned pending document", async () => {

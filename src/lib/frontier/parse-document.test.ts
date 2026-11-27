@@ -40,7 +40,7 @@ describe("parseDocumentFile", () => {
     )
     const err = await parseDocumentFile(new File(["x"], "r.docx"), JWT).catch((e: unknown) => e)
     expect((err as Error).message).toBe(
-      "We couldn't read that file. It may be image-only, encrypted, or not a valid PDF or DOCX.",
+      "We couldn't read that file. It may be image-only, encrypted, or not a valid DOCX.",
     )
     expect((err as Error).message).not.toContain("TypeError")
   })

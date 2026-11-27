@@ -13,6 +13,8 @@ vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   OPS: {},
   VerbosityLevel: { ERRORS: 0 },
+  // with no worker of the reader's own, pdf.js's in-page reader, ready at once
+  PDFWorker: class { promise = Promise.resolve(); destroy() {} },
   getDocument: () => ({
     promise: Promise.reject(openError.current),
     destroy: async () => {},

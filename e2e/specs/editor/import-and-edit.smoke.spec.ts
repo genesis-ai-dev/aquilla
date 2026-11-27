@@ -388,7 +388,10 @@ for (const { format, text } of youtubeCaptionExports) {
   const videoEvents = events.filter((e) => e.kind === "file.video.set")
   expect(videoEvents).toHaveLength(1)
   expect(videoEvents[0].payload).toMatchObject({ coreMediaUrl: url })
-  expect(events.filter(e => e.kind === "source.cell.create")).toHaveLength(2)
+  const revisionEvents = events.filter((e) => e.kind === "file.revision")
+  expect(revisionEvents).toHaveLength(1)
+  expect(revisionEvents[0].payload).toMatchObject({ unitCount: 2 })
+  expect(events.filter((e) => e.kind === "source.cell.create")).toHaveLength(0)
 
   const downloadPromise = alice.waitForEvent("download")
   await ws.clickDownloadOriginal()

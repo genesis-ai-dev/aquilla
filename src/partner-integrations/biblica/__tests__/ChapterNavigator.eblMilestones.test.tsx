@@ -94,7 +94,7 @@ function currentLabel(): string {
 describe("AQU-1008 — EBL divisions in the milestone navigator", () => {
   it("labels every division the way the guide's own headings read", () => {
     expect(items.map((item) => item.label)).toEqual([
-      "Boxes and tables",
+      "Boxes and tables 1",
       SAMPLE_EBL.titleLines.join(" "),
       SAMPLE_EBL.introHead,
       SAMPLE_EBL.contentsHead,
@@ -103,6 +103,7 @@ describe("AQU-1008 — EBL divisions in the milestone navigator", () => {
       `Lesson 1: ${SAMPLE_EBL.lessonOneTitle}`,
       `Lesson 2: ${SAMPLE_EBL.lessonTwoTitle}`,
       SAMPLE_EBL.glossaryHead,
+      "Boxes and tables 2",
     ])
   })
 
@@ -138,11 +139,11 @@ describe("AQU-1008 — EBL divisions in the milestone navigator", () => {
   it("does not turn a pull-out box's heading into a section of its own", () => {
     render(<Navigator />)
 
-    // Set in the same level-1 style a lesson tag uses, but a detached frame —
-    // and listed ahead of the body, so it would otherwise open the file.
+    // Set in the same level-1 style a lesson tag uses, but a detached frame,
+    // so it would otherwise open a section named after the badge.
     expect(items.map((item) => item.label)).not.toContain(SAMPLE_EBL.timingBadge)
     expect(items.map((item) => item.label)).not.toContain(SAMPLE_EBL.summaryBanner)
-    expect(currentLabel()).toBe("Boxes and tables")
+    expect(currentLabel()).toBe("Boxes and tables 1")
   })
 
   it("gives every division one unbroken run, so a page is never disjoint", () => {

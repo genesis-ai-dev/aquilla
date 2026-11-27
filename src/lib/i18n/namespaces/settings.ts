@@ -228,6 +228,13 @@ export const settings = defineNamespace({
 
     // ── MediaDefaultsSection ── AQU-1768
     "settings.mediaDefaults.groupLabel": "Timeline and recordings",
+    // AQU-2647: org default for who may edit source text. Projects may override.
+    "settings.sourceText.groupLabel": "Source text",
+    "settings.sourceText.label": "Who can edit source text",
+    "settings.sourceText.description":
+      "Who may change the source text in a project that does not set its own. The same people may hide a cell and split a line at quotation marks. Maintainers and owners always may.",
+    "settings.sourceText.saveFailed": "Couldn’t save who may edit source text.",
+    "settings.sourceText.blocked": "You need to be a maintainer to change this.",
     "settings.mediaDefaults.timingLockedDescription":
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
@@ -504,6 +511,14 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.navIdentity": "Identity",
     "settings.orgSettingsIndex.navSecurity": "Security",
     "settings.orgSettingsIndex.navGroupPeopleProjects": "People & projects",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "settings.orgSettingsIndex.hintSecurity": "Visibility & permissions",
+    "settings.orgSettingsIndex.hintBilling": "Plan & AI usage",
+    "settings.orgSettingsIndex.hintProviders": "Org keys",
+    "settings.orgSettingsIndex.hintMonday": "Board sync",
+    "settings.orgSettingsIndex.hintTeams": "Groups of members",
+    "settings.orgSettingsIndex.hintAccess": "Folders, roles & invites",
+    "settings.orgSettingsIndex.hintProjectDefaults": "Inherited by every project",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
     //   org.breadcrumb.organizationFallback already holds the documented exception
@@ -635,6 +650,41 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.orgSettingsIndex.hintSecurity": {
+        description:
+          "Short grey hint at the right of the 'Security' row on the Organization settings index, saying what the page covers. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintBilling": {
+        description:
+          "Short grey hint at the right of the 'Billing' row on the Organization settings index: the page shows the org's plan and its AI usage. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProviders": {
+        description:
+          "Short grey hint at the right of the AI provider keys row on the Organization settings index: the API keys the organization supplies for AI providers.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintMonday": {
+        description:
+          "Short grey hint at the right of the Monday.com row on the Organization settings index: the page sets up syncing project progress to a Monday.com board.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintTeams": {
+        description:
+          "Short grey hint at the right of the 'Teams' row on the Organization settings index: a team is a named group of org members that can be added to projects together.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintAccess": {
+        description:
+          "Short grey hint at the right of the 'People & access' row on the Organization settings index: the page shows the organization as folders and sets who can open each one, with what role, and sends invites.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProjectDefaults": {
+        description:
+          "Short grey hint at the right of the 'Project defaults' row on the Organization settings index: settings made there apply to every project unless the project sets its own.",
+        maxLength: 32,
+      },
       "settings.locked.section": {
         description:
           "One line at the top of a settings card the reader cannot change, saying who can. " +
@@ -903,6 +953,22 @@ export const settings = defineNamespace({
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
           "(timing lock, track editing, who may add and remove cells, recording validation).",
+      },
+      "settings.sourceText.groupLabel": {
+        description: "Heading of the group on the organization's Project defaults page for who may edit source text.",
+      },
+      "settings.sourceText.label": {
+        description: "Row label for the dropdown in that group. The same words as the project setting.",
+      },
+      "settings.sourceText.description": {
+        description:
+          "Help text under that row. Says projects follow this unless they set their own, and that the same people may hide a cell and split a line at quotation marks.",
+      },
+      "settings.sourceText.saveFailed": {
+        description: "Error shown when saving the organization's source-text floor fails.",
+      },
+      "settings.sourceText.blocked": {
+        description: "Error shown when someone below maintainer tries to change the organization's source-text floor.",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",

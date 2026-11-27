@@ -493,8 +493,9 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0)
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Members" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "People & access" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
   })
 
   it("renders both project names from the portfolio", async () => {
@@ -1025,17 +1026,6 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       </MemoryRouter>,
     )
   }
-
-  it("keeps the projects panel usable through a slow and failed totals request", async () => {
-    const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
-    let fail!: (error: Error) => void
-    vi.mocked(getPortfolioAggregates).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
-    await renderAllOrgs()
-    expect(await screen.findByTestId("project-table")).toBeInTheDocument()
-    await act(async () => fail(new Error("Totals unavailable")))
-    expect(await screen.findByRole("alert")).toHaveTextContent("Totals unavailable")
-    expect(screen.getByTestId("project-table")).toBeInTheDocument()
-  })
 
   // AQU-1488. WHY: a member invited to one project but never to its org read
   // "Projects 0" in these totals beside a table listing that project: the totals

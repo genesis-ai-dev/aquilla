@@ -109,6 +109,17 @@ describe("bulk upload engine", () => {
     expect(getBulkUploadState()).toMatchObject({ total: 1, done: 1, failed: [], finished: true })
   })
 
+  // Re-check S2: bulk upload never starts auto-even; the banner offers to
+  // even the track instead.
+  it("asks auto-even to stay out of every take it attaches", async () => {
+    await startBulkUpload(request([
+      { kind: "single", fileId: "f1", cellId: "GEN 1:1", files: [0] },
+      { kind: "range", fileId: "f1", cellIds: ["c1", "c2"], files: [1] },
+    ], [file("Genesis 1-1.wav"), file("Genesis 1-2-3.wav")]))
+    expect(attaches.length).toBeGreaterThan(1)
+    for (const a of attaches) expect(a.skipAutoEven).toBe(true)
+  })
+
   it("a range is one object, and a take of it on every line it covers, each with its own id", async () => {
     await startBulkUpload(request([{ kind: "range", fileId: "f1", cellIds: ["c1", "c2", "c3"], files: [0] }], [file("Genesis 1-1-3.wav")]))
     expect(uploads).toHaveLength(1)

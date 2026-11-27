@@ -8,6 +8,11 @@
 // validate arguments before dispatch.
 
 import { PROJECT_SETTINGS_KEYS } from '../../../db/shared/project-settings-keys'
+import {
+  CLIENT_ONLY_PROSE,
+  FILE_TYPE_OVERRIDE_HINT,
+  SERVER_PARSEABLE_PROSE,
+} from './import-parse-formats'
 
 /** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
  *  when to ask the user before a call: ChatGPT's "ask before changes" setting
@@ -1459,6 +1464,30 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'create_upload_url',
+    description:
+      'Get a signed, single-use URL for uploading a source or audio file too large for ' +
+      'upload_artifact (up to 64 MiB). PUT the raw file bytes to uploadUrl from a shell, ' +
+      'e.g. curl --data-binary @file, within 15 minutes; no Authorization header is ' +
+      'needed. The PUT response is { artifactId, sha256, sizeBytes, kind }, the same as ' +
+      'upload_artifact, for preview_import / prepare_import, prepare_link_media or ' +
+      'transcribe_audio. Creating the URL stores nothing. The same project scope, write ' +
+      'access, contributor permissions and upload rate limits apply, and are checked ' +
+      'again when the bytes arrive. Treat the URL as a secret: anyone holding it can ' +
+      'upload one file to this project as you until it expires.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        name: { type: 'string', description: 'Original filename, including its extension.' },
+        kind: { type: 'string', enum: ['source', 'audio'] },
+        contentType: { type: 'string', description: 'MIME type; audio requires a supported audio MIME type. Use application/octet-stream when unsure for a source file.' },
+      },
+      required: ['projectId', 'name', 'kind', 'contentType'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'upload_artifact',
     description:
       'Upload a source or audio artifact through MCP without replaying OAuth on REST. ' +
@@ -1467,8 +1496,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'does not import content, attach audio, or spend transcription credits. ' +
       'Returns artifactId for preview_import / prepare_import, prepare_link_media or ' +
       'transcribe_audio. Existing project scope, write access, contributor permissions ' +
-      'and upload rate limits apply. For larger files use Aquilla or a separately ' +
-      'authorized REST client; never replay an MCP OAuth token on REST.',
+      'and upload rate limits apply. For larger files, or any file you can reach from a ' +
+      'shell, use create_upload_url instead; never replay an MCP OAuth token on REST.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1493,10 +1522,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'MCP OAuth on REST. Preserving the original in storage also enables ' +
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
-      'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
-      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
-      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
+      `Server-parseable formats: ${SERVER_PARSEABLE_PROSE} (format is auto-detected; pass ` +
+      'fileType to override — required for po/properties/obs/sbv, which are not sniffable). ' +
+      `NOT server-parseable yet: ${CLIENT_ONLY_PROSE} — they return validation_failed ` +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +
@@ -1511,8 +1539,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         },
         fileType: {
           type: 'string',
-          description:
-            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+          description: FILE_TYPE_OVERRIDE_HINT,
         },
         fileName: { type: 'string', description: 'Name for the file to be created (default: the artifact name).' },
         sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },
@@ -1556,8 +1583,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         },
         fileType: {
           type: 'string',
-          description:
-            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+          description: FILE_TYPE_OVERRIDE_HINT,
         },
         fileName: { type: 'string', description: 'Name for the created file (default: the artifact name).' },
         sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },
@@ -1803,6 +1829,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   list_org_members: 'read',
   prepare_translations: 'stage',
   upload_artifact: 'upload',
+  create_upload_url: 'upload',
   preview_import: 'read',
   prepare_import: 'stage',
   export_file: 'read',

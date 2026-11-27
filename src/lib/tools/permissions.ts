@@ -105,6 +105,11 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "data.put": "write:data",
   "data.putMany": "write:data",
   "data.delete": "write:data",
+  // apiRev 8: native editor integration
+  "editor.activeCell": "read:cells",
+  "editor.reveal": "read:cells",
+  "editor.annotate": "read:cells",
+  "editor.clearAnnotations": "read:cells",
 }
 
 /** The event kind whose server role floor bounds each write scope. */

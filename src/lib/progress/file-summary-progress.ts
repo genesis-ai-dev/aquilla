@@ -48,6 +48,12 @@ export interface FileStats {
    */
   textTranslated?: number
   textValidated?: number
+  /**
+   * Untouched machine drafts in this file's lane. Absent means the rollup
+   * does not know — several target languages have no per-lane counter — and
+   * must not be read as zero.
+   */
+  aiDrafted?: number
 }
 
 /** Does this file have audio worth drawing? Undefined counts never do. */
@@ -94,6 +100,7 @@ export function fileSummariesToProgress(
       // merging objects could not tell from a deliberate one.
       ...(s.audioCount == null ? {} : { recorded: s.audioCount }),
       ...(s.audioValidatedCount == null ? {} : { audioValidated: s.audioValidatedCount }),
+      ...(typeof s.aiDraftedCount === "number" ? { aiDrafted: s.aiDraftedCount } : {}),
     })
   }
   return map
@@ -118,9 +125,17 @@ export function mergeFileProgress(
     // file's bar on open — the server snapshot is the only thing that knows
     // those figures until then.
     const previous = merged.get(fileId)
-    merged.set(fileId, stats.recorded == null && previous?.recorded != null
-      ? { ...stats, recorded: previous.recorded, audioValidated: previous.audioValidated }
-      : stats)
+    // The live entry is cells and an attachment map. It does not carry the
+    // draft counter, so a blanket overwrite would forget the snapshot's
+    // number the moment the file is opened. A live entry that does name one
+    // (the open book's own count) still wins.
+    const keptAudio = stats.recorded == null && previous?.recorded != null
+      ? { recorded: previous.recorded, audioValidated: previous.audioValidated }
+      : {}
+    const keptAi = stats.aiDrafted == null && previous?.aiDrafted != null
+      ? { aiDrafted: previous.aiDrafted }
+      : {}
+    merged.set(fileId, { ...stats, ...keptAudio, ...keptAi })
   }
   return merged
 }

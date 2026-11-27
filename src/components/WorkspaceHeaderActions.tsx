@@ -1,6 +1,5 @@
 import { Plus, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -21,7 +20,7 @@ interface WorkspaceHeaderActionsProps {
   importDisabledReason?: string | null
 }
 
-/** Header right-side actions: Import + ⋯ overflow grouped, Settings cog beside. */
+/** Header right-side actions: Import, the ⋯ menu, and Settings, each its own button. */
 export function WorkspaceHeaderActions({
   onImport,
   onSettings,
@@ -31,32 +30,30 @@ export function WorkspaceHeaderActions({
   const t = useT()
   return (
     <div className="flex items-center gap-1">
-      <ButtonGroup className="shadow-xs">
-        <AppTooltip content={importDisabledReason ?? undefined}>
-          <Button
-            type="button"
-            variant="outline"
-            size="default"
-            className="bg-card"
-            disabled={!!importDisabledReason}
-            onClick={onImport}
-            data-testid="workspace-import-button"
-          >
-            <Plus data-icon="inline-start" />
-            {t("nav.workspaceActions.import")}
-          </Button>
-        </AppTooltip>
-        {menuItems.length > 0 ? (
-          <OverflowMenu
-            items={menuItems}
-            triggerVariant="outline"
-            triggerSize="icon"
-            triggerClassName="bg-card"
-            ariaLabel="More"
-            testId="workspace-more-menu"
-          />
-        ) : null}
-      </ButtonGroup>
+      <AppTooltip content={importDisabledReason ?? undefined}>
+        <Button
+          type="button"
+          variant="outline"
+          size="default"
+          className="bg-card shadow-xs"
+          disabled={!!importDisabledReason}
+          onClick={onImport}
+          data-testid="workspace-import-button"
+        >
+          <Plus data-icon="inline-start" />
+          {t("nav.workspaceActions.import")}
+        </Button>
+      </AppTooltip>
+      {menuItems.length > 0 ? (
+        <OverflowMenu
+          items={menuItems}
+          triggerVariant="outline"
+          triggerSize="icon"
+          triggerClassName="bg-card shadow-xs"
+          ariaLabel={t("nav.workspaceActions.moreAria")}
+          testId="workspace-more-menu"
+        />
+      ) : null}
       {onSettings ? (
         <Button
           type="button"

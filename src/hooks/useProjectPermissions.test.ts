@@ -4,7 +4,7 @@ import type { ProjectRecord } from "@/lib/parsers/types";
 import { ROLE } from "@/lib/frontier/roles";
 
 // Helper: build a minimal ProjectRecord with a given syncRole level
-function withRole(level: number): ProjectRecord {
+function withRole(level: number, over: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: "proj-1",
     name: "Test Project",
@@ -14,6 +14,7 @@ function withRole(level: number): ProjectRecord {
     files: [],
     members: [],
     syncRole: { level, name: "test", source: "server", fetchedAt: new Date().toISOString() },
+    ...over,
   }
 }
 
@@ -134,23 +135,36 @@ describe("resolveEditorCapabilities — cloud projects (syncRole present)", () =
   });
 });
 
-describe("resolveEditorCapabilities — canEditSource (source.cell.commit gate)", () => {
-  // Source editing matches the sync-worker source.cell.commit role floor
-  // (PROJECT_LEAD, 500) and must be suppressed on live-linked downstreams,
-  // whose mirrored source lane is read-only (server-enforced).
-  function withLink(level: number, mode: "clone" | "live" | null): ProjectRecord {
-    return { ...withRole(level), sourceLinkMode: mode };
+describe("resolveEditorCapabilities — canEditSource (source text floor)", () => {
+  // AQU-2647: absent floor is Maintainer. A lane grant counts. Live-linked
+  // downstreams stay read-only whatever the floor.
+  function withLink(level: number, mode: "clone" | "live" | null, over: Partial<ProjectRecord> = {}): ProjectRecord {
+    return { ...withRole(level, over), sourceLinkMode: mode };
   }
 
-  it("project_lead (500) on a self-contained project can edit source", () => {
-    expect(resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD)).canEditSource).toBe(true);
-  });
-
-  it("owner (700) can edit source", () => {
+  it("defaults to Maintainer: a project lead cannot edit source, a maintainer and an owner can", () => {
+    expect(resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD)).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(withRole(ROLE.MAINTAINER)).canEditSource).toBe(true);
     expect(resolveEditorCapabilities(withRole(ROLE.OWNER)).canEditSource).toBe(true);
   });
 
-  it("contributor (400) cannot edit source — below the 500 floor", () => {
+  it("a project lead on one lane can edit at the Project Lead floor and cannot at Maintainer", () => {
+    const laneLead = { syncRole: { level: ROLE.VIEWER, name: "viewer", source: "server", fetchedAt: "t" }, laneGrantLevels: [ROLE.PROJECT_LEAD] };
+    expect(resolveEditorCapabilities(withRole(ROLE.VIEWER, { ...laneLead, sourceTextFloor: "project_lead" })).canEditSource).toBe(true);
+    expect(resolveEditorCapabilities(withRole(ROLE.VIEWER, laneLead)).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD, { sourceTextFloor: "project_lead" })).canEditSource).toBe(true);
+  });
+
+  it("a contributor on one lane can edit only at the Contributor floor", () => {
+    const laneContributor = { syncRole: { level: ROLE.VIEWER, name: "viewer", source: "server", fetchedAt: "t" }, laneGrantLevels: [ROLE.CONTRIBUTOR] };
+    expect(resolveEditorCapabilities(withRole(ROLE.VIEWER, { ...laneContributor, sourceTextFloor: "contributor" })).canEditSource).toBe(true);
+    expect(resolveEditorCapabilities(withRole(ROLE.VIEWER, { ...laneContributor, sourceTextFloor: "project_lead" })).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(withRole(ROLE.VIEWER, laneContributor)).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR, { sourceTextFloor: "contributor" })).canEditSource).toBe(true);
+    expect(resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR, { sourceTextFloor: "project_lead" })).canEditSource).toBe(false);
+  });
+
+  it("contributor (400) cannot edit source at the default floor", () => {
     expect(resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR)).canEditSource).toBe(false);
   });
 
@@ -158,12 +172,12 @@ describe("resolveEditorCapabilities — canEditSource (source.cell.commit gate)"
     expect(resolveEditorCapabilities(withRole(ROLE.REVIEWER)).canEditSource).toBe(false);
   });
 
-  it("project_lead on a CLONE-linked project can edit source (clone is independent)", () => {
-    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "clone")).canEditSource).toBe(true);
+  it("project_lead on a CLONE-linked project can edit source when the floor allows it", () => {
+    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "clone", { sourceTextFloor: "project_lead" })).canEditSource).toBe(true);
   });
 
   it("project_lead on a LIVE-linked downstream cannot edit source (mirrored lane is locked)", () => {
-    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "live")).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "live", { sourceTextFloor: "project_lead" })).canEditSource).toBe(false);
   });
 
   it("owner on a LIVE-linked downstream still cannot edit source", () => {
@@ -204,7 +218,7 @@ describe("resolveEditorCapabilities — DCS upstream lockdown (hasDcsUpstream)",
 
   it("cursor absent preserves prior behavior and carries no source lock reason", () => {
     for (const opts of [undefined, {}, { hasDcsUpstream: false }]) {
-      const caps = resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD), opts);
+      const caps = resolveEditorCapabilities(withRole(ROLE.MAINTAINER), opts);
       expect(caps.canEditSource).toBe(true);
       expect(caps.sourceReadOnlyReason).toBeNull();
     }
@@ -266,7 +280,7 @@ describe("resolveEditorCapabilities — archived lane (AQU-1463)", () => {
   })
 
   it("leaves source editing to the role, since archiving a target lane is not about source", () => {
-    const caps = resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD), {
+    const caps = resolveEditorCapabilities(withRole(ROLE.MAINTAINER), {
       archivedLaneLabel: "Spanish",
     })
     expect(caps.canEditSource).toBe(true)

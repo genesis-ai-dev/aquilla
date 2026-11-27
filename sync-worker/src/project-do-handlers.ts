@@ -1241,6 +1241,19 @@ export function stripAppliedRows(msg: ProjectDoServerMessage): ProjectDoServerMe
   return rest
 }
 
+/**
+ * [Pen test 2026-11-26] Whether a lane-walled socket may receive this frame.
+ * A `presence.draft` is a peer's uncommitted text in whatever lane they are
+ * editing, and the frame does not say which lane that is, so a walled socket
+ * gets none: it would otherwise read every lane's keystrokes on the file it
+ * has open. The caret position still arrives in `presence.diff`; only the
+ * live text is withheld. A lane-aware draft (sender's lane checked against
+ * the receiver's grants) can lift this later.
+ */
+export function deliverableToWalledSocket(msg: ProjectDoServerMessage): boolean {
+  return msg.t !== "presence.draft"
+}
+
 export function resolveTokenRefresh(
   conn: { numericUserId: number | null },
   claims: { userId: number; role: number | null; exp: number },

@@ -5,7 +5,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ExportDialog } from "./ExportDialog"
+import { exportDialogUnchangedWhileClosed } from "./closedDialogInputs"
+import { memoWhileClosed } from "./memoWhileClosed"
 import type { CellData } from "@/hooks/useCells"
+import { DEFAULT_EXPORT_MEMORY, writeExportMemory } from "@/lib/export/export-dialog-memory"
 
 vi.mock("@/lib/export/export-service", () => ({
   downloadBlob: vi.fn(),
@@ -107,11 +110,80 @@ describe("ExportDialog — format follows the active file", () => {
     })
   })
 
+  it("does not keep a remembered InDesign export selected on a Word file", async () => {
+    // The fold format is remembered per project. InDesign is in the catalog,
+    // so a previous IDML file used to leave it selected unseen on a .docx,
+    // and the footer Export button then read the Word package as an IDML archive.
+    localStorage.clear()
+    writeExportMemory("local", "p1", { ...DEFAULT_EXPORT_MEMORY, foldFormat: "idml" })
+    const props = {
+      ...TXT_FILE_PROPS,
+      activeFileId: "f-docx",
+      activeFileName: "Daily Doctrine_original_eng.docx",
+      activeFileType: "docx",
+      projectFiles: [
+        ...PROJECT_FILES,
+        { id: "f-docx", name: "Daily Doctrine_original_eng.docx", type: "docx" },
+      ],
+    }
+    const { rerender } = render(<ExportDialog {...props} open={false} />)
+    rerender(<ExportDialog {...props} open />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /Word \(.docx\)/i })).toBeChecked()
+    })
+    expect(screen.queryByRole("radio", { name: /InDesign/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/IDML archive is missing its root mimetype member/)).not.toBeInTheDocument()
+  })
+
   it("offers and preselects native PPTX round-trip for a PPTX file", () => {
     render(<ExportDialog {...PPTX_FILE_PROPS} />)
     expect(screen.getByRole("button", { name: /^Download slides\.pptx$/i })).toBeVisible()
     fireEvent.click(screen.getByText("Export to another format"))
     expect(screen.getByRole("radio", { name: /PowerPoint \(.pptx\)/i })).toBeChecked()
     expect(screen.queryByText("USFM")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2655: the workspace skips the closed dialog's renders
+// (`memoWhileClosed`). A file switch while closed must still reach the
+// format-reset effect while closed: deferred to the opening commit, it would
+// run after the restore-on-open effect and overwrite the remembered format.
+describe("ExportDialog — skipped while closed (AQU-2655)", () => {
+  const WhileOpen = memoWhileClosed(ExportDialog, undefined, exportDialogUnchangedWhileClosed)
+
+  it.each([
+    ["the dialog itself", ExportDialog],
+    ["the dialog skipped while closed", WhileOpen],
+  ] as const)("%s reopens on the remembered format after a file switch while closed", (_label, Dialog) => {
+    localStorage.clear()
+    const { rerender } = render(<Dialog {...TXT_FILE_PROPS} currentUsername="u1" />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    fireEvent.click(screen.getByText("Markdown"))
+
+    rerender(<Dialog {...TXT_FILE_PROPS} currentUsername="u1" open={false} />)
+    rerender(<Dialog {...PPTX_FILE_PROPS} currentUsername="u1" open={false} />)
+    rerender(<Dialog {...PPTX_FILE_PROPS} currentUsername="u1" open />)
+
+    fireEvent.click(screen.getByText("Export to another format"))
+    expect(screen.getByRole("radio", { name: /Markdown/i })).toBeChecked()
+  })
+
+  it("renders while closed only for the inputs its closed-state effects read", () => {
+    const base = { ...TXT_FILE_PROPS, open: false }
+    // Rebuilt every workspace render with the same content: not a change.
+    expect(exportDialogUnchangedWhileClosed(base, {
+      ...base,
+      onOpenChange: vi.fn(),
+      cells: [cell("c1")],
+      projectFiles: PROJECT_FILES.map((f) => ({ ...f })),
+    })).toBe(true)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, activeFileId: "f-pptx" })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, activeFileName: "renamed.txt" })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, projectFiles: PROJECT_FILES.slice(1) })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, targetLang: "fr" })).toBe(false)
+    // A codex file offers the Web page only when its lines carry verses.
+    const codex = { ...base, activeFileType: "codex", cells: [{ ...cell("c1"), group: "" } as CellData] }
+    expect(exportDialogUnchangedWhileClosed(codex, { ...codex, cells: [cell("c1")] })).toBe(false)
   })
 })

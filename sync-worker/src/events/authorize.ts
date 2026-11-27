@@ -9,11 +9,17 @@ import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { effectiveCellEditingFloorLevel } from './cell-removal-authority'
+import {
+  effectiveSourceTextFloorLevel,
+  isSourceTextEditKind,
+  sourceTextAuthorityForClaims,
+  sourceTextEditRefusal,
+} from './source-text-authority'
 import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { resolveImportFloor } from './import-authority'
-import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
+import { isGatedTrackPatch, resolveAllowTrackEditing, trackPatchRoleFloor } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
@@ -86,6 +92,12 @@ async function extensionWriteGate(
     return { ok: false, reason: 'extension data files can only be written by an extension' }
   }
   return { ok: true, dataFile: true }
+}
+
+/** The static role floor for one event: its kind's, except a `file.track.set`
+ *  that sets only a track's volume (AQU-2664, trackPatchRoleFloor). */
+function roleFloorFor(raw: { kind: EventKind; payload?: unknown }): number {
+  return raw.kind === 'file.track.set' ? trackPatchRoleFloor(raw.payload) : requiredRoleFor(raw.kind)
 }
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -446,7 +458,7 @@ export async function authorize<K extends EventKind>(
     const platformViewRefusal = refusePlatformView(tokenClaims)
     if (platformViewRefusal) return platformViewRefusal
 
-    if (tokenClaims.role < requiredRoleFor(raw.kind)) {
+    if (tokenClaims.role < roleFloorFor(raw)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
 
@@ -615,7 +627,7 @@ export async function authorize<K extends EventKind>(
   if (extensionGate && !extensionGate.ok) {
     return { ok: false, status: 403, reason: extensionGate.reason }
   }
-  const baseRequiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  const baseRequiredRole = assignmentAuthority?.minRole ?? roleFloorFor(raw)
   const requiredRole = extensionGate?.ok && extensionGate.dataFile && DATA_FILE_CELL_KINDS.has(raw.kind)
     ? ROLE.CONTRIBUTOR
     : baseRequiredRole
@@ -648,6 +660,16 @@ export async function authorize<K extends EventKind>(
       return { ok: false, status: 403, reason: decision.reason }
     }
     if (decision.action === 'allow') roleForGate = decision.effectiveRole
+  }
+
+  // AQU-2647: a Project Lead or Contributor on any language lane meets that
+  // rung even when their project role is lower. The static floor below is
+  // Contributor, the lowest the setting can admit; comparing it to the project
+  // role alone would refuse a lane lead whose project role is Viewer.
+  let sourceAuthority: number | null = null
+  if (isSourceTextEditKind(raw.kind)) {
+    sourceAuthority = await sourceTextAuthorityForClaims(db ?? null, raw.projectId, tokenClaims)
+    if (sourceAuthority > roleForGate) roleForGate = sourceAuthority
   }
 
   // Role gate: check that the token's role is sufficient for this event kind.
@@ -736,6 +758,19 @@ export async function authorize<K extends EventKind>(
     if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
+  }
+
+  // AQU-2647: the project's source-text floor, on top of the static
+  // Contributor floor. Default Maintainer. An extension's own data file is
+  // exempt — that commit is the extension's alignment, not the source text
+  // translators work from (see extensionWriteGate).
+  if (
+    sourceAuthority != null &&
+    !(extensionGate?.ok && extensionGate.dataFile && raw.kind === 'source.cell.commit')
+  ) {
+    const floor = await effectiveSourceTextFloorLevel(db ?? null, raw.projectId, settings)
+    const reason = sourceTextEditRefusal(sourceAuthority, floor, raw.kind)
+    if (reason) return { ok: false, status: 403, reason }
   }
 
   // AQU-2304: the org's configurable import floor raises `file.create` from

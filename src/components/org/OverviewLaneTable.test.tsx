@@ -7,6 +7,11 @@
 // lead, so a lane-limited lead never appeared ("—") however they were staffed.
 // Maintainers (600+) see every lane and are never lane-scoped, so they are
 // still not read.
+//
+// AQU-2322 follow-up — Give access writes a lane GRANT
+// (project_member_lane_roles) and no scope row, so a column that read scope
+// rows alone never listed the person it had just been used to add. The column
+// reads both, from the one scopes response that carries them.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -15,15 +20,31 @@ import { OverviewLaneTable } from "./OverviewLaneTable"
 import type { PortfolioLane } from "@/lib/frontier/portfolio"
 
 type Scope = { kind: "lane" | "file"; value: string }
+type Grant = { laneId: string; name: string; level: number }
 
-const { mockFetchMemberScopes } = vi.hoisted(() => ({
-  mockFetchMemberScopes: vi.fn(
+// The table reads the scope VIEW: a member's scope rows plus, for a project
+// lead and above, their lane grants. `mockFetchMemberScopes` stays the scope
+// half so the scope tests read as they did; `laneGrants` is the grant half.
+const { mockFetchMemberScopes, mockFetchMemberScopeView, laneGrants } = vi.hoisted(() => {
+  const mockFetchMemberScopes = vi.fn(
     async (_jwt: string, _projectId: string, _userId: number) => [] as Scope[] | null,
-  ),
-}))
+  )
+  const laneGrants = { byUser: {} as Record<number, Grant[]> }
+  const mockFetchMemberScopeView = vi.fn(async (jwt: string, projectId: string, userId: number) => {
+    const scopes = await mockFetchMemberScopes(jwt, projectId, userId)
+    if (scopes === null) return null
+    const grants = laneGrants.byUser[userId]
+    return {
+      scopes,
+      laneNames: {},
+      ...(grants ? { laneAccess: { memberRoleLevel: 400, readWallEnabled: true, grants, targetLanes: [] } } : {}),
+    }
+  })
+  return { mockFetchMemberScopes, mockFetchMemberScopeView, laneGrants }
+})
 
 vi.mock("@/lib/sync/member-scopes", () => ({
-  fetchMemberScopes: mockFetchMemberScopes,
+  fetchMemberScopeView: mockFetchMemberScopeView,
 }))
 
 const role = (level: number, name: string) => ({ level, name, source: "override" as const })
@@ -32,6 +53,7 @@ vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: vi.fn(() => ({
     members: [
       { userId: 10, username: "maria", role: role(400, "contributor"), secondarySources: [] },
+      { userId: 11, username: "bo", role: role(400, "contributor"), secondarySources: [] },
       { userId: 12, username: "wendi", role: role(500, "project_lead"), secondarySources: [] },
       { userId: 13, username: "jade", role: role(600, "maintainer"), secondarySources: [] },
     ],
@@ -42,8 +64,41 @@ vi.mock("@/hooks/useProjectMembers", () => ({
   })),
 }))
 
-// The row's popovers and dialogs have their own suites; the column is the unit here.
-vi.mock("@/components/StaffLanePopover", () => ({ StaffLanePopover: () => null }))
+// The row's popovers and dialogs have their own suites; the column is the unit
+// here. The stand-ins keep only the hand-offs the table wires between them:
+// an open Staff popover can ask for Give access on its lane, or for a lane
+// grant's removal (AQU-2324), and each dialog can report what it wrote.
+vi.mock("@/components/StaffLanePopover", () => ({
+  StaffLanePopover: ({ open, laneId, onGiveAccess, onRemoveGrant }: {
+    open?: boolean
+    laneId?: string | null
+    onGiveAccess?: (request: { userId: string; place: { type: "lane"; id: string }; nonce: number }) => void
+    onRemoveGrant?: (request: { orgId: number; person: { userId: string; displayName: string }; grants: { type: "lane"; id: string }[] }) => void
+  }) =>
+    open ? (
+      <>
+        <button
+          type="button"
+          data-testid={`staff-add-${laneId}`}
+          onClick={() => onGiveAccess?.({ userId: "11", place: { type: "lane", id: laneId ?? "" }, nonce: 1 })}
+        />
+        <button
+          type="button"
+          data-testid={`staff-remove-${laneId}`}
+          onClick={() => onRemoveGrant?.({ orgId: 1, person: { userId: "11", displayName: "bo" }, grants: [{ type: "lane", id: laneId ?? "" }] })}
+        />
+      </>
+    ) : null,
+}))
+vi.mock("@/components/org/access/GiveAccessLauncher", () => ({
+  GiveAccessLauncher: ({ request, onGranted }: { request: { place?: { id: string } } | null; onGranted?: () => void }) =>
+    request ? <button type="button" data-testid={`give-${request.place?.id}`} onClick={() => onGranted?.()} /> : null,
+}))
+vi.mock("@/components/org/access/RemoveAccessDialog", () => ({
+  RemoveAccessDialog: ({ grants, onRemoved }: { grants: { id: string }[]; onRemoved?: () => void }) => (
+    <button type="button" data-testid={`removed-${grants[0]?.id}`} onClick={() => onRemoved?.()} />
+  ),
+}))
 vi.mock("@/components/AssignModal", () => ({ AssignModal: () => null }))
 
 function lane(tag: string, laneId: string): PortfolioLane {
@@ -87,6 +142,8 @@ function peopleIn(tag: string): string[] {
 }
 
 beforeEach(() => {
+  laneGrants.byUser = {}
+  mockFetchMemberScopeView.mockClear()
   mockFetchMemberScopes.mockReset()
   // Stored as lane ids, the way the Staff popover writes them (AQU-1607).
   mockFetchMemberScopes.mockImplementation(async (_jwt, _projectId, userId) => {
@@ -110,6 +167,55 @@ describe("OverviewLaneTable People column", () => {
     await waitFor(() => expect(mockFetchMemberScopes).toHaveBeenCalledWith("jwt-owner", "proj-1", 12))
     expect(mockFetchMemberScopes).toHaveBeenCalledWith("jwt-owner", "proj-1", 10)
     expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("jwt-owner", "proj-1", 13)
+  })
+
+  it("lists someone who holds a lane grant and no scope row, on that lane only", async () => {
+    laneGrants.byUser = { 11: [{ laneId: "ln-sv", name: "Swedish", level: 400 }] }
+    renderTable()
+
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10", "11"]))
+    expect(peopleIn("French")).toEqual(["12"])
+  })
+
+  it("lists someone once when a scope row and a grant name the same lane", async () => {
+    // What the Staff popover's own writes leave: the scope row, and the grant
+    // the scopes PUT syncs from it.
+    laneGrants.byUser = { 10: [{ laneId: "ln-sv", name: "Swedish", level: 400 }] }
+    renderTable()
+
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10"]))
+  })
+
+  it("adds the person to the lane's row once Give access has granted it, without a reload", async () => {
+    renderTable()
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10"]))
+
+    // Staff… on the Swedish row → its Add → Give access → Give. The grant
+    // lands server-side as a lane-role row; the next read carries it.
+    fireEvent.click(screen.getByTestId("overview-lane-people-Swedish"))
+    fireEvent.click(screen.getByTestId("staff-add-ln-sv"))
+    laneGrants.byUser = { 11: [{ laneId: "ln-sv", name: "Swedish", level: 400 }] }
+    fireEvent.click(screen.getByTestId("give-ln-sv"))
+
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10", "11"]))
+    expect(peopleIn("French")).toEqual(["12"])
+  })
+
+  // AQU-2324: the table holds the grant's removal dialog (the popover is
+  // remounted as it closes), so the table is what re-reads after it.
+  it("drops the person from the lane's row once their lane grant is removed, without a reload", async () => {
+    laneGrants.byUser = { 11: [{ laneId: "ln-sv", name: "Swedish", level: 400 }] }
+    renderTable()
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10", "11"]))
+
+    // Staff… on the Swedish row → bo's Remove → the grant's dry run → Remove.
+    fireEvent.click(screen.getByTestId("overview-lane-people-Swedish"))
+    fireEvent.click(screen.getByTestId("staff-remove-ln-sv"))
+    laneGrants.byUser = {}
+    fireEvent.click(screen.getByTestId("removed-ln-sv"))
+
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10"]))
+    expect(peopleIn("French")).toEqual(["12"])
   })
 })
 

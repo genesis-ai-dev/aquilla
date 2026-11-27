@@ -4,9 +4,10 @@
 // session/org must not leave stale data on screen.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, act } from "@testing-library/react"
+import { render, renderHook, screen, act } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgAccessPage } from "./OrgAccessPage"
+import { useOrgAccess } from "@/hooks/useOrgAccess"
 import type { OrgAccessPayload } from "@/components/org/access/org-access-data"
 
 vi.mock("@/components/org/OrgSidebar", () => ({ OrgSidebar: () => null }))
@@ -15,14 +16,17 @@ vi.mock("@/components/org/OrgBreadcrumb", () => ({ OrgBreadcrumb: () => null }))
 // single stale commit (invisible to post-act DOM assertions) is still caught.
 let currentOrg: number | null = null
 const renders: string[] = []
-vi.mock("@/components/org/access/PlacesLens", () => ({
-  PlacesLens: ({ tree }: { tree: OrgAccessPayload["tree"] }) => {
+vi.mock("@/components/org/access/AccessFolderTree", () => ({
+  AccessFolderTree: ({ tree }: { tree: OrgAccessPayload["tree"] }) => {
     const names = tree.map((n) => n.scope.name).join(",")
     renders.push(`${names}@${currentOrg}`)
     return <div>{names}</div>
   },
 }))
-vi.mock("@/components/org/access/AccessPeopleView", () => ({ AccessPeopleView: () => null }))
+vi.mock("@/components/org/access/PeopleLens", () => ({
+  PeopleLens: () => null,
+  PeoplePrintReport: () => null,
+}))
 
 let jwt: string | null = "jwt"
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -86,5 +90,20 @@ describe("OrgAccessPage org switch", () => {
     rerender(page())
     expect(screen.queryByText("Alpha Org")).toBeNull()
     expect((exportButton() as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("AQU-2320: reload after a grant re-reads in place — the current rows stay until the new ones land", async () => {
+    setOrg(1)
+    const { result } = renderHook(() => useOrgAccess())
+    await act(async () => pending.get(1)?.(payload(1, "Before grant")))
+    const ready = result.current
+    if (ready.status !== "ready") throw new Error("not loaded")
+    pending.clear()
+    act(() => ready.reload())
+    // A second read is in flight, and the lens is not blanked to a loader meanwhile.
+    expect(pending.has(1)).toBe(true)
+    expect(result.current.status === "ready" && result.current.data.tree[0].scope.name).toBe("Before grant")
+    await act(async () => pending.get(1)?.(payload(1, "After grant")))
+    expect(result.current.status === "ready" && result.current.data.tree[0].scope.name).toBe("After grant")
   })
 })

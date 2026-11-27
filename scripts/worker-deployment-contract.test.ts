@@ -767,7 +767,7 @@ describe("worker deployment environment contract", () => {
     expect(workersBuild).toContain("normalizedBranch === \"main\" ? \"production\" : \"development\"")
     expect(workersBuild).toContain("promote: false")
     expect(workersBuildScript).not.toContain("api.aquilla.app")
-    expect(workersBuildScript).toContain("pnpm exec tsc -b")
+    expect(workersBuildScript).toContain("pnpm run typecheck")
     expect(readRepoFile("scripts", "cloudflare-stack-preview.mjs")).toContain('verify(join(cwd, "dist"))')
   })
 
@@ -778,8 +778,8 @@ describe("worker deployment environment contract", () => {
     const build = readRepoFile("scripts", "ci-build.sh")
     expect(rootPackage.scripts["build:workers-build"])
       .toBe("bash scripts/ci-build.sh")
-    expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
-    expect(build).toContain("pnpm exec tsc -b")
+    expect(rootPackage.scripts["build:compile"]).toBe("pnpm run typecheck && vite build")
+    expect(build).toContain("pnpm run typecheck")
     // esbuild bundles the Workers without type-checking them.
     expect(build).toContain("pnpm --dir auth-worker run type-check")
     expect(build).toContain("pnpm --dir sync-worker run type-check")
@@ -789,6 +789,42 @@ describe("worker deployment environment contract", () => {
     expect(hook).toContain("pnpm run scan:secrets")
     expect(hook).toContain("pnpm run test:e2e:affected")
     expect(hook).not.toMatch(/pnpm (?:test$|run check:push|run test:e2e:smoke)/m)
+  })
+
+  it("type-checks every build with an explicit heap the build machines can back", () => {
+    // The app project needs about 4.8 GB of heap when GC is not squeezed, and
+    // Node's default ceiling is about 4 GB at best, so a bare `tsc -b` passes
+    // only while the collector keeps up: on 2026-11-26 one 175 MB JSON import
+    // ended it with "JavaScript heap out of memory". A red type-check fails the
+    // Cloudflare preview of every PR, the dev deploy and release-verify alike,
+    // so all of them go through the one script that sets the ceiling.
+    const { scripts } = JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>
+    }
+    const heap = /^node --max-old-space-size=(\d+) node_modules\/typescript\/bin\/tsc -b$/
+      .exec(scripts.typecheck)
+    expect(heap, "typecheck must run tsc -b under an explicit heap").not.toBeNull()
+    const heapMb = Number(heap![1])
+    // Above the 4.8 GB the app project uses today, and at least 1 GiB under the
+    // smallest machines that run it: the 7 GB macOS runners (tauri-*.yml) and
+    // the 8 GB Workers Builds container.
+    expect(heapMb).toBeGreaterThanOrEqual(5120)
+    expect(heapMb).toBeLessThanOrEqual(6144)
+    const bare = Object.entries(scripts)
+      .filter(([name, command]) => name !== "typecheck" && /\btsc -b\b/.test(command))
+      .map(([name]) => name)
+    expect(bare, "use `pnpm run typecheck` instead of a bare `tsc -b`").toEqual([])
+    for (const name of ["build", "build:compile", "build:codex", "build:honeycomb", "build:context"]) {
+      expect(scripts[name], name).toContain("pnpm run typecheck && ")
+    }
+    const ci = readRepoFile(".github", "workflows", "ci.yml")
+    expect(ci, "ci.yml").toContain("run: pnpm run typecheck --noEmit")
+    expect(ci, "ci.yml").not.toMatch(/run: npx tsc -b/)
+    // release-verify is the build since 2026-11-27, and the `build` script
+    // (checked above) type-checks through `pnpm run typecheck`.
+    const verify = readRepoFile(".github", "workflows", "release-verify.yml")
+    expect(verify, "release-verify.yml").toContain("run: pnpm run build")
+    expect(verify, "release-verify.yml").not.toMatch(/run: npx tsc -b/)
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

@@ -40,6 +40,7 @@ import {
   BINARY_PARSE_FILE_TYPES,
   CLIENT_ONLY_FORMATS,
   CLIENT_ONLY_HINT,
+  FILE_TYPE_ALIASES,
   SERVER_PARSEABLE_FILE_TYPES,
   type ServerParseFileType,
 } from './import-parse-formats'
@@ -49,21 +50,15 @@ import type { ParsedTextFileResult, TranslatableString } from '../../../src/lib/
 import { loadProjectSettings } from '../../../db/shared/projects'
 import type { UsfmNoteRecord } from '../lib/usfm-notes'
 
+/** Largest artifact parseArtifactToCells will read (the pre-64 MiB upload cap). */
+export const MAX_PARSE_BYTES = 25 * 1024 * 1024
+
 export {
   BINARY_PARSE_FILE_TYPES,
   CLIENT_ONLY_FORMATS,
   CLIENT_ONLY_HINT,
   SERVER_PARSEABLE_FILE_TYPES,
   type ServerParseFileType,
-}
-
-/** Caller-supplied fileType spellings → canonical parse types. */
-const FILE_TYPE_ALIASES: Record<string, ServerParseFileType> = {
-  sfm: 'usfm',
-  markdown: 'md',
-  plaintext: 'txt',
-  text: 'txt',
-  word: 'docx',
 }
 
 /** /inspect's detectedFormat values → canonical parse types. Formats absent
@@ -352,8 +347,20 @@ export async function parseArtifactToCells(
     }
   }
 
-  // Full read (unlike /inspect's 64KB range) — the parsers need the whole text.
-  // Bounded by the 25MB upload cap, which the worker already buffers on upload.
+  // Full read (unlike /inspect's 64KB range) — the parsers need the whole text,
+  // and hold the bytes, the decoded string and the parse result at once. Storing
+  // allows MAX_ARTIFACT_BYTES (64 MiB), which would not fit the 128 MB isolate
+  // here, so parsing keeps the old 25 MB cap and refuses before reading.
+  if (Number(row.size_bytes) > MAX_PARSE_BYTES) {
+    return {
+      ok: false,
+      response: errorResponse(
+        'validation_failed',
+        `artifact ${artifactId} is too large to parse; files over ${MAX_PARSE_BYTES} bytes can be stored but not parsed into cells`,
+        { sizeBytes: Number(row.size_bytes), maxBytes: MAX_PARSE_BYTES },
+      ),
+    }
+  }
   const obj = await env.SNAPSHOTS.get(row.r2_key)
   if (!obj) {
     return { ok: false, response: errorResponse('not_found', 'artifact bytes missing from storage') }

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 import { Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -201,10 +201,6 @@ export function BuiltinCheckRow({
 }: BuiltinCheckRowProps) {
   const t = useT()
   if (rule.check.type !== "builtin") return null
-  const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
-    { value: "major", label: t("rules.severity.major") },
-    { value: "minor", label: t("rules.severity.minor") },
-  ]
   const checkId = rule.check.checkId
   const name = translateRuleName(rule, t)
   const description = translateRuleDescription(rule, t)
@@ -258,13 +254,56 @@ export function BuiltinCheckRow({
           </Button>
         </AppTooltip>
       )}
+      <BuiltinCheckControls
+        checkId={checkId}
+        name={name}
+        severity={rule.severity}
+        enabled={rule.enabled}
+        canManage={canManage}
+        onSetOverride={onSetOverride}
+      />
+    </li>
+  )
+}
+
+/**
+ * A row's severity Select and on/off Switch — most of what a row renders.
+ *
+ * AQU-2655: memoized on primitives. The list re-renders each time the violation
+ * counts fill in (the scan is sliced across frames) and each time the page's
+ * data lands, and the rule objects are rebuilt each time; the controls change
+ * only when this check's own severity, state or permission does. Callers keep
+ * `onSetOverride` stable for this to hold.
+ */
+const BuiltinCheckControls = memo(function BuiltinCheckControls({
+  checkId,
+  name,
+  severity,
+  enabled,
+  canManage,
+  onSetOverride,
+}: {
+  checkId: BuiltinCheckId
+  name: string
+  severity: TranslationRule["severity"]
+  enabled: boolean
+  canManage: boolean
+  onSetOverride: Props["onSetOverride"]
+}) {
+  const t = useT()
+  const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
+    { value: "major", label: t("rules.severity.major") },
+    { value: "minor", label: t("rules.severity.minor") },
+  ]
+  return (
+    <>
       <Select
         items={SEVERITY_OPTIONS}
-        value={rule.severity}
+        value={severity}
         disabled={!canManage}
         onValueChange={(v) => onSetOverride(checkId, {
-          enabled: rule.enabled,
-          severity: (v ?? rule.severity) as "major" | "minor",
+          enabled,
+          severity: (v ?? severity) as "major" | "minor",
         })}
       >
         {/* Greyed out, so the stand-in AppTooltip draws takes the click and
@@ -291,14 +330,14 @@ export function BuiltinCheckRow({
       </Select>
       <Switch
         size="sm"
-        checked={rule.enabled}
+        checked={enabled}
         disabled={!canManage}
         aria-label={t("rules.builtinChecks.enabledSwitchAriaLabel", { name })}
         onCheckedChange={(checked) => onSetOverride(checkId, {
           enabled: checked,
-          severity: rule.severity,
+          severity,
         })}
       />
-    </li>
+    </>
   )
-}
+})

@@ -28,10 +28,13 @@ export { classifyFiles }
 // What a walk has to say for a PR to ride the line (WALK_POLICY, a repository
 // variable release-cut.yml passes through):
 //
-//   fail-only (default, 2026-11-19)  only a walk that tried and could not
-//       prove the claim holds: FAIL, FLAKY, BLOCKED (all read as `fail`).
-//       A PR nobody walked (`unknown`) and a PASS at test level only
-//       (`partial`) ship.
+//   advisory (default, 2026-11-27)  no walk verdict holds. The walk stays
+//       a comment on the PR and the `qa-walk` status; a person who reads a
+//       FAIL fixes forward.
+//   fail-only (default 2026-11-19 to 2026-11-27)  only a walk that tried
+//       and could not prove the claim holds: FAIL, FLAKY, BLOCKED (all read
+//       as `fail`). A PR nobody walked (`unknown`) and a PASS at test level
+//       only (`partial`) ship.
 //   strict    the rule until 2026-11-19: anything but PASS or `none` holds.
 //
 // Why the default moved. "Nobody saw it in a browser" is not one of the
@@ -45,8 +48,16 @@ export { classifyFiles }
 // unwalked PR now is the release slice's own full suite and smart Jev, and
 // the rollback watch after the deploy (release-rollback.mjs). `strict` is
 // the switch back, with no code change.
-export const WALK_POLICIES = ["fail-only", "strict"]
-export const DEFAULT_WALK_POLICY = "fail-only"
+//
+// Why it moved again (2026-11-27 audit of the PRs merged since 2026-10-01).
+// 68 PRs got a FAIL walk: 17 were fixed and walked again to PASS, and 51
+// merged with no later PASS. 74 PRs got BLOCKED and 18 FLAKY, which
+// AGENTS.md calls checker bugs, and all three read as `fail` here. So the
+// fail-only hold still measured the walker more often than the change, and
+// a failed walk is not one of the outcomes that cannot be fixed forward.
+// `fail-only` and `strict` are the switches back.
+export const WALK_POLICIES = ["advisory", "fail-only", "strict"]
+export const DEFAULT_WALK_POLICY = "advisory"
 
 export function walkPolicy(env = process.env) {
   return WALK_POLICIES.includes(env.WALK_POLICY) ? env.WALK_POLICY : DEFAULT_WALK_POLICY
@@ -54,6 +65,7 @@ export function walkPolicy(env = process.env) {
 
 /** Whether this walk verdict keeps a PR off the line under `policy`. */
 export function walkHolds(walk, policy = DEFAULT_WALK_POLICY) {
+  if (policy === "advisory") return false
   if (walk === "PASS" || walk === "none") return false
   return policy === "strict" ? true : walk !== "unknown" && walk !== "partial"
 }
@@ -118,7 +130,10 @@ export function isDocsOrTestOnly(files) {
 //
 // en.ts (the English source barrel), index.ts and all.ts (the registries a
 // new locale edits) are code, not catalogs, and so are the tests beside them.
-const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
+//
+// The import also prunes translation-baseline.json (AQU-2740: the keys each
+// locale may still show in English), so that file is part of the same push.
+const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|translation-baseline\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
 
 export function isLocaleCatalogOnly(files) {
   return files.length > 0 && files.every((file) => LOCALE_CATALOG_FILE.test(file))

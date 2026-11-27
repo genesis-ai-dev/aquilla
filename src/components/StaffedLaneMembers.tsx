@@ -20,6 +20,10 @@
 // naming how many assignments will close, and only a confirm saves anything.
 // A lane with no open assignments is still one press.
 //
+// AQU-2324: the list reads lane grants too, so someone given this lane through
+// People & access (a grant row, no scope row) is listed instead of silently
+// missing. Their Remove is that grant's removal dry run — see `via` below.
+//
 // Presentational on purpose: the popover owns the scope reads, the assignment
 // reads, the unassign events and the PUT, so this file stays about rendering
 // one list, its one guard, and that confirmation.
@@ -41,6 +45,16 @@ export interface StaffedLanePerson {
    * their only one, which is what the guard refuses — see the file header.
    */
   laneCount: number
+  /**
+   * AQU-2324: how they are on this lane. `scope` — a project_member_scopes row
+   * (Remove rewrites their scopes, under the last-lane guard). `grant` — only
+   * a lane grant (Give access writes these); Remove opens the removal dry run
+   * for that one grant, and the last-lane guard does not apply: dropping a
+   * grant narrows access, it never widens it.
+   */
+  via: "scope" | "grant"
+  /** The lane id the grant row holds, for `via: "grant"`. */
+  grantLaneId?: string
 }
 
 export interface StaffedLaneMembersProps {
@@ -68,6 +82,8 @@ export interface StaffedLaneMembersProps {
   onCancelRemove: () => void
   /** Closes the popover when the guard's settings link navigates away. */
   onNavigate?: () => void
+  /** AQU-2324: a grant-only row can be removed (needs the org, for its route). */
+  grantRemovable?: boolean
 }
 
 export function StaffedLaneMembers({
@@ -82,6 +98,7 @@ export function StaffedLaneMembers({
   onConfirmRemove,
   onCancelRemove,
   onNavigate,
+  grantRemovable = false,
 }: StaffedLaneMembersProps) {
   const { t } = useI18n()
   const location = useLocation()
@@ -106,7 +123,8 @@ export function StaffedLaneMembers({
       ) : (
         <ul className="max-h-40 divide-y overflow-y-auto rounded border">
           {people.map((person) => {
-            const lastLane = person.laneCount <= 1
+            const viaGrant = person.via === "grant"
+            const lastLane = !viaGrant && person.laneCount <= 1
             const busy = busyUserId === person.userId
             const confirming = pending?.userId === person.userId
             return (
@@ -139,7 +157,8 @@ export function StaffedLaneMembers({
                       name: person.username,
                       lane: laneLabel,
                     })}
-                    disabled={lastLane || busy || confirming}
+                    data-via={person.via}
+                    disabled={lastLane || busy || confirming || (viaGrant && !grantRemovable)}
                     onClick={() => onRemove(person)}
                   >
                     {busy && <Spinner className="me-1 size-3" />}

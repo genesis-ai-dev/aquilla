@@ -138,12 +138,6 @@ export const OrgSidebar = memo(function OrgSidebar() {
             {t("editor.navTitle.overview")}
           </OrgNavLink>
         )}
-        {isMemberOrg && activeOrgId != null && (
-          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>
-            <NavIcon icon={NAV_PAGE_ICONS.teams} />
-            {t("editor.navTitle.teams")}
-          </OrgNavLink>
-        )}
         {/* AQU-2458: "Assigned to me" lists only the caller's OWN open
             assignments, so unlike the member-scoped nav above it is not a
             window into an org the caller cannot operate on — it is the only
@@ -170,22 +164,19 @@ export const OrgSidebar = memo(function OrgSidebar() {
         {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
         )}
-        {showMembersNav && activeOrgId != null && (
-          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>
-            <NavIcon icon={NAV_PAGE_ICONS.members} />
-            {t("editor.navTitle.members")}
-          </OrgNavLink>
-        )}
-        {/* AQU-1352 §3.6: same roster gate as Members (and GET /users/:id/access). */}
+        {/* AQU-1352 §3.6: the one page for people, folders and access; the org's roster gate. */}
         {showMembersNav && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/access")} className={link}>
             <NavIcon icon={KeyRound} />
             {t("org.access.page.title")}
           </OrgNavLink>
         )}
-        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner. */}
-        {activeOrgId != null && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
-          <OrgNavLink to={orgPath(activeOrgId, "/access-audit")} className={link}>
+        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner.
+            AQU-2324: the audit is the People lens now, so this entry only shows
+            when People & access above does not (a roster floor raised above
+            this admin) — one door, never two to the same page. */}
+        {activeOrgId != null && !showMembersNav && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access?lens=people")} className={link}>
             <NavIcon icon={ScrollText} />
             {t("org.accessAudit.title")}
           </OrgNavLink>

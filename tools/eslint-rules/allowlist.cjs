@@ -92,6 +92,34 @@ const TRANSLATABLE_ATTRS = new Set([
   'content', // <AppTooltip content="…">
 ])
 
+// AQU-2740: the list above names attributes, but components pass copy through
+// props of their own (`<NavRow hint="Roles & invites">`, `<DataTable
+// searchPlaceholder="Search…">`), and a list of names cannot keep up. A prop
+// whose name ends in one of these words carries copy by the codebase's own
+// naming convention, so it gets the same check as the listed attributes.
+const TRANSLATABLE_ATTR_NAME =
+  /^(?:hint|[a-z][A-Za-z0-9]*(?:Label|Placeholder|Title|Text|Hint|Description|Message|Tooltip|Caption|Heading|Subtitle))$/
+
+function isTranslatableAttr(name) {
+  return TRANSLATABLE_ATTRS.has(name) || TRANSLATABLE_ATTR_NAME.test(name)
+}
+
+// Props that never carry copy, whatever their value looks like: identifiers,
+// routing, styling, form plumbing, test hooks, handlers, and the aria-*
+// attributes that hold ids (the ones that hold text are listed above).
+const NON_COPY_ATTR =
+  /^(?:className|class|id|key|ref|href|to|src|srcSet|type|name|value|defaultValue|role|style|testId|htmlFor|form|method|action|target|rel|lang|dir|mode|variant|size|as|accept|autoComplete|inputMode|pattern|fontFamily|data-[\w-]+|aria-[\w-]+|on[A-Z]\w*)$/
+
+// Any other prop is checked only for copy that reads as a phrase: a capitalized
+// word followed by more words ("Assigned to me", "Plan & AI usage"). Enum
+// values, ids and class lists do not have that shape, so the check stays quiet
+// on them.
+const PROSE = /^(?:\p{Lu}\p{Ll}+(?:['’]\p{Ll}+)?|[AI])(?:\s+[\p{L}\p{N}&'’…,.:;!?()/-]+)+$/u
+
+function looksLikeProse(raw) {
+  return PROSE.test(raw.trim())
+}
+
 // Callees whose first string argument is shown to the user as a notification.
 // Deliberately narrow: `new Error(...)` is excluded because in this codebase
 // most Error messages are developer-facing and never rendered verbatim.
@@ -139,7 +167,10 @@ function isAllowedString(raw) {
 module.exports = {
   ATOMIC_TERMS,
   IGNORED_FILE_PATTERNS,
+  NON_COPY_ATTR,
   TRANSLATABLE_ATTRS,
+  isTranslatableAttr,
+  looksLikeProse,
   USER_FACING_CALLS,
   isIgnoredFile,
   isAllowedString,

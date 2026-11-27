@@ -264,10 +264,10 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects',
         // Omnilingual ASR spec §7.
         'transcribe_audio', 'transcription_status',
-        'upload_artifact', 'wait_for_changeset',
+        'upload_artifact', 'create_upload_url', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(40)
+    expect(body.result.tools).toHaveLength(41)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -850,6 +850,40 @@ describe('MCP tools/call — settings + command discovery', () => {
     // Field-scoped like patch_settings: the sibling key is untouched.
     expect(stored.systemPrompt).toBe('keep')
     vi.unstubAllGlobals()
+  })
+
+  it('an OAuth connection can confirm the brief it staged through its own declared tool', async () => {
+    // prepare_set_brief is on the OAuth tool list, but the OAuth confirm gate
+    // kept a separate list of reviewed kinds that never gained SetBrief — so a
+    // claude.ai or ChatGPT connection could stage a brief and then be told the
+    // changeset "contains an operation unavailable on this connection".
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const { env } = envWithRenderer('Plain-register translation for rural youth.')
+    const token = await credToken(tdb)
+    await tdb.pg.query(
+      'UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2',
+      ['https://w/api/v1/external/mcp', CRED_1],
+    )
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 66, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { audience: 'Rural youth, 15-25' } },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 67, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    const committed = toolPayload(((await commitRes.json()) as any).result)
+    expect(committed.isError, JSON.stringify(committed.payload)).toBe(false)
+    expect((await storedSettings())[BRIEF_KEY].parameters.audience).toBe('Rural youth, 15-25')
   })
 
   it('prepare_set_brief pins the live settings version when ifMatchVersion is omitted, and honours one that is passed', async () => {
@@ -1442,6 +1476,18 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     }
   }
 
+  // AQU-2647: these tests are about marshalling and OAuth binding, as a
+  // project lead on a floor that still admits one. The product default is
+  // Maintainer, covered in source-text-floor.test.ts.
+  async function asProjectLeadWhoMayEditSource() {
+    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await tdb.pg.query(
+      `INSERT INTO project_settings (project_id, settings, version, updated_at)
+       VALUES ($1, $2, 1, CURRENT_TIMESTAMP)`,
+      [PROJECT, JSON.stringify({ sourceTextFloor: 'project_lead' })],
+    )
+  }
+
   it('lists individual operations and refuses undeclared or generic commands', async () => {
     const token = await oauthToken()
     const list = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
@@ -1456,6 +1502,17 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     })
     expect(toolPayload(injected.result!).payload).toMatchObject({ error: { code: 'validation_failed' } })
     expect(await tdb.rows('changesets')).toEqual([])
+  })
+
+  it('tells an OAuth connection which file formats the server imports', async () => {
+    // An agent on this connection told a user Aquilla cannot import .docx:
+    // capabilities carried no format list, so it read a stale tool hint.
+    const token = await oauthToken()
+    const caps = toolPayload((await invoke(token, 'get_capabilities', {})).result!).payload as {
+      importing: { serverParseableFormats: string[]; clientOnlyFormats: string[] }
+    }
+    expect(caps.importing.serverParseableFormats).toContain('docx')
+    expect(caps.importing.clientOnlyFormats).toContain('pptx')
   })
 
   it('stages translations, commits through events, and reads actual saved content', async () => {
@@ -1486,7 +1543,7 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
 
   it('marshals a fixed operation through the real command validator', async () => {
     const token = await oauthToken()
-    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await asProjectLeadWhoMayEditSource()
     const staged = await invoke(token, 'prepare_hide_cells', {
       projectId: PROJECT, updates: [{ fileId: FILE, cellId: 'cell-1' }],
     })
@@ -1524,7 +1581,7 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
 
   it('refuses a stored legacy operation after the credential becomes OAuth-bound', async () => {
     const token = await credToken(tdb)
-    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await asProjectLeadWhoMayEditSource()
     const response = await invoke(token, 'prepare_translations', {
       projectId: PROJECT,
       commands: [{ kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'Changed source' }],

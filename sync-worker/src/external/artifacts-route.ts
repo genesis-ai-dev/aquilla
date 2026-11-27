@@ -32,9 +32,12 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { attachmentDisposition } from '../events/content-disposition'
 import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
-/** Max artifact size — 25 MB. Published in get_capabilities (operational
- *  contract §4); surfaced in the oversize error so an agent can self-correct. */
-export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
+/** Max artifact size — 64 MiB. Published in get_capabilities (operational
+ *  contract §4); surfaced in the oversize error so an agent can self-correct.
+ *  Raised from 25 MB for whole-corpus sources (37–41 MB lexicon files). The
+ *  upload is buffered in Worker memory (128 MB isolate), so this stays well
+ *  under that rather than at the 100 MB request-body ceiling. */
+export const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 /** Artifact kinds. `source` (default) preserves a verbatim import original;
  *  `audio` is an uploaded clip a LinkMedia changeset attaches to a cell. The
@@ -89,7 +92,21 @@ export async function authArtifact(
 
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
+  return authorizeArtifactCredential(env, cred, projectId, minRole, opts)
+}
 
+/** The half of authArtifact after the credential is known: write access,
+ *  project scope, live role. The signed-upload route (upload-tickets.ts) runs
+ *  it against the credential a ticket names, re-resolved at upload time. */
+export async function authorizeArtifactCredential(
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  minRole: number,
+  opts: { writes?: boolean; action?: string } = {},
+): Promise<AuthResult> {
+  const db = env.AQUILLA_PG
+  if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
   try {
     if (opts.writes === true) assertCredentialMayWrite(cred, opts.action ?? 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
@@ -179,6 +196,30 @@ async function handleUpload(
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
   const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR, { writes: true })
   if (!authed.ok) return authed.response
+  return storeArtifact(request, env, projectId, authed.cred, {
+    name: request.headers.get('x-artifact-name'),
+    contentType: request.headers.get('content-type'),
+    kind: request.headers.get('x-artifact-kind'),
+  })
+}
+
+/** What an upload declares about its bytes: headers on the REST route, the
+ *  signed ticket's claims on the upload-URL route. */
+export interface ArtifactUploadMeta {
+  name: string | null
+  contentType: string | null
+  kind: string | null
+}
+
+/** Validate, store and record an upload for an already-authorized credential. */
+export async function storeArtifact(
+  request: Request,
+  env: ExternalEnv,
+  projectId: string,
+  cred: ApiCredentialContext,
+  meta: ArtifactUploadMeta,
+): Promise<Response> {
+  if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
   const db = env.AQUILLA_PG as AquillaDb
 
   // AQU-1843: atomic, keyed on the credential's owner (a second PAT must not
@@ -186,7 +227,7 @@ async function handleUpload(
   // MAX_ARTIFACT_BYTES into R2, so a limiter outage must not uncap it.
   const uploadLimit = await enforceRateLimit(db, {
     kind: 'external_artifact_upload',
-    identifier: userRateLimitIdentifier(authed.cred.userId),
+    identifier: userRateLimitIdentifier(cred.userId),
     limit: UPLOAD_MAX_PER_USER,
     failMode: 'closed',
   })
@@ -194,16 +235,14 @@ async function handleUpload(
     return errorResponse('rate_limited', 'artifact upload rate limit exceeded, slow down')
   }
 
-  const name = request.headers.get('x-artifact-name')
+  const { name, contentType } = meta
   if (!name || name.trim() === '') {
     return errorResponse('validation_failed', 'x-artifact-name header is required')
   }
-  const contentType = request.headers.get('content-type')
-
   // Kind (Agent API v1.1 §3). Absent header → 'source' — the existing path is
   // byte-for-byte unchanged. 'audio' validates the content type against the
   // audio allowlist and lands the bytes in the per-file audio R2 layout.
-  const kindHeader = request.headers.get('x-artifact-kind')
+  const kindHeader = meta.kind
   let kind: ArtifactKind
   if (kindHeader == null || kindHeader === 'source') {
     kind = 'source'
@@ -273,8 +312,8 @@ async function handleUpload(
       .bind(
         artifactId,
         projectId,
-        String(authed.cred.userId),
-        authed.cred.credentialId,
+        String(cred.userId),
+        cred.credentialId,
         name,
         contentType,
         bytes.byteLength,

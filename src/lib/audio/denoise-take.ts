@@ -16,15 +16,17 @@ import {
   parseFrontierAudioUrl,
 } from "./upload"
 import { audioCachePutBlob } from "./bytes-cache"
-import { decodeToMono48k } from "./decode-mono"
+import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
+import { loudnessClient } from "./loudness-client"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioEven, emitCellAudioMeasure } from "@/lib/sync/events-emit"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { newPieceAudioId } from "./cut-take"
 import {
   injectOptimisticAudioAttachment,
+  injectOptimisticAudioTrim,
   notifyAudioAttachmentsChanged,
 } from "./audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -72,6 +74,12 @@ export interface DenoiseTakeArgs {
     gainDb?: number | null
     fadeInMs?: number | null
     fadeOutMs?: number | null
+    /** AQU-2494 (review, Nov 9): the voice an AI take was made with — on an
+     *  added track its only mark — so the cleaned take is still marked AI. */
+    voiceId?: string | null
+    /** AQU-2664: the loudness it is evened out to, carried to the cleaned
+     *  take. Its new audio is unmeasured until Even out measures it. */
+    evenTargetLufs?: number | null
   }
 }
 
@@ -129,6 +137,43 @@ async function cleanAndUpload(args: {
   return { blob, durationMs, result, fullAudioId, dropUpload }
 }
 
+/**
+ * AQU-2664: measure the cleaned take(s) right away, from the cleaned audio
+ * this action holds, over each take's kept part — off the page in the
+ * loudness worker, else on the page in yielding chunks. Never awaited by the
+ * save: it runs after it, and any failure just leaves the take unmeasured
+ * (it plays at its own volume, the fallback, until Even out measures it).
+ */
+async function measureCleaned(
+  blob: Blob,
+  where: { projectId: string; fileId: string; cellId: string; author: string; targetLang?: string },
+  takes: ReadonlyArray<{ audioId: string; trimStartMs?: number | null; trimEndMs?: number | null; out: AudioAttachmentOut }>,
+): Promise<void> {
+  try {
+    const pcm = await decodeToMono48k(new Uint8Array(await blob.arrayBuffer()))
+    const durationMs = Math.round((pcm.length / TARGET_RATE) * 1000)
+    for (const t of takes) {
+      const a = Math.min(pcm.length, Math.max(0, Math.round(((t.trimStartMs ?? 0) / 1000) * TARGET_RATE)))
+      const b = t.trimEndMs != null ? Math.min(pcm.length, Math.round((t.trimEndMs / 1000) * TARGET_RATE)) : pcm.length
+      // A copy: the worker takes (transfers) what it measures.
+      const r = await loudnessClient().measure([pcm.slice(a, Math.max(a, b))], TARGET_RATE)
+      const reading = { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: t.trimStartMs ?? 0, loudnessToMs: t.trimEndMs ?? null }
+      const ev = emitCellAudioMeasure({
+        projectId: where.projectId, fileId: where.fileId, cellId: where.cellId, audioId: t.audioId, durationMs,
+        loudness: reading,
+        ...(where.targetLang ? { targetLang: where.targetLang } : {}),
+        author: where.author,
+      })
+      // Shown on the page at once, not only once the outbox has flushed.
+      injectOptimisticAudioTrim(where.fileId, where.cellId, { ...t.out, ...reading }, ev)
+      await ev
+    }
+    notifyAudioAttachmentsChanged(where.fileId)
+  } catch {
+    // The fallback: unmeasured, it plays at its own volume.
+  }
+}
+
 export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
   const { projectId, fileId, cellId, sourceAudioId, author } = args
   const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({ ...args })
@@ -148,6 +193,8 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       url: result.url,
       slot,
       mimeType: blob.type || undefined,
+      // AQU-2494 (review, Nov 9): an AI voice stays one when it is cleaned.
+      ...(src?.voiceId ? { voiceId: src.voiceId } : {}),
       referenceAudioId: sourceAudioId,
       durationMs: Math.round(durationMs),
       ...(src?.label ? { label: src.label } : {}),
@@ -173,6 +220,9 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
         ...lane, author,
       })
     }
+    if (src?.evenTargetLufs != null) {
+      await emitCellAudioEven({ projectId, fileId, cellId, audioId: fullAudioId, evenTargetLufs: src.evenTargetLufs, ...lane, author })
+    }
   } catch (emitErr) {
     dropUpload()
     throw emitErr
@@ -180,12 +230,12 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
 
   // 5. Optimistically surface the cleaned take so it shows without waiting for
   //    the outbox flush + projection round-trip.
-  injectOptimisticAudioAttachment(fileId, cellId, {
+  const cleanedOut: AudioAttachmentOut = {
     audioId: fullAudioId,
     url: result.url,
     slot,
     mimeType: blob.type || null,
-    voiceId: null,
+    voiceId: src?.voiceId ?? null,
     referenceAudioId: sourceAudioId,
     durationMs: Math.round(durationMs),
     trimStartMs: src?.trimStartMs ?? null,
@@ -196,8 +246,13 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     ...(src?.gainDb != null ? { gainDb: src.gainDb } : {}),
     ...(src?.fadeInMs != null ? { fadeInMs: src.fadeInMs } : {}),
     ...(src?.fadeOutMs != null ? { fadeOutMs: src.fadeOutMs } : {}),
-  }, attachEventId)
+    ...(src?.evenTargetLufs != null ? { evenTargetLufs: src.evenTargetLufs } : {}),
+  }
+  injectOptimisticAudioAttachment(fileId, cellId, cleanedOut, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
+  void measureCleaned(blob, { projectId, fileId, cellId, author, ...(args.targetLang ? { targetLang: args.targetLang } : {}) }, [
+    { audioId: fullAudioId, trimStartMs: src?.trimStartMs, trimEndMs: src?.trimEndMs, out: cleanedOut },
+  ])
   if (args.history) {
     recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
   }
@@ -245,6 +300,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
     audioId: i === 0 ? fullAudioId : newPieceAudioId(cellId, fullAudioId),
   }))
   const rootId = born[0].audioId
+  const outs = new Map<string, AudioAttachmentOut>()
   let attached = 0
   try {
     for (const { piece, audioId } of born) {
@@ -253,6 +309,8 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         url: result.url,
         slot: piece.slot,
         mimeType: blob.type || undefined,
+        // AQU-2494 (review, Nov 9): an AI voice stays one when it is cleaned.
+        ...(piece.voiceId ? { voiceId: piece.voiceId } : {}),
         referenceAudioId: piece.audioId,
         durationMs: Math.round(durationMs),
         ...(piece.label ? { label: piece.label } : {}),
@@ -264,6 +322,13 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         author,
       })
       attached += 1
+      // AQU-2494 (review, Nov 9): each cleaned piece keeps its own piece's
+      // volume and fades, as a cleaned whole take keeps the take's. They came
+      // back at the recorded volume with no fades.
+      const level = { gainDb: piece.gainDb ?? null, fadeInMs: piece.fadeInMs ?? null, fadeOutMs: piece.fadeOutMs ?? null }
+      if (level.gainDb != null || level.fadeInMs != null || level.fadeOutMs != null) {
+        await emitCellAudioGain({ projectId, fileId, cellId, audioId, ...level, ...lane, author })
+      }
       // AQU-2267: in both timings — its place following the recordings is
       // stated beside its place following the source, so neither moves.
       const placeP = piece.targetOffsetMs != null || piece.recordingsOffsetMs != null
@@ -274,12 +339,16 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
             ...lane, author,
           })
         : null
-      injectOptimisticAudioAttachment(fileId, cellId, {
+      // AQU-2664: each cleaned piece keeps its piece's evening out.
+      if (piece.evenTargetLufs != null) {
+        await emitCellAudioEven({ projectId, fileId, cellId, audioId, evenTargetLufs: piece.evenTargetLufs, ...lane, author })
+      }
+      const out: AudioAttachmentOut = {
         audioId,
         url: result.url,
         slot: piece.slot,
         mimeType: blob.type || null,
-        voiceId: null,
+        voiceId: piece.voiceId ?? null,
         referenceAudioId: piece.audioId,
         durationMs: Math.round(durationMs),
         trimStartMs: piece.trimStartMs ?? null,
@@ -288,7 +357,13 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
         ...(piece.label ? { label: piece.label } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
-      }, placeP ?? eventId)
+        ...(level.gainDb != null ? { gainDb: level.gainDb } : {}),
+        ...(level.fadeInMs != null ? { fadeInMs: level.fadeInMs } : {}),
+        ...(level.fadeOutMs != null ? { fadeOutMs: level.fadeOutMs } : {}),
+        ...(piece.evenTargetLufs != null ? { evenTargetLufs: piece.evenTargetLufs } : {}),
+      }
+      outs.set(audioId, out)
+      injectOptimisticAudioAttachment(fileId, cellId, out, placeP ?? eventId)
     }
   } catch (emitErr) {
     // Nothing of the cleaned take reached the outbox: drop the upload. Once a
@@ -297,6 +372,8 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
     throw emitErr
   }
   notifyAudioAttachmentsChanged(fileId)
+  void measureCleaned(blob, { projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}) },
+    born.filter(({ audioId }) => outs.has(audioId)).map(({ piece, audioId }) => ({ audioId, trimStartMs: piece.trimStartMs, trimEndMs: piece.trimEndMs, out: outs.get(audioId)! })))
   if (args.history) {
     recordTakeAdded(
       "denoise",

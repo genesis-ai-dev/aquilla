@@ -20,9 +20,10 @@
 // keys off it any more, and a class that looks load-bearing but is not is worse
 // than no class. The lane's `useHotSlot` (slot-hover.ts) is the whole mechanism.
 
-import type { MouseEvent, ReactNode } from "react"
+import { createContext, useContext, useState, type MouseEvent, type ReactNode } from "react"
+import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
-import { AppTooltip } from "@/components/ui/tooltip"
+import { TooltipContent } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
 
@@ -30,6 +31,33 @@ import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
 const MENU_HOVER_OPEN_MS = 150
 /** ...and closes this long after the pointer leaves the button and the menu. */
 const MENU_HOVER_CLOSE_MS = 200
+
+// AQU-2655: ONE tooltip root per lane, not one per button. A lane draws a
+// slot button for every empty stretch and every unrecorded line — 208 of them
+// on a two-file project — and a full tooltip tree under each (root, trigger,
+// content, portal) was most of what the voice studio rendered on open. The
+// buttons are detached triggers of the lane's root (Base UI's tooltip handle):
+// each button is still its own trigger, mounted once and never swapped, so
+// nothing remounts when a tooltip opens (AppTooltip's warning) and the
+// accessible name is still the button's `aria-label` — Base UI's tooltip adds
+// no ARIA wiring to its trigger, so sharing the root changes none. The label
+// is the trigger's payload, which the root's one popup prints.
+type SlotTooltipHandle = ReturnType<typeof TooltipPrimitive.createHandle<string>>
+
+const SlotTooltipContext = createContext<SlotTooltipHandle | null>(null)
+
+/** The lane's one tooltip for every slot button inside it. */
+export function SlotTooltipScope({ children }: { children: ReactNode }) {
+  const [handle] = useState(() => TooltipPrimitive.createHandle<string>())
+  return (
+    <SlotTooltipContext.Provider value={handle}>
+      {children}
+      <TooltipPrimitive.Root handle={handle}>
+        {({ payload }) => <TooltipContent>{payload}</TooltipContent>}
+      </TooltipPrimitive.Root>
+    </SlotTooltipContext.Provider>
+  )
+}
 
 export function TimelineSlotButton({
   testId,
@@ -79,6 +107,8 @@ export function TimelineSlotButton({
   onClick?(e: MouseEvent<HTMLButtonElement>): void
   children: ReactNode
 }) {
+  const tooltip = useContext(SlotTooltipContext)
+  if (!tooltip) throw new Error("TimelineSlotButton must be inside a SlotTooltipScope")
   const button = (
       <button
         type="button"
@@ -115,22 +145,39 @@ export function TimelineSlotButton({
         {children}
       </button>
   )
-  if (!menu) return <AppTooltip content={label}>{button}</AppTooltip>
+  if (!menu) {
+    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" handle={tooltip} payload={label} render={button} />
+  }
   return (
-    <DropdownMenu open={menu.open} onOpenChange={menu.onOpenChange}>
-      <AppTooltip content={label} disabled={menu.open}>
-        {/* Sam, Nov 19: "open on click or hover. Hovering specifically over
-            the button that shows up." Base UI's own hover-open, on the
-            BUTTON: an intent delay so passing over does not pop it, a grace
-            after leaving, the way into the menu kept open (safe polygon),
-            and mouse only, so touch opens it by tapping. */}
-        <DropdownMenuTrigger
-          render={button}
-          openOnHover
-          delay={MENU_HOVER_OPEN_MS}
-          closeDelay={MENU_HOVER_CLOSE_MS}
-        />
-      </AppTooltip>
+    <DropdownMenu
+      open={menu.open}
+      onOpenChange={(open) => {
+        // The tooltip stays shut while the menu is open. `disabled` on the
+        // trigger stops it opening; only the shared root can shut one that
+        // is already showing.
+        if (open) tooltip.close()
+        menu.onOpenChange(open)
+      }}
+    >
+      {/* Sam, Nov 19: "open on click or hover. Hovering specifically over
+          the button that shows up." Base UI's own hover-open, on the
+          BUTTON: an intent delay so passing over does not pop it, a grace
+          after leaving, the way into the menu kept open (safe polygon),
+          and mouse only, so touch opens it by tapping. */}
+      <TooltipPrimitive.Trigger
+        data-slot="tooltip-trigger"
+        handle={tooltip}
+        payload={label}
+        disabled={menu.open}
+        render={
+          <DropdownMenuTrigger
+            render={button}
+            openOnHover
+            delay={MENU_HOVER_OPEN_MS}
+            closeDelay={MENU_HOVER_CLOSE_MS}
+          />
+        }
+      />
       {/* Portalled, but React still bubbles its events up the component
           tree: a press or right-click in the menu must not reach the track
           (its press handler, its own context menu). */}

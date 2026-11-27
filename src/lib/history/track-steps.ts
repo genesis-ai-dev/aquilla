@@ -18,6 +18,7 @@
  * the one playing.
  */
 import type { StepHandler, StepOutcome } from "./history"
+import { toStoredVolume } from "@/lib/audio/track-volume-store"
 
 const DONE: StepOutcome = { kind: "done" }
 const CHANGED: StepOutcome = { kind: "skipped", reason: "changed" }
@@ -33,6 +34,8 @@ export interface TrackFields {
   contentFileId?: string | null
   /** AQU-2252: false = a layer; null = the default (sets its lines' lengths). */
   setsLineLengths?: boolean | null
+  /** AQU-2664: the track's volume, dB; null = 0 dB. */
+  volumeDb?: number | "-inf" | null
 }
 
 /** `before` null = the track did not exist (it was added); `after` null = deleted. */
@@ -51,7 +54,7 @@ export interface TrackStepContext {
 }
 
 const FIELDS: ReadonlyArray<keyof TrackFields> = [
-  "kind", "name", "order", "groupId", "color", "sourceTrackId", "contentFileId", "setsLineLengths",
+  "kind", "name", "order", "groupId", "color", "sourceTrackId", "contentFileId", "setsLineLengths", "volumeDb",
 ]
 
 function matches(current: TrackFields | null, expected: TrackFields | null): boolean {
@@ -218,6 +221,7 @@ export function trackFieldsOf(
     sourceTrackId?: string | null
     contentFileId?: string | null
     setsLineLengths?: boolean
+    volumeDb?: number
   },
   keys?: ReadonlyArray<keyof TrackFields>,
 ): TrackFields {
@@ -231,6 +235,8 @@ export function trackFieldsOf(
     contentFileId: track.contentFileId ?? null,
     // Only `false` is ever stored; the default reads as nothing stored.
     setsLineLengths: track.setsLineLengths === false ? false : null,
+    // In its stored form: nothing for 0 dB, "-inf" for silence (fader-scale.ts).
+    volumeDb: toStoredVolume(track.volumeDb ?? 0),
   }
   if (!keys) return all
   const picked: TrackFields = {}

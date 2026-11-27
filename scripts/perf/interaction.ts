@@ -9,6 +9,7 @@
  *   pnpm perf:interaction --only plain --throttle 1
  *   pnpm perf:interaction --suggest-budgets
  *   pnpm perf:interaction --no-ghost-text   # see the flag's note in measureVariant
+ *   pnpm perf:interaction --no-1x           # skip the unthrottled count pass (see COUNT_PASS_THROTTLE)
  *
  * Two fixtures of the same small project (2 files, 400 cells): `plain`, and
  * `glossary` with 664 active terms that use forms, affixes and mark folding —
@@ -31,7 +32,7 @@ import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { v7 as uuidv7 } from "uuid"
-import type { Page } from "@playwright/test"
+import type { Browser, Page } from "@playwright/test"
 import { devLogin, mintSyncToken, postEvents, DEFAULT_TARGET, type PerfTarget, type RawEventInput } from "./lib/client"
 import { readHandle, type BigBibleHandle } from "./lib/fixture-handle"
 import { evaluateBudgets, parseBudgetFile, renderBreaches } from "./lib/budgets"
@@ -48,6 +49,8 @@ import {
   type ProbeReading,
   type RequestTally,
 } from "./lib/interaction-probe"
+import { holdResponses } from "./lib/serial-responses"
+import { resetScenarioCells, shortEdit, TYPED_SENTENCE } from "./lib/scenario-reset"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const DIST_DIR = path.join(REPO_ROOT, ".perf", "interaction-dist")
@@ -74,6 +77,8 @@ interface Options {
   enforce: boolean
   /** False: the editor's ghost-text suggestions are switched off for the run. */
   ghostText: boolean
+  /** True: after the measured pass, run the scenario again at 1× and report its counts. */
+  countPass: boolean
   target: PerfTarget
 }
 
@@ -88,6 +93,7 @@ function parseOptions(argv: string[]): Options {
       "suggest-budgets": { type: "boolean" },
       "no-budgets": { type: "boolean" },
       "no-ghost-text": { type: "boolean" },
+      "no-1x": { type: "boolean" },
     },
   })
   const only = values.only?.split(",").map((s) => s.trim()).filter(Boolean)
@@ -104,11 +110,32 @@ function parseOptions(argv: string[]): Options {
     suggestBudgets: !!values["suggest-budgets"],
     enforce: !values["no-budgets"],
     ghostText: !values["no-ghost-text"],
+    countPass: !values["no-1x"] && throttle !== COUNT_PASS_THROTTLE,
     target: DEFAULT_TARGET,
   }
 }
 
 const log = (line: string) => console.log(`[perf] ${line}`)
+
+/**
+ * The timed open's commit and render counts depend on which responses share a
+ * React batch (backlog item 37), so they are reported but not budgeted; the
+ * `openSerial` phase's are. See measureSerialOpen.
+ */
+const TIMING_DEPENDENT_COUNTS = /\.open\.(reactCommits|componentRenders)$/
+
+/**
+ * Item 39 of docs/routines/PERF-BACKLOG.md: under the 4× throttle, separate
+ * state updates that land close together fall into one React batch, so a
+ * change that removes one of them can leave the 4× count unchanged (commit
+ * path: 9 workspace renders at 1×, 7 at 4×). The second pass runs the same
+ * scenario unthrottled and reports its counts as `<fixture>.<phase>@1x.<name>`.
+ * Timings from that pass are not reported (they would read as a different
+ * machine), it skips tabReturn (a 30 s wait that is not commit path), and its
+ * metrics are not budgeted: they are there to be compared before and after.
+ */
+const COUNT_PASS_THROTTLE = 1
+const COUNT_PASS_SUFFIX = "@1x"
 
 // ── fixture ────────────────────────────────────────────────────────────────
 
@@ -197,12 +224,20 @@ function buildApp(target: PerfTarget): void {
 }
 
 async function servePreview(): Promise<{ base: string; stop: () => void }> {
+  const base = `http://127.0.0.1:${PREVIEW_PORT}`
+  // Without this, the readiness poll below finds the other server, the run
+  // measures another worktree's build, and nothing says so.
+  if (await fetch(base).then(() => true, () => false)) {
+    throw new Error(
+      `port ${PREVIEW_PORT} is already serving something (another worktree's vite preview?). `
+        + "Stop it, or serve this build on another port and pass --app-base.",
+    )
+  }
   const child: ChildProcess = spawn(
     "pnpm",
     ["exec", "vite", "preview", "--outDir", DIST_DIR, "--port", String(PREVIEW_PORT), "--strictPort", "--host", "127.0.0.1"],
     { cwd: REPO_ROOT, stdio: "ignore", detached: true },
   )
-  const base = `http://127.0.0.1:${PREVIEW_PORT}`
   const stop = () => {
     try {
       if (child.pid) process.kill(-child.pid)
@@ -296,11 +331,63 @@ async function signIn(page: Page, appBase: string, target: PerfTarget): Promise<
   )
 }
 
+/** A fresh context with the probe installed, signed in, throttled. */
+async function newSignedInPage(browser: Browser, appBase: string, options: Options, throttle: number): Promise<Page> {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await context.addInitScript({ content: INTERACTION_INIT_SCRIPT })
+  // `--no-ghost-text`: a visible ghost suggestion takes Tab (accept) ahead of
+  // cell navigation, and whether one is visible when editTab presses Tab is
+  // a race between the suggestion's 250 ms debounce and the main thread. The
+  // flag takes the race out: the preference is the one View settings writes
+  // (src/lib/store/ghost-text-pref.ts).
+  if (!options.ghostText) {
+    await context.addInitScript({ content: 'try { localStorage.setItem("aq.ghost-text.v3", "off") } catch {}' })
+  }
+  const page = await context.newPage()
+  await signIn(page, appBase, options.target)
+  if (throttle > 1) await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle })
+  return page
+}
+
+/**
+ * PERF-BACKLOG item 37: `open.componentRenders` depends on which of the open's
+ * ~39 responses happen to land in one React batch (7,033…9,581 on one tree).
+ * This opens the same file in its own context with every API response held and
+ * released one at a time, each once the page has stopped committing (see
+ * lib/serial-responses.ts), so each response pays its own render and the count
+ * no longer depends on timing. Its counts are the open's budgeted counts; the
+ * timed `open` phase still reports its own, unbudgeted.
+ */
+async function measureSerialOpen(browser: Browser, fileUrl: string, appBase: string, options: Options, throttle: number): Promise<PhaseResult> {
+  const page = await newSignedInPage(browser, appBase, options, throttle)
+  try {
+    const gate = await holdResponses(page, new URL(appBase).origin)
+    await page.goto(fileUrl, { waitUntil: "commit", timeout: READY_TIMEOUT_MS })
+    const { released } = await gate.drain(() => page.locator(ROW).first().isVisible())
+    const reading = (await page.evaluate(READ_PROBE)) as ProbeReading
+    if (reading.react.error) throw new Error(`render counter failed: ${reading.react.error}`)
+    await gate.stop()
+    return summarizePhase("openSerial", reading, { count: released, bytes: 0, byRoute: {} }, { released })
+  } finally {
+    await page.context().close()
+  }
+}
+
+/** The measured pass, or the unthrottled count pass that follows it. */
+interface Pass {
+  throttle: number
+  /** Appended to every phase name, so `commit` becomes `commit@1x`. */
+  suffix: string
+  /** Report only count metrics (drop timings: `ms`, `…Ms`) and skip tabReturn. */
+  countsOnly: boolean
+}
+
 async function measureVariant(
   variant: Variant,
   handle: BigBibleHandle,
   appBase: string,
   options: Options,
+  pass: Pass = { throttle: options.throttle, suffix: "", countsOnly: false },
 ): Promise<{ metrics: Record<string, number>; phases: PhaseResult[] }> {
   const { chromium } = await import("@playwright/test")
   // A cloud session ships its own Chromium, not the one this lockfile pins.
@@ -309,28 +396,30 @@ async function measureVariant(
   const metrics: Record<string, number> = {}
   const phases: PhaseResult[] = []
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-    await context.addInitScript({ content: INTERACTION_INIT_SCRIPT })
-    // `--no-ghost-text`: a visible ghost suggestion takes Tab (accept) ahead of
-    // cell navigation, and whether one is visible when editTab presses Tab is
-    // a race between the suggestion's 250 ms debounce and the main thread. The
-    // flag takes the race out: the preference is the one View settings writes
-    // (src/lib/store/ghost-text-pref.ts).
-    if (!options.ghostText) {
-      await context.addInitScript({ content: 'try { localStorage.setItem("aq.ghost-text.v3", "off") } catch {}' })
-    }
-    const page = await context.newPage()
-    const cdp = await context.newCDPSession(page)
-    const recorder = createRecorder(page, new URL(appBase).origin)
+    const reset = await resetScenarioCells(options.target, handle)
+    if (reset > 0) log(`${variant}: reset ${reset} cells a previous run typed into`)
     const file = handle.files[0]
+    const fileUrl = `${appBase}/project/${handle.projectId}/editor/file/${file.id}`
+    if (!pass.countsOnly) {
+      const serial = await measureSerialOpen(browser, fileUrl, appBase, options, pass.throttle)
+      phases.push(serial)
+      log(`${variant} openSerial: ${serial.reactCommits} commits, ${serial.componentRenders} renders, ${serial.extra.released} responses`)
+      metrics[`${variant}.openSerial.reactCommits`] = serial.reactCommits
+      metrics[`${variant}.openSerial.componentRenders`] = serial.componentRenders
+    }
+
+    const page = await newSignedInPage(browser, appBase, options, pass.throttle)
+    const recorder = createRecorder(page, new URL(appBase).origin)
     const targetCell = (i: number) => page.locator(ROW).nth(i).locator('[data-cell-type="target"]')
     const editable = (i: number) => targetCell(i).locator('.ProseMirror[contenteditable="true"], textarea').first()
     const put = (phase: string, values: Record<string, number | null>) => {
       for (const [key, value] of Object.entries(values)) {
-        if (value !== null) metrics[`${variant}.${phase}.${key}`] = value
+        if (value === null || (pass.countsOnly && /(^ms|Ms)$/.test(key))) continue
+        metrics[`${variant}.${phase}${pass.suffix}.${key}`] = value
       }
     }
     const record = (result: { phase: PhaseResult }) => {
+      result.phase.name += pass.suffix
       phases.push(result.phase)
       log(
         `${variant} ${result.phase.name}: ${result.phase.reactCommits} commits, ${result.phase.componentRenders} renders, `
@@ -338,13 +427,10 @@ async function measureVariant(
       )
     }
 
-    await signIn(page, appBase, options.target)
-    if (options.throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.throttle })
-
     // open
     await recorder.begin()
     let t0 = Date.now()
-    await page.goto(`${appBase}/project/${handle.projectId}/editor/file/${file.id}`, { waitUntil: "commit", timeout: READY_TIMEOUT_MS })
+    await page.goto(fileUrl, { waitUntil: "commit", timeout: READY_TIMEOUT_MS })
     await page.locator(ROW).first().waitFor({ state: "visible", timeout: READY_TIMEOUT_MS })
     const readyMs = Date.now() - t0
     let result = await recorder.end("open", { readyMs })
@@ -379,7 +465,7 @@ async function measureVariant(
 
     // typing: 40 keystrokes, read before the idle commit fires
     await recorder.begin()
-    const typed = "A sentence of forty characters to type. "
+    const typed = TYPED_SENTENCE
     await page.keyboard.type(typed, { delay: 60 })
     result = await recorder.end("typing", {}, false)
     record(result)
@@ -407,7 +493,7 @@ async function measureVariant(
     await recorder.begin()
     const tabMs: number[] = []
     for (let i = 0; i < EDITS; i++) {
-      await page.keyboard.type(`Short edit ${i} `, { delay: 40 })
+      await page.keyboard.type(shortEdit(i), { delay: 40 })
       const before = await page.evaluate("document.activeElement && document.activeElement.closest('[data-cell-id]')?.getAttribute('data-cell-id')")
       t0 = Date.now()
       await page.keyboard.press("Tab")
@@ -432,6 +518,7 @@ async function measureVariant(
     })
 
     // tabReturn: hidden for 30s, then back
+    if (pass.countsOnly) return { metrics, phases }
     await page.evaluate(HIDE_TAB)
     await page.waitForTimeout(30_000)
     await recorder.begin()
@@ -461,6 +548,8 @@ async function measureVariant(
 function suggestBudgets(metrics: Record<string, number>): { max: Record<string, number> } {
   const max: Record<string, number> = {}
   for (const [metric, value] of Object.entries(metrics)) {
+    if (metric.includes(COUNT_PASS_SUFFIX)) continue // reported for comparison, never budgeted
+    if (TIMING_DEPENDENT_COUNTS.test(metric)) continue // openSerial carries the open's count budgets
     const isTiming = /Ms$/.test(metric)
     const headroom = isTiming ? 2 : 1.25
     const floor = isTiming ? 100 : 2
@@ -492,6 +581,16 @@ async function main(): Promise<void> {
       const measured = await measureVariant(variant, handle, appBase, options)
       Object.assign(metrics, measured.metrics)
       phases[variant] = measured.phases
+      if (options.countPass) {
+        log(`${variant}: count pass at ${COUNT_PASS_THROTTLE}× (reported as …${COUNT_PASS_SUFFIX}, not budgeted)`)
+        const counted = await measureVariant(variant, handle, appBase, options, {
+          throttle: COUNT_PASS_THROTTLE,
+          suffix: COUNT_PASS_SUFFIX,
+          countsOnly: true,
+        })
+        Object.assign(metrics, counted.metrics)
+        phases[variant].push(...counted.phases)
+      }
     }
 
     const sha = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim()

@@ -33,6 +33,7 @@ import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { lanesForRequestedTag, legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { laneTagAllowed, loadTargetLanes, visibleLanesForRead } from "./lane-read-wall"
 import { effectiveThresholdSql } from '../../../db/shared/validation-threshold'
+import { loadJoinedCopies, type JoinedInto } from './joined-copies'
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -58,6 +59,9 @@ interface FileRowRaw {
    *  rollup to fall back on, exactly as the per-file progress read has it. */
   audio_count: number
   audio_validated_count: number
+  /** Untouched machine drafts for a one-language project. Null when several
+   *  target languages mean the files counter is not this lane's number. */
+  ai_drafted_count: number | null
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
@@ -128,6 +132,12 @@ interface FileSummary {
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
   filledCount: number
   /**
+   * Untouched machine drafts. A number for a project with one target
+   * language. Null when several languages make `files.ai_drafted_count` a
+   * sum this listing cannot attribute to the pinned lane.
+   */
+  aiDraftedCount: number | null
+  /**
    * AQU-2111: lines with a take of their own, and lines whose weakest chosen
    * take meets the project's AUDIO validation requirement.
    *
@@ -152,6 +162,9 @@ interface FileSummary {
   /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
    *  owner, meta). Null on ordinary files. */
   extension: FileExtensionMeta | null
+  /** AQU-2549: in the Recently deleted list only — the project's own file this
+   *  copy was joined into. Such a copy cannot be restored (joined-copies.ts). */
+  joinedInto?: JoinedInto
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -211,6 +224,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
+    aiDraftedCount: row.ai_drafted_count == null ? null : Number(row.ai_drafted_count),
     audioCount: row.audio_count,
     audioValidatedCount: row.audio_validated_count,
     wordCount: row.word_count,
@@ -336,6 +350,15 @@ export async function handleFilesReadRequest(
             THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
             ELSE 0
           END AS filled_count, ` +
+    // Untouched machine drafts. `files.ai_drafted_count` sums every target
+    // lane, so it is this lane's number only for a one-language project —
+    // the same limit the filled-count fallback keeps. Several languages have
+    // no per-lane draft counter on the progress row; null tells the client
+    // not to invent one from the sum.
+    `CASE WHEN thr.one_target_lane
+            THEN GREATEST(0, f.ai_drafted_count - ${less("f.structural_ai_drafted_count")})
+            ELSE NULL
+          END AS ai_drafted_count, ` +
     // AQU-2111: the audio pair, off the same pinned-lane row. There is no
     // `files` counter to fall back on — the projection is the only source, as
     // the per-file progress read already documents — so a file with no row
@@ -510,7 +533,15 @@ export async function handleFilesReadRequest(
           id: last.id,
         })
       : null
-  return Response.json({ files: page.map(mapRow), nextCursor })
+  const files = page.map(mapRow)
+  if (trash && files.length > 0) {
+    const joined = await loadJoinedCopies(env.AQUILLA_PG, projectId)
+    for (const file of files) {
+      const into = joined.get(file.fileId)
+      if (into) file.joinedInto = into
+    }
+  }
+  return Response.json({ files, nextCursor })
 }
 
 export const FILES_MAX_PAGE = 500

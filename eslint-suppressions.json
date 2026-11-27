@@ -154,11 +154,6 @@
       "count": 2
     }
   },
-  "src/components/org/TeamsList.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 6
-    }
-  },
   "src/components/settings/OrgProviderSection.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 5

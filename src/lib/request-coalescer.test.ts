@@ -84,6 +84,31 @@ describe("createRequestCoalescer", () => {
     expect(fn).toHaveBeenCalledTimes(2)
   })
 
+  // AQU-2655: a component mounting is not news that anything changed, so it
+  // may share a read of any age — but never one older than a follow-up a
+  // poke has already queued, or it would be answered with pre-write data.
+  it("`joinLatest` joins the newest request whatever its age, the follow-up if one is queued", async () => {
+    let clock = 0
+    const c = createRequestCoalescer<number>({ joinWindowMs: 250, now: () => clock })
+    const first = deferred<number>()
+    let calls = 0
+    const fn = vi.fn(() => (++calls === 1 ? first.promise : Promise.resolve(calls)))
+
+    const early = c.run("k", fn)
+    clock = 1_000
+    const mountedLate = c.run("k", fn, { joinLatest: true }) // past the window, still shares
+    expect(fn).toHaveBeenCalledTimes(1)
+    const poke = c.run("k", fn) // a change signal → follow-up
+    const mountedAfterPoke = c.run("k", fn, { joinLatest: true }) // joins the follow-up
+
+    first.resolve(1)
+    expect(await early).toBe(1)
+    expect(await mountedLate).toBe(1)
+    expect(await poke).toBe(2)
+    expect(await mountedAfterPoke).toBe(2)
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
   it("a rejected request is not cached and does not poison the next call", async () => {
     const c = createRequestCoalescer<number>({ cacheTtlMs: 30_000 })
     await expect(c.run("k", () => Promise.reject(new Error("nope")))).rejects.toThrow("nope")

@@ -80,8 +80,9 @@ describe('authorize: extension identity and data files', () => {
 
   it('accepts a verified extension write at the normal floor', async () => {
     const tag = { ...ORIGIN, session: await session() }
-    expect((await authorize(await token('normal-file', 500), commit('normal-file', { tool_origin: tag }), SECRET, t.db)).ok).toBe(true)
-    // An ordinary source commit stays project-lead, extension or not.
+    expect((await authorize(await token('normal-file', 600), commit('normal-file', { tool_origin: tag }), SECRET, t.db)).ok).toBe(true)
+    // A normal file is source text. The default floor is Maintainer.
+    expect((await authorize(await token('normal-file', 500), commit('normal-file', { tool_origin: tag }), SECRET, t.db)).ok).toBe(false)
     expect((await authorize(await token('normal-file', 400), commit('normal-file', { tool_origin: tag }), SECRET, t.db)).ok).toBe(false)
   })
 

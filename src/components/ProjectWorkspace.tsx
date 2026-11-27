@@ -35,6 +35,7 @@ import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
+import { RecentlyDeletedRow } from "@/components/RecentlyDeletedRow"
 import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
 import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
 import { TabStrip as TabStripImpl } from "./TabStrip"
@@ -101,6 +102,7 @@ import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
 import { createHealthCardNamer, healthCardRows } from "@/lib/health/health-card-rows"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -228,7 +230,7 @@ import { ExtensionsBar } from "./tools/ExtensionsBar"
 import { useToolsMount } from "./tools/ToolsMountContext"
 import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
 import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
-import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
+import { CloneVoiceModalHost as CloneVoiceModalHostImpl } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
@@ -277,7 +279,9 @@ import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
-import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { mayEditSourceText, sourceTextAuthority, useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { sourceTextFloorLevel } from "../../db/shared/source-text-floor"
+import { laneGrantLevelsFromSyncToken } from "@/lib/sync/lane-grant-levels"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
@@ -289,13 +293,20 @@ import { plainTextHtml, runMakeSpeech, type MakeSpeechActions, type MakeSpeechLi
 import { setTimelineSelection } from "@/lib/audio/timeline-selection"
 import type { MakeSpeechTextActions } from "@/components/voice/inspector/MakeSpeechPanel"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { AUTO_EVEN_CHANGED_TAKES, clearEvenOut, createEvenOutQueue, evenedTakesIn, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
+import { evenOutTrackStates, type EvenOutScope } from "@/lib/audio/even-out-scopes"
+import { EvenOutWindow, type EvenOutWindowHandle } from "@/components/timeline/EvenOutWindow"
+import { createAutoEvenQueue } from "@/lib/audio/auto-even-queue"
+import { onLocalTakeChange } from "@/lib/audio/local-take-changes"
+import { clearedToastText, ranToastText } from "@/lib/audio/even-out-toasts"
+import { flushEvenOutWrites } from "@/lib/audio/even-out-flush"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
+import { attachmentOutFrom, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, undoStepById, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, fileMayFollowTiming, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
@@ -328,7 +339,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioEven, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -378,6 +389,8 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
+import { applyPendingVolumes, applyTrackVolumes, nextPendingVolume, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
+import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
@@ -389,7 +402,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom, canAttachSourceAudio } from "@/lib/sync/role-policy"
+import { canPerform, canSetTrackVolume, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom, canAttachSourceAudio } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -408,6 +421,7 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
 import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
+import { refetchOncePerEvent } from "@/lib/sync/refetch-once-per-event"
 import { confirmCommittedBatch, createFlushAppliedTracker, type FlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
@@ -438,7 +452,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, CheckSquare, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw, Info } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -532,7 +546,7 @@ import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import type { SyncTokenResponse } from "@/lib/sync/sync-token"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackIsLayer, takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -683,6 +697,15 @@ import {
   type ValidateRunChoices,
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
+import { BatchBooksDialog, type BatchBooksChoices, type BatchBooksDialogHandle, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
+import { listBatchBooks } from "@/lib/review/batch-books"
+import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
+import { listChapterLabels } from "@/lib/export/chapter-scope"
+import { loadBookCells } from "@/lib/review/load-book-cells"
+import { holdBatchForSync } from "@/lib/review/hold-batch-for-sync"
+import { showBatchSyncTimeoutToast } from "@/lib/review/batch-sync-timeout-toast"
+import { openFlagsInBook } from "@/lib/review/open-flags-in-book"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
@@ -736,8 +759,12 @@ const AgentWorkbench = lazy(() =>
 const StationPanel = lazy(() =>
   import("@/components/station/StationPanel").then((m) => ({ default: m.StationPanel })),
 )
+// AQU-2655: not re-rendered while closed, except for the film picture it
+// resolves ahead of an opening (see `closedDialogInputs.ts`).
 const AudioRecordingModal = lazy(() =>
-  import("./AudioRecorder/AudioRecordingModal").then((m) => ({ default: m.AudioRecordingModal })),
+  Promise.all([import("./AudioRecorder/AudioRecordingModal"), import("./closedDialogInputs")]).then(([m, closed]) => ({
+    default: memoWhileClosed(m.AudioRecordingModal, undefined, closed.audioRecordingModalUnchangedWhileClosed),
+  })),
 )
 const VoiceSidebar = lazy(() =>
   import("./voice/VoiceSidebar").then((m) => ({ default: m.VoiceSidebar })),
@@ -780,16 +807,25 @@ const CueLinkDrawer = lazy(() =>
 const AlignTimelineScriptDialog = lazy(() =>
   import("./import/AlignTimelineScriptDialog").then((m) => ({ default: m.AlignTimelineScriptDialog })),
 )
+// AQU-2655: not re-rendered while closed, except for the lane inputs that can
+// finish a pending import while closed (see `importDialogUnchangedWhileClosed`).
 const ImportDialog = lazy(() =>
-  import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
+  Promise.all([import("./ImportDialog"), import("./closedDialogInputs")]).then(([mod, closed]) => ({
+    default: memoWhileClosed(mod.ImportDialog, undefined, closed.importDialogUnchangedWhileClosed),
+  })),
 )
 
 // AQU-2559: a Bible book as one continuous document.
 const BibleDocumentView = lazy(() =>
   import("@/components/bible-document/BibleDocumentView").then((m) => ({ default: m.BibleDocumentView })),
 )
+// AQU-2655: not re-rendered while closed, except for the file and project
+// inputs its format and base-name effects follow (see
+// `exportDialogUnchangedWhileClosed`).
 const ExportDialog = lazy(() =>
-  import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
+  Promise.all([import("./ExportDialog"), import("./closedDialogInputs")]).then(([mod, closed]) => ({
+    default: memoWhileClosed(mod.ExportDialog, undefined, closed.exportDialogUnchangedWhileClosed),
+  })),
 )
 
 // FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
@@ -937,8 +973,10 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 // renders with `open={false}` for the whole session. Each stays mounted — its
 // exit animation and any state it keeps between opens are untouched — but is
 // not re-rendered while it stays closed. Every one here was checked to do
-// nothing while closed; see `memoWhileClosed` for the rule and for the four
-// that are deliberately left as they were.
+// nothing while closed; see `memoWhileClosed` for the rule. The lazy Export,
+// Import and recorder dialogs above do react to a few props while closed, and
+// say which.
+const CloneVoiceModalHost = memoWhileClosed(CloneVoiceModalHostImpl)
 const AiSetupDialog = memoWhileClosed(AiSetupDialogImpl)
 const AssignModal = memoWhileClosed(AssignModalImpl)
 const ParallelPassagesPanel = memoWhileClosed(ParallelPassagesPanelImpl)
@@ -983,6 +1021,24 @@ const fileProgressMapsEqual = (a: Map<string, FileStats>, b: Map<string, FileSta
 type CellAssignmentMap = ReadonlyMap<string, { username: string; scopeLabel: string }>
 const assignmentMapsEqual = (a: CellAssignmentMap, b: CellAssignmentMap): boolean =>
   mapsEqual(a, b, (x, y) => x.username === y.username && x.scopeLabel === y.scopeLabel)
+
+/** A recolour and a track volume, drawn before the read shows them, for one
+ *  file. Each map is null while nothing of its kind is pending; the whole
+ *  overlay is null when neither is (trackPaintOf). */
+type PendingTrackPaint = {
+  fileId: string
+  colors: Map<string, string | null> | null
+  volumes: Map<string, PendingVolume> | null
+}
+function trackPaintOf(
+  fileId: string,
+  colors: Map<string, string | null> | null,
+  volumes: Map<string, PendingVolume> | null,
+): PendingTrackPaint | null {
+  const c = colors && colors.size > 0 ? colors : null
+  const v = volumes && volumes.size > 0 ? volumes : null
+  return c || v ? { fileId, colors: c, volumes: v } : null
+}
 
 export function ProjectWorkspace() {
   const analytics = useAccountAnalytics()
@@ -1937,8 +1993,9 @@ export function ProjectWorkspace() {
   // shared by both fetchers below so the route-scoped mint records the role
   // too — `patchProject` is a no-op until the record exists locally.
   const onSyncTokenRole = useCallback(
-    (role: SyncTokenResponse["role"]) => {
+    (role: SyncTokenResponse["role"], token?: string) => {
       if (!projectId) return
+      const laneGrantLevels = token ? laneGrantLevelsFromSyncToken(token) : undefined
       void patchProject(projectId, (p) => ({
         ...p,
         syncRole: {
@@ -1947,6 +2004,7 @@ export function ProjectWorkspace() {
           source: role.source,
           fetchedAt: new Date().toISOString(),
         },
+        ...(laneGrantLevels ? { laneGrantLevels } : {}),
       }))
     },
     [projectId],
@@ -2083,6 +2141,10 @@ export function ProjectWorkspace() {
       activeFileId,
       username: currentUsername,
       roleLevel: project.syncRole?.level ?? null,
+      // AQU-2647: a language-lane grant counts, and the floor (default
+      // Maintainer) is applied before the edit reaches the outbox.
+      sourceTextAuthority: sourceTextAuthority(project),
+      sourceTextFloor: sourceTextFloorLevel(project.sourceTextFloor),
       // AQU-2304: the org's import floor, so the emit layer refuses a
       // `file.create` the org reserved for maintainers before it reaches the
       // durable outbox — the same reason the static mirror exists.
@@ -2091,7 +2153,7 @@ export function ProjectWorkspace() {
       sourceAudioCoversEveryLanguage,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole, sourceAudioCoversEveryLanguage])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, project?.sourceTextFloor, project?.laneGrantLevels, carriedImportMinRole, sourceAudioCoversEveryLanguage])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -2275,10 +2337,7 @@ export function ProjectWorkspace() {
    * localStorage, so it outlives a demotion — a former lead would otherwise keep
    * seeing every hidden row in a file they can no longer park.
    */
-  const mayParkCellsInProject = canPerform(
-    "source.cell.visibility.set",
-    project?.syncRole?.level ?? null,
-  )
+  const mayParkCellsInProject = mayEditSourceText(project)
   const showHiddenCellsPref = useShowHiddenCells()
   /**
    * AQU-2308: this file's hand-set milestones.
@@ -2615,7 +2674,10 @@ export function ProjectWorkspace() {
   // the store — no per-cell GET, no range refresh — with a per-cell seq guard.
   // Frames without rows fall through to the existing refresh path.
   const liveApplier = useMemo(
-    () => createLiveApplier({ store: cellStore, revalidateCell }),
+    // AQU-2655: a row-less frame (every `cell.audio.*` event) arrives twice
+    // for this tab's own write — in the POST response and as its echo — and
+    // is read back once, not once per copy.
+    () => refetchOncePerEvent(createLiveApplier({ store: cellStore, revalidateCell })),
     [cellStore, revalidateCell],
   )
   useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])
@@ -4612,6 +4674,103 @@ export function ProjectWorkspace() {
     [applyTakeGain, readTake, activeFileId],
   )
 
+  // AQU-2664: a take's evened-out target, alone — the trim's order again.
+  // Never its volume or fades: evening out is the stage before them.
+  // `flush: false` (the Even out action) queues the write and leaves the one
+  // outbox flush to the action, so 300 takes are not 300 round trips.
+  const applyTakeEven = useCallback(
+    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<{ fileId: string; eventId: string } | null> => {
+      if (!project?.id) return null
+      const owner = resolveTakeCellRef.current(cellId)
+      const att = owner?.cell.attachments?.[audioId]
+      if (!owner || !att) return null
+      const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const p = emitCellAudioEven({
+        projectId: project.id, fileId: owner.fileId, cellId, audioId, evenTargetLufs: targetLufs,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), evenTargetLufs: targetLufs }, p)
+      const eventId = await p
+      if (opts?.flush === false) return { fileId: owner.fileId, eventId }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(owner.fileId)
+      return { fileId: owner.fileId, eventId }
+    },
+    [project?.id, currentUsername, getTokenForProjectFile, activeLane],
+  )
+  // AQU-2664: "Even out" and "Clear" over a set of takes — the engine's action
+  // API (lib/audio/even-out.ts); the UI that calls it is designed separately
+  // and reaches it through the Station host (`evenOut`, `clearEvenOut`).
+  // Takes with no reading are measured once here; one that can't be is
+  // skipped and plays at its own volume (the fallback).
+  /** Review M2: one Even out (or Clear) at a time, whoever starts it. */
+  const evenOutQueue = useRef(createEvenOutQueue())
+  const evenOutHost = useMemo<EvenOutHost | null>(() => {
+    if (!project?.id) return null
+    const projectId = project.id
+    const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
+    const touched = new Set<string>()
+    const written: string[] = []
+    // Review M2: each run builds its own measurer (its own held decode and
+    // failures); runs go one at a time through `evenOutQueue`.
+    const newMeasurer = () => makeTakeMeasurer({
+      fetchBytes: async (att, where, signal) => {
+        const ref = parseFrontierAudioUrl(att.url)
+        const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
+        if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
+        return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
+      },
+      decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
+      decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
+      emit: async (cellId, audioId, reading, durationMs) => {
+        const owner = resolveTakeCellRef.current(cellId)
+        const att = owner?.cell.attachments?.[audioId]
+        if (!owner || !att) return
+        const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+        const p = emitCellAudioMeasure({
+          projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        })
+        injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
+        await p
+      },
+    })
+    return {
+      readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
+      applyEven: async (cellId, audioId, target) => {
+        const w = await applyTakeEven(cellId, audioId, target, { flush: false })
+        if (!w) throw new Error("even out: the take is gone")
+        touched.add(w.fileId)
+        written.push(w.eventId)
+      },
+      // Every write out before the action ends: round after round of the
+      // outbox, not one batch of 100 (even-out-flush.ts).
+      flush: async () => {
+        await flushEvenOutWrites(written.splice(0), { getTokenForFile: getTokenForProjectFile })
+        for (const f of touched) notifyAudioAttachmentsChanged(f)
+        touched.clear()
+      },
+      // Refused up front, before any download, below the event's role.
+      allowed: canPerform("cell.audio.even", project.syncRole?.level ?? null),
+      fileId: activeFileId,
+      fileName: activeFileNameRef.current,
+      newMeasurer,
+      // Unused while `newMeasurer` is given; the contract still names one.
+      measure: async () => null,
+      queue: evenOutQueue.current,
+    }
+  }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername, getTokenForProjectFile])
+  const handleEvenOut = useCallback(
+    (takes: readonly TakeRef[], opts?: EvenOutOptions) => (evenOutHost ? evenOutTakes(evenOutHost, takes, opts) : Promise.resolve(null)),
+    [evenOutHost],
+  )
+  const handleClearEvenOut = useCallback(
+    (takes: readonly TakeRef[], opts?: { onWaiting?: () => void }) => (evenOutHost ? clearEvenOut(evenOutHost, takes, opts) : Promise.resolve(null)),
+    [evenOutHost],
+  )
+
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
   // gutter's picker. The assignment itself never synthesizes; in the Audio
   // view the card then acts on the picked line (AQU-2212). The picker's scope (Oct 23) says how far it reaches: this
@@ -4875,8 +5034,13 @@ export function ProjectWorkspace() {
       const shared = attachmentOutFrom(audioId, att, slot)
       const firstVoters = pieceVoters?.first ?? []
       const secondVoters = pieceVoters?.second ?? []
+      // AQU-2494 (review, Nov 9): …and the take's volume and fades split as
+      // the server splits them: the volume on both, the fade-in on the first
+      // piece, the fade-out on the new one.
+      const levels = levelsAfterCut(att, atMs)
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
+        ...levels.first,
         trimEndMs: Math.round(atMs),
         validatorCount: firstVoters.length,
         validators: firstVoters,
@@ -4884,6 +5048,7 @@ export function ProjectWorkspace() {
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
+        ...levels.second,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
         validatorCount: secondVoters.length,
@@ -12951,8 +13116,11 @@ export function ProjectWorkspace() {
    */
   const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => {
     const flagged = flaggedCellIds()
+    const inFile = project?.id && activeFileId
+      ? cellSummaries.filter((c) => c.fileId === activeFileId)
+      : []
     return summarizeBatchValidate(
-      project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+      applyChapterScope(inFile, choices?.chapter),
       // AQU-1571: the project's text rules, pinned by a unit test of the builder.
       // AQU-983: the file modal passes which groups this run includes. A call
       // with no choices keeps the selection-toolbar defaults (include both).
@@ -12990,6 +13158,16 @@ export function ProjectWorkspace() {
     return { rows: cellIds.length, lines }
   }, [quoteSplitFileCandidates])
 
+  // AQU-2664: the Even out window's takes and opener, set further down (the
+  // cells that carry the takes are worked out there).
+  const evenOutCellsRef = useRef<CellData[]>([])
+  // The file menu's "Even out loudness…" shows while the file holds takes;
+  // counted further down (where the cells are) and read through this ref; the
+  // file menu lists the count among its inputs, so it updates when it changes.
+  const evenOutTakeCountRef = useRef(0)
+  const handleClearOneTakeRef = useRef<(cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => Promise<ClearResult | null>>(async () => null)
+  const openEvenOutRef = useRef<(trackIds: readonly string[], from?: string) => void>(() => {})
+
   // AQU-1397: what the Draft window would offer for the open file, counted
   // over the same cells by its own rule, so the two draft entries never open it
   // onto "nothing to draft" and never hide while it has lines to draft.
@@ -13011,6 +13189,8 @@ export function ProjectWorkspace() {
     batchValidateSummary,
     canSplitAtQuotes,
     quoteSplitSummary,
+    // AQU-2664: read through a ref — the takes are worked out further down.
+    evenOutTakes: () => evenOutTakeCountRef.current,
   }), [project, activeFileId, activeLaneDelivers, fileProgress, draftable, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
@@ -13147,10 +13327,16 @@ export function ProjectWorkspace() {
   // untouched AI drafts in a file-wide validation.
   const batchValidateChoicesRef = useRef<ValidateRunChoices>({
     includeReadyCells: true,
+    includeSignedByOthers: true,
     includeUntouchedAiDrafts: false,
     // AQU-2507: a check flag is overruled only on purpose.
     includeFlaggedCells: false,
+    chapter: WHOLE_BOOK,
   })
+  /** AQU-2673: a header run across books hands the loop a summary it already
+   *  built from files the cell store does not hold. Null on the open-file path. */
+  const batchValidateOverrideRef = useRef<BatchValidateSummary | null>(null)
+  const batchBooksHistoryRef = useRef<{ fileId: string | null; fileName: string | null } | null>(null)
   const draftChoicesRef = useRef<DraftRunChoices>({
     includeEmpty: true,
     refreshAiDrafts: false,
@@ -13165,7 +13351,10 @@ export function ProjectWorkspace() {
     // hidden cell never enters the list (`classifyBatchDraft`).
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -13175,7 +13364,10 @@ export function ProjectWorkspace() {
     },
     runCompleteAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -13214,7 +13406,10 @@ export function ProjectWorkspace() {
       // chunk this loop writes and flushes at a time — the event pipeline keeps
       // the protection it was given in AQU-586 — and the loop runs over every
       // chunk, reporting progress, before the one closing message.
-      const summary = batchValidateSummary(batchValidateChoicesRef.current)
+      const summary = batchValidateOverrideRef.current ?? batchValidateSummary(batchValidateChoicesRef.current)
+      const history = batchBooksHistoryRef.current
+      batchValidateOverrideRef.current = null
+      batchBooksHistoryRef.current = null
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -13223,16 +13418,14 @@ export function ProjectWorkspace() {
       const chunks = chunksOf(summary.validatable, batchValidateChunk)
       const total = summary.validatable.length
       void (async () => {
-        // A run of more than one chunk takes long enough to need saying so.
-        // `timeout: 0` keeps it up until this run replaces it with its own
-        // closing message; a single-chunk run keeps the old silence-then-toast.
-        const progressToastId = chunks.length > 1
-          ? toast.add({
+        // A run of more than one chunk takes long enough to need saying so,
+        // and a single chunk still says it is working. `timeout: 0` keeps the
+        // toast up until this run replaces it with its own closing message.
+        const progressToastId = toast.add({
             type: "loading",
             title: t("editor.batchValidate.progress", { done: 0, total }),
             timeout: 0,
           })
-          : null
         const closeProgress = () => { if (progressToastId != null) toast.close(progressToastId) }
         try {
           // AQU-1486: ask what the run's repetitions get BEFORE anything is
@@ -13249,8 +13442,8 @@ export function ProjectWorkspace() {
             {
               labelKey: "editor.history.stepValidateMany",
               labelParams: { count: total },
-              fileId: activeFileId,
-              fileName: activeFileNameRef.current,
+              fileId: history?.fileId ?? activeFileId,
+              fileName: history?.fileName ?? activeFileNameRef.current,
             },
             async () => {
               let done = 0
@@ -13368,46 +13561,71 @@ export function ProjectWorkspace() {
       if (targets.length === 0) return
       const projectId = project.id
       void (async () => {
-        // AQU-1767 phase 2: the whole run is ONE history step.
-        await withGroup(
-          {
-            labelKey: "editor.history.stepValidateAudioMany",
-            labelParams: { count: targets.length },
-            fileId: activeFileId,
-            fileName: activeFileNameRef.current,
-          },
-          async () => {
-            for (const target of targets) {
-              await emitCellAudioValidate({
-                projectId,
-                fileId: target.fileId,
-                cellId: target.cellId,
-                audioId: target.audioId,
-                ...(activeLane ? { targetLang: activeLane } : {}),
-                author: currentUsername,
-                surface: "batch", // AQU-1572
-              })
-              recordStep({
-                kind: "vote.audio",
-                data: { cellId: target.cellId, audioId: target.audioId, voted: true },
-                labelKey: "editor.history.stepValidateAudio",
-                fileId: activeFileId,
-              })
-            }
-          },
-          { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
-        )
-        await refreshOutboxPending()
-        // EVERY file the run touched, not just the open one. On a file with an
-        // audio-cue sibling the takes live on the heard lines, so poking only
-        // `activeFileId` left the file that actually changed stale — the same
-        // shape runTranscribeAll already guards against. The flush lives in
-        // the shared commit so every audio-validation path orders it the same
-        // way (AQU-490, 2026-09-22).
-        await commitAudioValidation(
-          targets.map((target) => target.fileId),
-          { getTokenForFile: getTokenForProjectFile },
-        )
+        const total = targets.length
+        const progressToastId = toast.add({
+          type: "loading",
+          title: t("editor.batchValidate.audioProgress", { done: 0, total }),
+          timeout: 0,
+        })
+        try {
+          // AQU-1767 phase 2: the whole run is ONE history step.
+          await withGroup(
+            {
+              labelKey: "editor.history.stepValidateAudioMany",
+              labelParams: { count: targets.length },
+              fileId: activeFileId,
+              fileName: activeFileNameRef.current,
+            },
+            async () => {
+              let done = 0
+              for (const target of targets) {
+                await emitCellAudioValidate({
+                  projectId,
+                  fileId: target.fileId,
+                  cellId: target.cellId,
+                  audioId: target.audioId,
+                  ...(activeLane ? { targetLang: activeLane } : {}),
+                  author: currentUsername,
+                  surface: "batch", // AQU-1572
+                })
+                recordStep({
+                  kind: "vote.audio",
+                  data: { cellId: target.cellId, audioId: target.audioId, voted: true },
+                  labelKey: "editor.history.stepValidateAudio",
+                  fileId: activeFileId,
+                })
+                done += 1
+                toast.update(progressToastId, {
+                  type: "loading",
+                  title: t("editor.batchValidate.audioProgress", { done, total }),
+                })
+              }
+            },
+            { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
+          )
+          await refreshOutboxPending()
+          // EVERY file the run touched, not just the open one. On a file with an
+          // audio-cue sibling the takes live on the heard lines, so poking only
+          // `activeFileId` left the file that actually changed stale — the same
+          // shape runTranscribeAll already guards against. The flush lives in
+          // the shared commit so every audio-validation path orders it the same
+          // way (AQU-490, 2026-09-22).
+          await commitAudioValidation(
+            targets.map((target) => target.fileId),
+            { getTokenForFile: getTokenForProjectFile },
+          )
+          toast.update(progressToastId, {
+            type: "success",
+            title: t("editor.batchValidate.audioDone", { count: total }),
+            timeout: 5000,
+          })
+        } catch {
+          toast.update(progressToastId, {
+            type: "error",
+            title: t("editor.batchValidate.failedTitle"),
+            timeout: 8000,
+          })
+        }
       })()
     },
     runTranscribeAll: () => {
@@ -13425,11 +13643,9 @@ export function ProjectWorkspace() {
       const cells =
         audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void (async () => {
-        // Same lazy toast as the mp3 auto-transcribe: created on the first
-        // progress call, so a run with nothing to transcribe never leaves a
-        // spinner hanging. The banner still tracks per-cell state; the toast
-        // is the count that survives scrolling away from the table.
-        let toastId: string | null = null
+        // The batch's own toast (AudioBulkProgressBanner) is the live count and
+        // the cancel control, in the bottom-right stack. This one is only the
+        // closing line, and only when the run reported work.
         let lastDone = 0
         let lastTotal = 0
         const plural = (n: number) => (n === 1 ? "" : "s")
@@ -13447,14 +13663,6 @@ export function ProjectWorkspace() {
           onProgress: (done, total) => {
             lastDone = done
             lastTotal = total
-            // The zeroth call lands BEFORE the Whisper model is fetched — on a
-            // cold run that is most of the wait, so say what is happening
-            // rather than counting from nothing.
-            const title = done === 0
-              ? `Transcribing ${total} recording${plural(total)}…`
-              : `Transcribing — ${done} of ${total} done…`
-            if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
-            else toast.update(toastId, { type: "loading", title })
           },
         })
         // AQU-783: the batch enqueues one cell.audio.attach per cell but never
@@ -13469,12 +13677,13 @@ export function ProjectWorkspace() {
         // left them invisible until a reload. Same rule as
         // `handleTranscribeSections`.
         for (const id of new Set(cells.map((c) => c.fileId))) notifyAudioAttachmentsChanged(id)
-        // Only if something was actually reported — see the lazy toast above.
-        // A short count means the banner's Cancel was pressed mid-run.
-        if (toastId !== null) {
-          toast.update(toastId, lastDone < lastTotal
-            ? { type: "info", title: `Transcription stopped — ${lastDone} of ${lastTotal} done.` }
-            : { type: "success", title: `Transcribed ${lastTotal} recording${plural(lastTotal)}.` })
+        if (lastTotal > 0) {
+          toast.add({
+            type: lastDone < lastTotal ? "info" : "success",
+            title: lastDone < lastTotal
+              ? `Transcription stopped — ${lastDone} of ${lastTotal} done.`
+              : `Transcribed ${lastTotal} recording${plural(lastTotal)}.`,
+          })
         }
       })()
     },
@@ -13547,6 +13756,7 @@ export function ProjectWorkspace() {
     // AQU-1759: every line the confirmation counted, through the row action's
     // own path — one read, one optimistic apply, one batch.
     runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
+    openEvenOut: () => openEvenOutRef.current([]),
     navigate,
   }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, batchValidateChunk, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
 
@@ -13559,7 +13769,329 @@ export function ProjectWorkspace() {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
     return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
   }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
-  const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
+  const [batchFileModal, setBatchFileModal] = useState<(BatchFileModalRequest & { chapterKey: string | null }) | null>(null)
+  // The chapter the table is showing, including the text view. A scroll writes
+  // the ref and does not re-render the workspace. The file id rides along so
+  // a chapter from the previous file cannot open the next book's dialog.
+  // The timeline's own pick stays on chosenScopeKey.
+  const viewChapterKeyRef = useRef<{ fileId: string | null; key: string | null }>({ fileId: null, key: null })
+  const booksDialogRef = useRef<BatchBooksDialogHandle>(null)
+  const openBatchFileModal = useCallback((request: BatchFileModalRequest) => {
+    const seen = viewChapterKeyRef.current
+    setBatchFileModal({
+      ...request,
+      chapterKey: seen.fileId === activeFileId ? seen.key : null,
+    })
+  }, [activeFileId])
+  const openFileChapters = useMemo(
+    () => listChapterLabels(activeFileId ? cellSummaries.filter((cell) => cell.fileId === activeFileId) : []),
+    [cellSummaries, activeFileId],
+  )
+  const batchBooks = useMemo(() => listBatchBooks(project?.files ?? []), [project?.files])
+  const runAcrossBooks = useCallback((request: BatchBooksRequest, choices: BatchBooksChoices) => {
+    if (!project) return
+    const names = new Map(batchBooks.map((book) => [book.id, book.name]))
+    void (async () => {
+      let readingId: ReturnType<typeof toast.add> | null = null
+      try {
+        // An unvalidate still in the outbox still looks like this person's
+        // signature, so the run would skip the cell. Wait, then read.
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            readingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            readingId,
+          )
+          return
+        }
+        const firstName = names.get(choices.fileIds[0] ?? "") ?? ""
+        if (readingId) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+          })
+        } else {
+          readingId = toast.add({
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+            timeout: 0,
+          })
+        }
+        const byFile = new Map<string, Awaited<ReturnType<typeof loadBookCells>>>()
+        // Unresolved checks are collected per book after the dialog has closed,
+        // while this loading toast is still up. The open book already has its
+        // flags. With the box on, no book is checked.
+        const leaveFlaggedOut = request === "validate" && !choices.includeFlaggedCells
+        const flagged = leaveFlaggedOut ? new Set<string>() : null
+        for (const fileId of choices.fileIds) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: names.get(fileId) ?? "" }),
+          })
+          let cells
+          // After a wait the open book's store can still show the signature
+          // that just synced away, until the next render. Read the server.
+          if (fileId === activeFileId && outcome !== "synced") {
+            cells = getActiveCells().filter((cell) => cell.fileId === fileId)
+            if (flagged) {
+              for (const id of flaggedCellIds()) flagged.add(id)
+            }
+          } else {
+            const mint = await getTokenForProjectFile(project.id, fileId)
+            if (!mint.token) throw new Error(names.get(fileId) ?? fileId)
+            cells = await loadBookCells({
+              projectId: project.id,
+              fileId,
+              jwt: mint.token,
+              lane: activeLane,
+              username: currentUsername,
+              requiredValidations: validationCount,
+            })
+            if (flagged) {
+              const found = await openFlagsInBook({
+                cells,
+                username: currentUsername,
+                myScopes,
+                activeLane,
+                allowSelfValidation: project.allowSelfValidation,
+                includeReadyCells: choices.includeReadyCells,
+                includeSignedByOthers: choices.includeSignedByOthers,
+                validationCount,
+                includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+                projectRules: rules,
+                rulesForCell: libraryLint.rulesForCell,
+                libraryMayLint: libraryLint.signature !== "",
+              })
+              for (const id of found) flagged.add(id)
+            }
+          }
+          byFile.set(fileId, cells)
+        }
+        if (readingId) toast.close(readingId)
+        if (request === "draft") {
+          for (const cells of byFile.values()) {
+            const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+              includeEmpty: choices.includeEmpty,
+              refreshAiDrafts: choices.refreshAiDrafts,
+              scope: "all",
+              batchSize: completionBatchSizeFor(project),
+              chapter: WHOLE_BOOK,
+            })
+            if (chosen.length > 0) await completeBatch(chosen)
+          }
+          return
+        }
+        const summary = summarizeBatchValidate(
+          [...byFile.values()].flat().map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId: choices.fileIds[0] ?? activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            ...(flagged
+              ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) }
+              : {}),
+            includeReadyCells: choices.includeReadyCells,
+            includeSignedByOthers: choices.includeSignedByOthers,
+            includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+            includeFlaggedCells: choices.includeFlaggedCells,
+          },
+        )
+        batchValidateChoicesRef.current = {
+          includeReadyCells: choices.includeReadyCells,
+          includeSignedByOthers: choices.includeSignedByOthers,
+          includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+          includeFlaggedCells: choices.includeFlaggedCells,
+          chapter: WHOLE_BOOK,
+        }
+        batchValidateOverrideRef.current = summary
+        const firstId = choices.fileIds[0] ?? null
+        batchBooksHistoryRef.current = choices.fileIds.length > 1
+          ? { fileId: firstId, fileName: t("editor.batchBooks.historyName", { count: choices.fileIds.length }) }
+          : { fileId: firstId, fileName: names.get(firstId ?? "") ?? null }
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        if (readingId) toast.close(readingId)
+        const name = err instanceof Error ? err.message : ""
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name: name || (names.get(choices.fileIds[0] ?? "") ?? "") }),
+        })
+      }
+    })()
+  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, rules, libraryLint, actionCtx, actionArgs, outboxFlushNow, t])
+  /**
+   * Batch validate text and Draft AI text. Same wait as the book runs: the
+   * confirm button has been pressed, and a pending edit must land before the
+   * cells are classified.
+   */
+  const runFileBatchAfterSync = useCallback((
+    request: "validate" | "draft",
+    choices: ValidateRunChoices | DraftRunChoices,
+  ) => {
+    if (!project || !activeFileId) return
+    const fileName = project.files.find((file) => file.id === activeFileId)?.name ?? ""
+    void (async () => {
+      let waitingId: ReturnType<typeof toast.add> | null = null
+      try {
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            waitingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            waitingId,
+          )
+          return
+        }
+        if (waitingId) toast.close(waitingId)
+        waitingId = null
+        if (outcome === "idle") {
+          if (request === "validate") {
+            batchValidateChoicesRef.current = choices as ValidateRunChoices
+            workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+          } else {
+            const draft = choices as DraftRunChoices
+            draftChoicesRef.current = draft
+            const id = draft.scope === "next" ? "run-completions" : "complete-all"
+            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
+          }
+          return
+        }
+        const mint = await getTokenForProjectFile(project.id, activeFileId)
+        if (!mint.token) throw new Error(fileName)
+        const cells = await loadBookCells({
+          projectId: project.id,
+          fileId: activeFileId,
+          jwt: mint.token,
+          lane: activeLane,
+          username: currentUsername,
+          requiredValidations: validationCount,
+        })
+        if (request === "draft") {
+          const draft = choices as DraftRunChoices
+          const chosen = selectBatchDraft(
+            classifyBatchDraft(applyChapterScope(cells, draft.chapter)),
+            {
+              includeEmpty: draft.includeEmpty,
+              refreshAiDrafts: draft.refreshAiDrafts,
+              scope: draft.scope,
+              batchSize: completionBatchSizeFor(project),
+            },
+          )
+          if (chosen.length > 0) await completeBatch(chosen)
+          return
+        }
+        const validate = choices as ValidateRunChoices
+        const scoped = applyChapterScope(cells, validate.chapter)
+        const flagged = validate.includeFlaggedCells
+          ? null
+          : await openFlagsInBook({
+            cells: scoped,
+            username: currentUsername,
+            myScopes,
+            activeLane,
+            allowSelfValidation: project.allowSelfValidation,
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            validationCount,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            projectRules: rules,
+            rulesForCell: libraryLint.rulesForCell,
+            libraryMayLint: libraryLint.signature !== "",
+          })
+        batchValidateChoicesRef.current = validate
+        batchValidateOverrideRef.current = summarizeBatchValidate(
+          scoped.map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            ...(flagged ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) } : {}),
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            includeFlaggedCells: validate.includeFlaggedCells,
+          },
+        )
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        if (waitingId) toast.close(waitingId)
+        const name = err instanceof Error && err.message ? err.message : fileName
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name }),
+        })
+      }
+    })()
+  }, [project, activeFileId, outboxFlushNow, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, rules, libraryLint, actionCtx, actionArgs, t])
+  const booksMenuItems = useMemo((): OverflowMenuItem[] => {
+    if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
+    const level = project.syncRole?.level ?? null
+    const items: OverflowMenuItem[] = [
+      { id: "books-section", type: "label", label: t("editor.batchBooks.section") },
+    ]
+    if (canPerform("cell.validate", level)) {
+      items.push({
+        id: "validate-books",
+        label: t("editor.batchBooks.menuValidate"),
+        icon: CheckSquare,
+        onClick: () => booksDialogRef.current?.open("validate"),
+      })
+    }
+    if (canPerform("target.cell.commit", level)) {
+      items.push({
+        id: "draft-books",
+        label: t("editor.batchBooks.menuDraft"),
+        icon: Sparkles,
+        onClick: () => booksDialogRef.current?.open("draft"),
+      })
+    }
+    return items.length > 1 ? items : []
+  }, [project, batchBooks.length, activeLaneDelivers, t])
   /**
    * AQU-2507: the open-check-flag predicate the batch modal renders its
    * "Also validate N cells with open check flags" box from — the SAME question
@@ -13571,16 +14103,32 @@ export function ProjectWorkspace() {
     const flagged = flaggedCellIds()
     return (cellId: string) => flagged.has(cellId)
   }, [batchFileModal, flaggedCellIds])
+  // The verse list under "unresolved checks" names the first open check on
+  // each cell. Built only while the dialog is open.
+  const batchModalFlagIssue = useMemo(() => {
+    if (!batchFileModal) return undefined
+    const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
+    const issues = new Map<string, string>()
+    for (const cell of readAtVersion(cellStoreVersion, getActiveCells)) {
+      if (activeFileId && cell.fileId !== activeFileId) continue
+      const found = infractions.get(cell.id)
+      if (!found || found.length === 0) continue
+      const active = partitionInfractions(found, cell.waivers).active
+      const line = summarizeCellIssues(active.slice(0, 1), ruleById, t)[0]
+      if (line) issues.set(cell.id, formatCellIssueLine(line))
+    }
+    return (cellId: string) => issues.get(cellId)
+  }, [batchFileModal, rules, cellStoreVersion, getActiveCells, activeFileId, infractions, t])
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
     // AQU-983: drafting and text validation open the file modal. The plain
     // confirm dialog stays for the actions that only need a yes.
     if (action.opensFileModal === "validate") {
-      setBatchFileModal({ kind: "validate" })
+      openBatchFileModal({ kind: "validate" })
       return
     }
     if (action.opensFileModal === "draft-next" || action.opensFileModal === "draft-all") {
-      setBatchFileModal({
+      openBatchFileModal({
         kind: "draft",
         scope: action.opensFileModal === "draft-next" ? "next" : "all",
       })
@@ -13591,7 +14139,7 @@ export function ProjectWorkspace() {
     } else {
       action.run(actionCtx, actionArgs)
     }
-  }, [actionCtx, actionArgs])
+  }, [actionCtx, actionArgs, openBatchFileModal])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -14024,12 +14572,11 @@ export function ProjectWorkspace() {
         if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
         return false
       }
-      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
       // AQU-2212: a pick reads in the voice picked, before the cast settings
       // catch up; otherwise the line's own cast voice. Named while it runs.
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
-      const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
+      const work = whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
         // AQU-2511: the lane's own voices and cast — the same view `voiceName`
         // above is read from, so the take comes back in the voice just named.
         project: audioProject ?? project,
@@ -14045,12 +14592,20 @@ export function ProjectWorkspace() {
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
         ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
-      if (!opts?.quiet) {
-        toast.add(ok
-          ? { type: "success", title: t("editor.timeline.regenerateDone") }
-          : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      }
-      return ok
+      // Make speech reports its own progress. A single line keeps one toast:
+      // "Generating…" becomes the result, including when generation fails.
+      if (opts?.quiet) return work
+      return toast.promise(
+        work.then((ok) => {
+          if (!ok) throw new Error("regenerate-failed")
+          return true
+        }),
+        {
+          loading: { title: t("editor.timeline.regenerateStarted") },
+          success: { title: t("editor.timeline.regenerateDone") },
+          error: { title: t("editor.timeline.regenerateFailed") },
+        },
+      ).then(() => true, () => false)
     },
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
@@ -14299,10 +14854,16 @@ export function ProjectWorkspace() {
       },
       lineName,
       trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      takeIsLayer: (fileId, slot) => takeTrackIsLayer({ files: project.files, fileId, slot }),
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
       setLevel: handleGainTarget,
+      evenOut: handleEvenOut,
+      clearEvenOut: handleClearEvenOut,
+      // AQU-2664 (board 73D): the Station's Clear, with its toast. Through a
+      // ref: the toast helper is set up further down.
+      clearEvenOutTake: (cellId, audioId, names) => handleClearOneTakeRef.current(cellId, audioId, names),
       removeNoise: async (cellId, audioId) => {
         const cur = readTake(cellId, audioId)
         if (!cur || !frontierSession) return null
@@ -14393,7 +14954,7 @@ export function ProjectWorkspace() {
         return out
       },
     }
-  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, handleEvenOut, handleClearEvenOut, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
   // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
   // and — while the Station's tab shows — follow the take you click.
   const handleEditInStation = useCallback((cellId: string, audioId: string) => {
@@ -14481,23 +15042,28 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(inspectedTake.cellId)
     const story = owner ? takeStory(owner.cell, inspectedTake.audioId, tts.laneSettings) : null
     if (!story) return
-    toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
-    void runMakeSpeech(
-      [inspectedTake.cellId],
-      { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
-      makeSpeechActions,
-      () => {},
-    ).then((result) => {
-      const ok = result.get(inspectedTake.cellId)?.kind === "done"
-      toast.add(ok
-        ? { type: "success", title: t("editor.timeline.regenerateDone") }
-        : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      if (!ok) return
+    const cellId = inspectedTake.cellId
+    void toast.promise(
+      runMakeSpeech(
+        [cellId],
+        { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
+        makeSpeechActions,
+        () => {},
+      ).then((result) => {
+        if (result.get(cellId)?.kind !== "done") throw new Error("regenerate-failed")
+        return result
+      }),
+      {
+        loading: { title: t("editor.timeline.regenerateStarted") },
+        success: { title: t("editor.timeline.regenerateDone") },
+        error: { title: t("editor.timeline.regenerateFailed") },
+      },
+    ).then(() => {
       // Follow the line to the take that plays now, so the panel shows the new one.
-      const next = resolveTakeCellRef.current(inspectedTake.cellId)
+      const next = resolveTakeCellRef.current(cellId)
       const audioId = next ? lineTake(next.cell).audioId : undefined
-      if (audioId) setInspectedTake((cur) => (cur?.cellId === inspectedTake.cellId ? { ...cur, audioId } : cur))
-    })
+      if (audioId) setInspectedTake((cur) => (cur?.cellId === cellId ? { ...cur, audioId } : cur))
+    }, () => {})
   }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
 
   /**
@@ -14786,7 +15352,7 @@ export function ProjectWorkspace() {
   // AQU-1759: the row menu's split gate, for the file-wide action — rows may
   // be added here, source text may be edited, and the file has no clock.
   canSplitAtQuotesRef.current = canEditLines
-    && canPerform("source.cell.commit", project?.syncRole?.level ?? null)
+    && mayEditSourceText(project)
     && placement === "anywhere"
 
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
@@ -15095,10 +15661,11 @@ export function ProjectWorkspace() {
   } | null>(null)
   // A recolour, painted before the emit. `refresh()` is a full project GET;
   // without this the row keeps its old hue until that lands.
-  const [pendingTrackColors, setPendingTrackColors] = useState<{
-    fileId: string
-    colors: Map<string, string | null>
-  } | null>(null)
+  // AQU-2664: and a track volume, drawn before the read shows it (as a colour
+  // is), so the fader doesn't spring back while the write travels. One overlay
+  // holds both (PendingTrackPaint).
+  const [pendingTrackPaint, setPendingTrackPaint] = useState<PendingTrackPaint | null>(null)
+  const trackVolumeWriteId = useRef(0)
   /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
    *  A drag's write calls it first, so the outbox holds writes in the order
    *  they were made and a held move can never land over a later drag. */
@@ -15119,11 +15686,114 @@ export function ProjectWorkspace() {
     if (pendingTrackScopes && pendingTrackScopes.fileId === activeFile?.id) {
       tracks = applyPendingScopes(tracks, pendingTrackScopes.places)
     }
-    if (pendingTrackColors && pendingTrackColors.fileId === activeFile?.id) {
-      tracks = applyPendingColors(tracks, pendingTrackColors.colors)
+    if (pendingTrackPaint && pendingTrackPaint.fileId === activeFile?.id) {
+      if (pendingTrackPaint.colors) tracks = applyPendingColors(tracks, pendingTrackPaint.colors)
+      if (pendingTrackPaint.volumes) tracks = applyPendingVolumes(tracks, pendingTrackPaint.volumes)
     }
     return tracks
-  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackColors, activeFile?.id])
+  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackPaint, activeFile?.id])
+  // AQU-2664 (board 74): each track's volume is the mixer's track stage, so the
+  // timeline plays at what the faders say (and every export applies the same).
+  useEffect(() => {
+    applyTrackVolumes(timelineTracks)
+  }, [timelineTracks])
+  useEffect(() => {
+    if (!pendingTrackPaint?.volumes || pendingTrackPaint.fileId !== activeFileId) return
+    const settled = settledPendingVolumes(pendingTrackPaint.volumes, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackPaint((current) => {
+      if (!current?.volumes || current.fileId !== activeFileId) return current
+      const next = new Map(current.volumes)
+      for (const id of settled) next.delete(id)
+      return trackPaintOf(current.fileId, current.colors, next)
+    })
+  }, [serverTimelineTracks, pendingTrackPaint, activeFileId])
+
+  // ── AQU-2664 (boards 71–73): the Even out window and its ways in ─────────
+  // The cells that carry this file's takes: the cue sibling's, merged, on a
+  // dubbing file; else the file's own (the list every export reads too).
+  const evenOutCells = audioCueCells ?? audioMergedCells
+  evenOutCellsRef.current = evenOutCells
+  const evenOutTakesInFile = useMemo(() => takesToEvenOut(evenOutCells).length, [evenOutCells])
+  evenOutTakeCountRef.current = evenOutTakesInFile
+  const canEvenOut = canPerform("cell.audio.even", project?.syncRole?.level ?? null)
+  /** Each track's ≈ (board 74), for the tracks holding takes. */
+  const evenOutStates = useMemo(() => evenOutTrackStates(evenOutCells, timelineTracks), [evenOutCells, timelineTracks])
+  /** The tracks selected on the timeline, as it last reported them. */
+  const evenOutSelection = useRef<readonly string[]>([])
+  /** The window holds its own request (EvenOutWindow); this opens it. */
+  const evenOutWindowRef = useRef<EvenOutWindowHandle>(null)
+  const openEvenOut = useCallback((trackIds: readonly string[], from?: string) => {
+    evenOutWindowRef.current?.open({ trackIds: [...trackIds], selection: [...evenOutSelection.current], ...(from ? { from } : {}) })
+  }, [])
+  openEvenOutRef.current = openEvenOut
+  const timelineEvenOut = useMemo(
+    () => (canEvenOut
+      ? { states: evenOutStates, open: openEvenOut, selectionChanged: (ids: readonly string[]) => { evenOutSelection.current = ids } }
+      : undefined),
+    [canEvenOut, evenOutStates, openEvenOut],
+  )
+  /** A toast with Undo for a run or a clear (board 73): Undo, or ⌘Z, takes
+   *  the whole step back. */
+  const evenOutToast = useCallback((title: string, stepId: string | null | undefined) => {
+    const id = `even-out:${stepId ?? Date.now()}`
+    let settled = false
+    const undo = stepId
+      ? () => {
+          if (settled) return
+          settled = true
+          toast.close(id)
+          void undoStepById(stepId).then((r) => { if (r) reportHistory("undo", r) })
+        }
+      : null
+    toast.add({
+      id,
+      title,
+      timeout: 10_000,
+      ...(undo ? { data: { undo }, actionProps: { children: t("editor.evenOut.undo"), onClick: () => undo() } } : {}),
+    })
+  }, [reportHistory, t])
+  const handleEvenOutRan = useCallback((r: EvenOutResult) => {
+    // Nothing changed (every take was already at the target): no toast.
+    if (!(r.changed ?? r.evened)) return
+    evenOutToast(ranToastText(r, t), r.stepId)
+  }, [evenOutToast, t])
+  const handleEvenOutCleared = useCallback((r: ClearResult, scope: EvenOutScope) => {
+    if (r.cleared === 0) return
+    evenOutToast(clearedToastText(r, scope, t), r.stepId)
+  }, [evenOutToast, t])
+  /** The Station's Clear on one take (board 73D), with its toast. */
+  const handleClearOneTake = useCallback(async (cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => {
+    const r = await handleClearEvenOut([{ cellId, audioId }])
+    if (r && r.cleared > 0) evenOutToast(t("editor.evenOut.clearedTake", names), r.stepId)
+    return r
+  }, [handleClearEvenOut, evenOutToast, t])
+  handleClearOneTakeRef.current = handleClearOneTake
+
+  // QUESTION 89 (ON) — the ONE switch (lib/audio/even-out.ts
+  // AUTO_EVEN_CHANGED_TAKES), read here and nowhere else. Review M1: auto-even
+  // starts only from THIS TAB's own actions on a take (record, attach, cut,
+  // trim, a Station version, Remove noise — local-take-changes.ts), never from
+  // what the takes look like, so a Clear, an Undo or a colleague's change
+  // sticks, and opening a file downloads nothing. It needs a KNOWN role of
+  // Contributor or up (review S2), and goes through the one Even out queue.
+  const autoEvenRole = useRef<number | null>(null)
+  autoEvenRole.current = project?.syncRole?.level ?? null
+  const handleEvenOutRef = useRef(handleEvenOut)
+  handleEvenOutRef.current = handleEvenOut
+  useEffect(() => {
+    const q = createAutoEvenQueue({
+      enabled: AUTO_EVEN_CHANGED_TAKES,
+      cells: () => evenOutCellsRef.current,
+      allowed: () => autoEvenRole.current != null && canPerform("cell.audio.even", autoEvenRole.current),
+      run: (takes) => handleEvenOutRef.current(takes, { markAsRun: true }),
+    })
+    const off = onLocalTakeChange((refs, kind) => q.note(refs, kind))
+    return () => {
+      off()
+      q.dispose()
+    }
+  }, [])
   useEffect(() => {
     if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
     const known = new Set(serverTimelineTracks.map((tr) => tr.id))
@@ -15163,16 +15833,16 @@ export function ProjectWorkspace() {
     })
   }, [serverTimelineTracks, pendingTrackScopes, activeFileId])
   useEffect(() => {
-    if (!pendingTrackColors || pendingTrackColors.fileId !== activeFileId) return
-    const settled = settledPendingColors(pendingTrackColors.colors, serverTimelineTracks)
+    if (!pendingTrackPaint?.colors || pendingTrackPaint.fileId !== activeFileId) return
+    const settled = settledPendingColors(pendingTrackPaint.colors, serverTimelineTracks)
     if (settled.length === 0) return
-    setPendingTrackColors((current) => {
-      if (!current || current.fileId !== activeFileId) return current
+    setPendingTrackPaint((current) => {
+      if (!current?.colors || current.fileId !== activeFileId) return current
       const next = new Map(current.colors)
       for (const id of settled) next.delete(id)
-      return next.size === 0 ? null : { fileId: current.fileId, colors: next }
+      return trackPaintOf(current.fileId, next, current.volumes)
     })
-  }, [serverTimelineTracks, pendingTrackColors, activeFileId])
+  }, [serverTimelineTracks, pendingTrackPaint, activeFileId])
   // The third way out: leaving the file (or the project) abandons the overlay.
   // Whatever the server ends up storing is the truth for a file you are no
   // longer looking at, and an overlay held across a switch would be applied to
@@ -15181,7 +15851,9 @@ export function ProjectWorkspace() {
     setPendingTrackOrders(null)
     setPendingTrackScopes(null)
     setPendingNewTracks(null)
-    setPendingTrackColors(null)
+    // A pending volume is kept, as it was before the two shared one overlay:
+    // it is keyed by its file and settles when that file's read shows it.
+    setPendingTrackPaint((current) => (current?.volumes ? trackPaintOf(current.fileId, null, current.volumes) : null))
   }, [activeFileId, projectId])
   // Pre-merge round: the control returned to the timeline toolbar. The gate
   // is "don't pass the callback": below the floor the toolbar renders the
@@ -15658,8 +16330,12 @@ export function ProjectWorkspace() {
   // milestone the timeline draws. A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
-    setChosenScopeKey(key)
-  }, [])
+    viewChapterKeyRef.current = { fileId: activeFileId ?? null, key }
+    // A book timeline, or a timed file split into milestones, follows the
+    // page. Otherwise the report only feeds the batch dialog and must not
+    // re-render this shell.
+    if (sequenceTimeline || splitByMilestone) setChosenScopeKey(key)
+  }, [sequenceTimeline, splitByMilestone, activeFileId])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line. With the split off, that run
   // stays on the whole book's clock. With the split on, the run is the
@@ -16255,15 +16931,14 @@ export function ProjectWorkspace() {
     (updates: ReadonlyArray<{ trackId: string; color: string | null }>): (() => void) => {
       const fileId = activeFileId
       if (!fileId || updates.length === 0) return () => {}
-      setPendingTrackColors((current) => ({
-        fileId,
-        colors: withPendingColors(current?.fileId === fileId ? current.colors : null, updates),
-      }))
+      setPendingTrackPaint((current) => {
+        const mine = current?.fileId === fileId ? current : null
+        return trackPaintOf(fileId, withPendingColors(mine?.colors ?? null, updates), mine?.volumes ?? null)
+      })
       return () => {
-        setPendingTrackColors((current) => {
-          if (!current || current.fileId !== fileId) return current
-          const colors = withoutPendingColors(current.colors, updates)
-          return colors === null ? null : { fileId, colors }
+        setPendingTrackPaint((current) => {
+          if (!current?.colors || current.fileId !== fileId) return current
+          return trackPaintOf(fileId, withoutPendingColors(current.colors, updates), current.volumes)
         })
       }
     },
@@ -16320,6 +16995,40 @@ export function ProjectWorkspace() {
       )
     },
     [applyTrackPatches, paintTrackColors, recordTrackChanges],
+  )
+
+  /**
+   * AQU-2664 (board 74): a track's volume from its header's fader — shared and
+   * exported, one write and one undo step per change (the fader writes once a
+   * drag ends). 0 dB is stored as nothing. Maintainer clearance, like colour.
+   */
+  const handleSetTrackVolume = useCallback(
+    (trackId: string, db: number) => {
+      const fileId = activeFileId
+      if (!fileId) return
+      // Stored: nothing for 0 dB, the number, or "-inf" for silence (fader-scale.ts).
+      const volumeDb = toStoredVolume(db)
+      // Review S3: remember what the read said, so a colleague's newer value
+      // settles this write too (the fader then shows theirs).
+      const readBefore = serverTracksRef.current.find((tr) => tr.id === trackId)?.volumeDb ?? 0
+      const id = ++trackVolumeWriteId.current
+      setPendingTrackPaint((current) => {
+        const mine = current?.fileId === fileId ? current : null
+        const volumes = new Map(mine?.volumes ?? [])
+        // Re-check S1: a second quick write keeps the first's read-before and
+        // remembers the first, so its landing doesn't spring the fader back.
+        volumes.set(trackId, nextPendingVolume(volumes.get(trackId), db, readBefore, id))
+        return trackPaintOf(fileId, mine?.colors ?? null, volumes)
+      })
+      // A refused write takes back only itself, never a newer one.
+      const revert = () => setPendingTrackPaint((current) => {
+        if (!current?.volumes || current.fileId !== fileId) return current
+        return trackPaintOf(fileId, current.colors, withoutPendingVolume(current.volumes, trackId, id))
+      })
+      recordTrackChanges("editor.history.stepTrackVolume", [{ trackId, after: { volumeDb } }])
+      void applyTrackPatches([{ trackId, patch: { volumeDb } }], "Couldn't change the track's volume:", revert)
+    },
+    [activeFileId, applyTrackPatches, recordTrackChanges],
   )
 
   /**
@@ -17078,7 +17787,7 @@ export function ProjectWorkspace() {
         },
         commitSource: async (cellId, text, parentId) => {
           const cell = getActiveCell(cellId)
-          if (!cell || !project?.id || !canPerform("source.cell.commit", project.syncRole?.level ?? null)) return null
+          if (!cell || !project?.id || !mayEditSourceText(project)) return null
           const eventId = await emitSourceCellCommit({
             projectId: project.id,
             fileId: cell.fileId,
@@ -17093,7 +17802,7 @@ export function ProjectWorkspace() {
         },
       }),
     )
-  }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, currentUsername, getTokenForProjectFile, revalidateCells])
+  }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, project?.sourceTextFloor, project?.laneGrantLevels, currentUsername, getTokenForProjectFile, revalidateCells])
   // …and lines made from a recording, in the open file or as a new file.
   const lineUntouched = useCallback(
     (cellId: string, createdEventId: string | null): boolean | null => {
@@ -17158,6 +17867,7 @@ export function ProjectWorkspace() {
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
+        applyEven: async (cellId, audioId, target) => { await applyTakeEven(cellId, audioId, target) },
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId, c.pieceVoters),
         uncut: applyTakeUncut,
@@ -17320,7 +18030,7 @@ export function ProjectWorkspace() {
     })
     return unregister
   }, [
-    readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    readTake, applyTakeTrim, applyTakeGain, applyTakeEven, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
     applyLineRooms, readLineRoom,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
@@ -18333,6 +19043,13 @@ export function ProjectWorkspace() {
 
     items.push({ id: "sep-file-actions", type: "separator" })
     items.push({ id: "file-section", type: "label", label: t("nav.fileMenu.section.file") })
+    // The same File details item the sidebar file menu opens.
+    items.push({
+      id: "file-details",
+      label: t("fileDetails.menuItem"),
+      icon: Info,
+      onClick: () => setDetailsFileId(activeFileId),
+    })
     if (suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)) {
       items.push({
         id: "redetect-suggestions",
@@ -18438,6 +19155,8 @@ export function ProjectWorkspace() {
     return items
   }, [
     actionCtx,
+    // AQU-2664: actionCtx reads the take count through a ref.
+    evenOutTakesInFile,
     activeFile,
     activeFileId,
     activeLane,
@@ -19327,6 +20046,7 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
+            extraMenuItems={booksMenuItems}
             onImport={project ? handleHeaderImport : undefined}
             importDisabledReason={importDenialReason}
             onSettings={project ? openProjectSettings : undefined}
@@ -19505,7 +20225,13 @@ export function ProjectWorkspace() {
             </div>
             {/* AQU-981: bulk recordings upload — progress, then its summary. */}
             <div className="px-3 py-1 empty:hidden">
-              <RecordingsUploadBanner />
+              {/* AQU-2664 re-check S2: a bulk upload lands on the main track;
+                  when that track is evened, its finish offers to even it. */}
+              <RecordingsUploadBanner
+                evenOutTrack={canEvenOut && evenOutStates.has("target-audio") && evenedTakesIn(evenOutCells, { slots: ["recording", "generatedVoice"] }).length > 0
+                  ? () => openEvenOut(["target-audio"])
+                  : undefined}
+              />
             </div>
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where
@@ -19759,7 +20485,7 @@ export function ProjectWorkspace() {
             className="relative flex h-full w-full flex-col"
             {...(timelineStacked ? { "data-media-editor": "" } : {})}
           >
-            <ExtensionsBar choice={extensionEditorChoice} />
+            <ExtensionsBar choice={extensionEditorChoice} fileId={activeFile?.id ?? null} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
@@ -20088,6 +20814,13 @@ export function ProjectWorkspace() {
                     // Colour rides the same clearance alone (Sam, 2026-09-26):
                     // how a track looks, not what the timeline holds.
                     onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
+                    // AQU-2664 (board 74): a track's volume, at a take's
+                    // volume level (Contributor); its other settings stay
+                    // with maintainers.
+                    onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
+                    // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
+                    // window, for anyone who may even takes out.
+                    evenOut={timelineEvenOut}
                     // AQU-1566: a caption track already on an empty linked
                     // video becomes its rows. Maintainer, no switch.
                     onPromoteTrackToRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
@@ -20305,7 +21038,7 @@ export function ProjectWorkspace() {
             archivedLaneLabel={activeLaneLock?.label ?? null}
             languagesLoading={lanesPending}
             onLaneChange={setActiveLane}
-            defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
+            defaultLaneLabel={laneLabels[""] || activeTargetLanguage || t("editor.column.target")}
             laneLabels={laneLabels}
             laneCodes={laneCodes}
             // AQU-583: the TARGET tag is the discoverable entry point to change
@@ -20425,11 +21158,11 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
-            // The table names the milestone on screen. A book always reports it.
-            // A timed file reports it while Split into milestones is on, so
-            // the timeline follows that page and does not re-render the shell
-            // on every scroll while the split is off.
-            onActiveChapterChange={sequenceTimeline || splitByMilestone ? handleTableChapterChange : undefined}
+            // The table names the milestone on screen, including the text view,
+            // so a batch on this book opens on the chapter in view. Chosen
+            // scope moves only for a book timeline or a split timed file, so a
+            // scroll does not re-render this shell otherwise.
+            onActiveChapterChange={handleTableChapterChange}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               </ChapterNavTrailingContext.Provider>
@@ -20807,6 +21540,7 @@ export function ProjectWorkspace() {
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
+                checksPending={health.infractionsPending}
               />
             ) : null
 
@@ -21155,6 +21889,16 @@ export function ProjectWorkspace() {
       </Suspense>
       {/* AQU-1486: "Validate the repeated rows too?" and the bulk conflict picker. */}
       {repetitionDialogs}
+      {/* AQU-2664 (board 71): the one Even out window. */}
+      <EvenOutWindow
+        ref={evenOutWindowRef}
+        cells={evenOutCells}
+        tracks={timelineTracks}
+        run={(takes, opts) => handleEvenOut(takes, { ...opts, markAsRun: true })}
+        clear={(takes, opts) => handleClearEvenOut(takes, opts)}
+        onRan={handleEvenOutRan}
+        onCleared={handleEvenOutCleared}
+      />
       {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog
@@ -21361,6 +22105,11 @@ export function ProjectWorkspace() {
           request={batchFileModal}
           batchSize={completionBatchSizeFor(project)}
           chunkSize={batchValidateChunk}
+          bookName={activeFile
+            ? (activeFile.bookCode ? (getBookName(activeFile.bookCode) ?? activeFile.name) : activeFile.name)
+            : undefined}
+          chapters={openFileChapters}
+          initialChapter={initialChapterScope(openFileChapters, batchFileModal.chapterKey)}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           validateCandidates={activeFileId
             ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
@@ -21377,21 +22126,28 @@ export function ProjectWorkspace() {
             // same predicate the run then applies.
             hasOpenFlags: batchModalOpenFlags,
           }}
+          flagIssue={batchModalFlagIssue}
           draftCells={batchFileModal.kind === "draft" && activeFileId
             ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
             : []}
           onConfirmValidate={(choices) => {
-            batchValidateChoicesRef.current = choices
-            workspaceActions.find((action) => action.id === "batch-validate")
-              ?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("validate", choices)
           }}
           onConfirmDraft={(choices) => {
-            draftChoicesRef.current = choices
-            const id = choices.scope === "next" ? "run-completions" : "complete-all"
-            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("draft", choices)
           }}
+        />
+      )}
+      {project && (
+        <BatchBooksDialog
+          ref={booksDialogRef}
+          books={batchBooks}
+          initialFileId={activeFileId}
+          validationCount={validationCount}
+          canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
+          onConfirm={runAcrossBooks}
         />
       )}
       {pendingActionConfirm?.requiresConfirmation && (
@@ -21784,25 +22540,12 @@ export function ProjectWorkspace() {
               <p className="px-1 py-1 text-sm text-muted-foreground">{t("workspace.trash.empty")}</p>
             )}
             {trashFiles.map((f) => (
-              <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
-                <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                {/* AQU-2260: labelled buttons say nothing on hover; what
-                    Delete forever does is the retention note below. */}
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                  onClick={() => void handleRestoreFile(f.fileId)}
-                >
-                  {t("common.restore")}
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                  onClick={() => void handlePurgeFile(f.fileId)}
-                >
-                  {t("workspace.trash.deleteForever")}
-                </button>
-              </div>
+              <RecentlyDeletedRow
+                key={f.fileId}
+                file={f}
+                onRestore={() => void handleRestoreFile(f.fileId)}
+                onPurge={() => void handlePurgeFile(f.fileId)}
+              />
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
               {t("workspace.trash.retentionNote")}

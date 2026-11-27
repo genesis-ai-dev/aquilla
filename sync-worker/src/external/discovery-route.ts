@@ -15,6 +15,11 @@
 
 import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
 import { PLAN_IMPORT_MAX_CELLS, SET_TRANSLATION_MAX_COMMANDS } from './commands'
+import {
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_PROSE,
+  SERVER_PARSEABLE_FILE_TYPES,
+} from './import-parse-formats'
 import { AGENT_SKILLS } from '../../../db/shared/agent-skills'
 
 const EXTERNAL_ROOT = '/api/v1/external'
@@ -105,7 +110,7 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/quality': 'Quality signals per file: health score (0-100), coverage (total/filled/validated cells + percentages) and the project rollup. Optional fileId=<id> to scope to one file. lane=<id> is required; the response laneId is that id. Same numbers the in-app health ring and progress surfaces show.',
       'GET /api/v1/external/projects/:projectId/terms/consistency': 'Term-consistency drift: per active concept, how many occurrences used an approved rendering, which cells used which rendering, and which cells used none. Optional fileId=<id>, onlyDrift=1 (findings with flagged cells only). lane=<id> is required; the response laneId is that id. Runs the same scan as the in-app "Check file" pass.',
       'GET /api/v1/external/projects/:projectId/terms': 'The project termbase: one entry per glossary concept with its conceptId, sourceTerm, renderings (preferred|admitted|forbidden), status (active|draft|deprecated), notes, caseSensitive and matchOptions, oldest first. Optional status=<one of those>, includeDeleted=1, limit + cursor. Same rows as the in-app Terminology page. Read it before writing a term: a second term.create for an existing sourceTerm does not merge, and matchOptions.forms is what makes a term match its inflected forms at all (matching is exact without it). Write via an EmitEvents changeset carrying term.* events.',
-      'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
+      'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 64MiB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',
       'POST /api/v1/external/projects/:projectId/knowledge': 'Upload a knowledge-base (reference) document — a published Bible, approved prior translations, a style guide. Body = raw bytes, header x-doc-name: <filename> (required, URL-encoded). Extensions: .md .txt .docx .pdf (25MB cap). Needs PROJECT_LEAD, the same floor as the in-app upload. Text is extracted and indexed server-side; a direct write, NOT a changeset. → { doc, textTruncated? }: textTruncated: true means the document is very long and only its first 2 million characters were read and indexed.',
@@ -175,7 +180,7 @@ function apiMap(): Record<string, unknown> {
       note:
         'Artifact-first file imports: preserve the ORIGINAL bytes first (enables round-trip export), then let the server parse them with Aquilla\'s built-in importers and stage a human-approvable PlanImport changeset. The MCP tools preview_import / prepare_import wrap steps 2–3.',
       workflow: [
-        `1. POST ${EXTERNAL_ROOT}/projects/:projectId/artifacts with header "x-artifact-name: <filename>" and the raw file bytes as the body (max 25MB) → { artifactId }.`,
+        `1. POST ${EXTERNAL_ROOT}/projects/:projectId/artifacts with header "x-artifact-name: <filename>" and the raw file bytes as the body (max 64MiB) → { artifactId }.`,
         `2. POST ${EXTERNAL_ROOT}/projects/:projectId/artifacts/:artifactId/parse (empty body) → PREVIEW: { fileName, fileType, totalCells, sampleCells, warnings, results }. Pass { "fileType": "..." } to override detection (required for po/properties/obs/sbv, which are not sniffable).`,
         `3. Same route with { "stage": true } (plus optional fileName/sourceLanguage/targetLanguage/resultIndex, and laneId when the file already has translations) → stages a PlanImport changeset linking the artifact; returns the standard { changeset, digest, summary, approvalUrl }. laneId is a lane id from GET .../projects/:projectId, not a language tag.`,
         `4. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit as usual (ask mode: human approval at the approvalUrl first).`,
@@ -188,9 +193,10 @@ function apiMap(): Record<string, unknown> {
         // validation_failed. Above it, prepare refuses; split the work.
         setTranslationMaxCommands: SET_TRANSLATION_MAX_COMMANDS,
       },
-      serverParseableFormats: ['csv', 'docx', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
+      serverParseableFormats: SERVER_PARSEABLE_FILE_TYPES,
+      clientOnlyFormats: CLIENT_ONLY_FORMATS,
       unsupportedFormats:
-        'pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+        `${CLIENT_ONLY_PROSE} need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.`,
     },
     livingMemory: {
       note:

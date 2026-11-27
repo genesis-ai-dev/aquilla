@@ -185,7 +185,7 @@ export interface SyncTokenCallbacks {
   /** Fires whenever a fresh token is successfully minted. Callers persist the
    * role to IDB so Dashboard rendering can decide owner-only actions without
    * a round-trip. */
-  onRole?: (role: SyncTokenResponse["role"]) => void
+  onRole?: (role: SyncTokenResponse["role"], token: string) => void
   /** Fires when the server rejects with 403, typically because the project was
    * archived. Callers use this to drive local tombstone reconciliation. Not
    * fired for the OPS-44 "elevation required" 403, which says nothing about
@@ -305,7 +305,7 @@ export function makeSyncTokenMinter(
         jwt,
         role: resp.role,
       }
-      callbacks.onRole?.(resp.role)
+      callbacks.onRole?.(resp.role, resp.token)
       return { token: resp.token, status: 200, ...platformRole(resp.role) }
     }
     const err = outcome.err

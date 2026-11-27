@@ -219,6 +219,13 @@ beforeEach(async () => {
     [PROJECT],
   )
   bridgeLane = lane.rows[0].id
+  // AQU-2647: SplitCell rewrites source text. These tests keep a floor that
+  // admits a project lead. The default Maintainer refusal is source-text-floor.test.ts.
+  await tdb.pg.query(
+    `INSERT INTO project_settings (project_id, settings, version, updated_at)
+     VALUES ($1, $2, 1, CURRENT_TIMESTAMP)`,
+    [PROJECT, JSON.stringify({ sourceTextFloor: 'project_lead' })],
+  )
 })
 
 // ── InsertCell ───────────────────────────────────────────────────────────────

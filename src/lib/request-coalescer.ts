@@ -22,7 +22,13 @@ export interface RequestCoalescerOptions {
 }
 
 export interface RequestCoalescer<T> {
-  run(key: string, fn: () => Promise<T>, options?: { fresh?: boolean }): Promise<T>
+  /**
+   * `joinLatest`: join the newest request for `key` whatever its age — the
+   * queued follow-up if there is one, else the one in flight. For a caller
+   * that is not reporting a change (a component mounting), so a request
+   * already on its way is as fresh an answer as it needs.
+   */
+  run(key: string, fn: () => Promise<T>, options?: { fresh?: boolean; joinLatest?: boolean }): Promise<T>
   /** Drop the cached value (and any pending join) for one key, or all keys. */
   invalidate(key?: string): void
 }
@@ -68,6 +74,7 @@ export function createRequestCoalescer<T>(options: RequestCoalescerOptions = {})
       }
       const current = inFlight.get(key)
       if (current) {
+        if (runOptions?.joinLatest) return current.followUp ?? current.promise
         if (now() - current.startedAt <= joinWindowMs) return current.promise
         if (!current.followUp) {
           const settled = current.promise.then(() => undefined, () => undefined)

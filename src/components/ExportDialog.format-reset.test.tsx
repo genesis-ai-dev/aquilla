@@ -8,6 +8,7 @@ import { ExportDialog } from "./ExportDialog"
 import { exportDialogUnchangedWhileClosed } from "./closedDialogInputs"
 import { memoWhileClosed } from "./memoWhileClosed"
 import type { CellData } from "@/hooks/useCells"
+import { DEFAULT_EXPORT_MEMORY, writeExportMemory } from "@/lib/export/export-dialog-memory"
 
 vi.mock("@/lib/export/export-service", () => ({
   downloadBlob: vi.fn(),
@@ -107,6 +108,32 @@ describe("ExportDialog — format follows the active file", () => {
       const [, name] = mockDownload.mock.calls[0]
       expect(name).toMatch(/\.md$/)
     })
+  })
+
+  it("does not keep a remembered InDesign export selected on a Word file", async () => {
+    // The fold format is remembered per project. InDesign is in the catalog,
+    // so a previous IDML file used to leave it selected unseen on a .docx,
+    // and the footer Export button then read the Word package as an IDML archive.
+    localStorage.clear()
+    writeExportMemory("local", "p1", { ...DEFAULT_EXPORT_MEMORY, foldFormat: "idml" })
+    const props = {
+      ...TXT_FILE_PROPS,
+      activeFileId: "f-docx",
+      activeFileName: "Daily Doctrine_original_eng.docx",
+      activeFileType: "docx",
+      projectFiles: [
+        ...PROJECT_FILES,
+        { id: "f-docx", name: "Daily Doctrine_original_eng.docx", type: "docx" },
+      ],
+    }
+    const { rerender } = render(<ExportDialog {...props} open={false} />)
+    rerender(<ExportDialog {...props} open />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /Word \(.docx\)/i })).toBeChecked()
+    })
+    expect(screen.queryByRole("radio", { name: /InDesign/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/IDML archive is missing its root mimetype member/)).not.toBeInTheDocument()
   })
 
   it("offers and preselects native PPTX round-trip for a PPTX file", () => {

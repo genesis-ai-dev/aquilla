@@ -113,10 +113,13 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
 import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
-import { RemoveAccessDialog } from "@/components/org/access/RemoveAccessDialog"
+import { RemoveAccessDialog, type RemoveAccessDialogProps } from "@/components/org/access/RemoveAccessDialog"
 import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { ScopePath } from "@/lib/access/types"
+
+/** AQU-2324: what a grant-only row's Remove hands to RemoveAccessDialog. */
+export type RemoveGrantRequest = Pick<RemoveAccessDialogProps, "orgId" | "person" | "grants">
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -153,6 +156,12 @@ export interface StaffLanePopoverProps {
    * was gone before the dialog could open. Absent, the popover opens it.
    */
   onGiveAccess?: (request: GiveAccessRequest) => void
+  /**
+   * AQU-2324: take a grant-only row's removal instead of opening
+   * RemoveAccessDialog from here — the same remount as `onGiveAccess`, so a
+   * caller that passes one must pass both. Absent, the popover opens it.
+   */
+  onRemoveGrant?: (request: RemoveGrantRequest) => void
 }
 
 /**
@@ -201,6 +210,7 @@ export function StaffLanePopover({
   onOpenChange,
   anchorOnly = false,
   onGiveAccess,
+  onRemoveGrant,
 }: StaffLanePopoverProps) {
   const { t, locale } = useI18n()
   const location = useLocation()
@@ -224,7 +234,7 @@ export function StaffLanePopover({
   /** AQU-2322: the Give access the Add opened, pre-filled; null when none is open. */
   const [giving, setGiving] = useState<GiveAccessRequest | null>(null)
   /** AQU-2324: a grant-only row whose removal is open in RemoveAccessDialog. */
-  const [removingGrant, setRemovingGrant] = useState<StaffedLanePerson | null>(null)
+  const [removingGrant, setRemovingGrant] = useState<RemoveGrantRequest | null>(null)
   /**
    * AQU-1998: who is already staffed on this lane. `null` until the first
    * scope read for an open popover has come back, so "nobody yet" and "not
@@ -440,10 +450,17 @@ export function StaffLanePopover({
     if (!jwt) return
     // AQU-2324: a grant-only row has no scope to take off. Its removal is the
     // lane-grant route's, behind the dry run that says what they lose and
-    // keep. The popover closes so the dialog is on top.
+    // keep. The popover closes so the dialog is on top; a caller that remounts
+    // it as it closes holds the dialog itself (`onRemoveGrant`).
     if (person.via === "grant") {
       if (orgId == null || !person.grantLaneId) return
-      setRemovingGrant(person)
+      const request: RemoveGrantRequest = {
+        orgId,
+        person: { userId: String(person.userId), displayName: person.username },
+        grants: [{ type: "lane", id: person.grantLaneId }],
+      }
+      if (onRemoveGrant) onRemoveGrant(request)
+      else setRemovingGrant(request)
       handleOpenChange(false)
       return
     }
@@ -747,13 +764,11 @@ export function StaffLanePopover({
     {orgId != null && !onGiveAccess && (
       <GiveAccessLauncher orgId={orgId} request={giving} onClose={() => setGiving(null)} onGranted={handleGranted} />
     )}
-    {orgId != null && removingGrant?.grantLaneId && (
+    {!onRemoveGrant && removingGrant && (
       <RemoveAccessDialog
         open
         onOpenChange={(next) => { if (!next) setRemovingGrant(null) }}
-        orgId={orgId}
-        person={{ userId: String(removingGrant.userId), displayName: removingGrant.username }}
-        grants={[{ type: "lane", id: removingGrant.grantLaneId }]}
+        {...removingGrant}
         onRemoved={handleGranted}
       />
     )}

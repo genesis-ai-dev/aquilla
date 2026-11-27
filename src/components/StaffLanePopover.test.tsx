@@ -1079,4 +1079,43 @@ describe("StaffLanePopover", () => {
     expect(launch).toHaveAttribute("data-place", "lane:ln-es")
     await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
   })
+
+  // AQU-2324: the walk of PR 2198 found the same remount behind Remove. On the
+  // Languages table a grant-only row's Remove closed the popover and nothing
+  // opened: the removal was held in the popover's state, and the table threw
+  // that away as it rebuilt the cell. The org Projects table, which does not
+  // remount it, showed the dialog.
+  it("in the project's Languages table, a grant-only row's Remove opens the grant's dry run though the table remounts the popover (AQU-2324)", async () => {
+    mockProjectMembers = [
+      { userId: 11, username: "mark", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    laneGrants.byUser = { 11: [{ laneId: "ln-es", name: "Spanish", level: 400 }] }
+    render(
+      <MemoryRouter>
+        <OverviewLaneTable
+          projectId="proj-1"
+          projectName="Mark"
+          orgId={1}
+          jwt="jwt-pm"
+          lanes={[{ lane: "es", laneId: "ln-es", name: "Spanish", role: "target", totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null }]}
+          defaultLanguageLabel="English"
+          extraLanes={[]}
+          files={[]}
+          roleLevel={700}
+          author="pm"
+          canManageLanes
+          canAddLanguage={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId("overview-lane-people-es"))
+    fireEvent.click(await screen.findByTestId("staff-lane-remove-11"))
+
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+    const launch = await screen.findByTestId("remove-access-launch")
+    expect(launch).toHaveAttribute("data-org", "1")
+    expect(launch).toHaveAttribute("data-user", "11")
+    expect(launch).toHaveAttribute("data-grants", "lane:ln-es")
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
+  })
 })

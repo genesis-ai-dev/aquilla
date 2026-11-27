@@ -64,7 +64,7 @@ export const importExport = defineNamespace({
     "importExport.scriptAlignment.trackName": "Track name",
     "importExport.scriptAlignment.destination": "Destination track",
     "importExport.scriptAlignment.newTrack": "New track",
-    "importExport.scriptAlignment.overwrite": "{count} segments in this track will be overwritten.",
+    "importExport.scriptAlignment.overwrite": plural({ one: "{count} segment in this track will be overwritten.", other: "{count} segments in this track will be overwritten." }),
     "importExport.scriptAlignment.align": "Align script",
     "importExport.scriptAlignment.aligning": "Aligning script…",
     "importExport.scriptAlignment.use": "Use aligned segments",
@@ -1153,7 +1153,7 @@ export const importExport = defineNamespace({
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in \"intro:*\" paragraph styles — check that this is the notes document.",
     "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
-    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the {limit} media import limit.",
+    "importExport.errors.mediaFileTooLarge": "{fileName} is larger than {limit}, so it can't be imported. Save a smaller copy and import that.",
     "importExport.errors.couldNotDecodeAudio":
       "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try re-exporting it as MP3 or WAV.",
     "importExport.errors.notAParatextProject":
@@ -1218,6 +1218,9 @@ export const importExport = defineNamespace({
 
     // — Thrown-error triage: src/lib/sync/source-upload.ts —
     "importExport.errors.sourceUploadEmpty": "Source upload failed: the original file is empty.",
+    // Import map X-D-film-refusal-text: the server's refusal of a film address.
+    "importExport.errors.filmRefused":
+      "This film couldn't be saved with the file. Only a YouTube video's link, or a film uploaded with this file, can be.",
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
     "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
     "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",
@@ -1453,6 +1456,8 @@ export const importExport = defineNamespace({
     "importExport.reimport.title": "Re-import {name}",
     "importExport.reimport.oneFile": "Choose one file to re-import.",
     "importExport.reimport.oneDocument": "Re-import takes one document, not a project or a set of books.",
+    "importExport.reimport.mediaCannotReplace": "{fileName} is a recording or film, so it can't replace what's in {name}. You can bring it in as a new file instead.",
+    "importExport.reimport.importMediaAsNew": "Import as a new file",
     "importExport.reimport.update": "Update this file",
     "importExport.reimport.updatedCopy": "Make updated copy",
     "importExport.reimport.blankCopy": "Make a blank copy",
@@ -1764,6 +1769,28 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.option.importAll.title": "Import them all",
     "importExport.translationCheck.option.importAll.description": "Adds every file to the project as new source text, those included.",
     "importExport.review.useOtherFile": "Import into {fileName} instead",
+    // AQU-2426: importing and splitting recordings.
+    "importExport.recordingChoice.title": "Import {name}",
+    "importExport.recordingChoice.titleMany": plural({ one: "Import {count} recording", other: "Import {count} recordings" }),
+    "importExport.recordingChoice.description": "No subtitle file came with this recording. Bring it in whole, or transcribe it to find its lines.",
+    "importExport.recordingChoice.descriptionMany": plural({ one: "None of them came with a subtitle file. Choose once for all {count}.", other: "None of them came with a subtitle file. Choose once for all {count}." }),
+    "importExport.recordingChoice.wholeNote": "Whole, it comes in as one line, and you can split it into lines later from its ⋯ menu.",
+    "importExport.recordingChoice.wholeNoteMany": "Whole, each comes in as one line, and you can split them into lines later from their ⋯ menu.",
+    "importExport.recordingChoice.captionsNotRead": "{name} is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    "importExport.recordingChoice.captionsNotReadMany": plural({
+      one: "{count} of these is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+      other: "{count} of these are over {maxSize}, so they were not checked for captions inside them. If they have any, import them as subtitle files along with them.",
+    }),
+    "importExport.recordingChoice.inAll": "In all",
+    "importExport.recordingChoice.list": "Recordings to import",
+    "importExport.recordingChoice.importWhole": plural({ one: "Import whole recording", other: "Import whole recordings" }),
+    "importExport.recordingChoice.importTranscribe": "Import and transcribe…",
+    "importExport.recordingChoice.whyNot": "Why you can't transcribe here",
+    "importExport.recordingChoice.costTitle": "Import and transcribe {name}",
+    "importExport.recordingChoice.costTitleMany": plural({ one: "Import and transcribe {count} recording", other: "Import and transcribe {count} recordings" }),
+    "importExport.recordingChoice.transcribeAndImport": "Transcribe and import",
+    "importExport.recordingChoice.findsLines": "It finds the lines from the words, at sentence ends and real pauses, and fills in each line's text.",
+    "importExport.recordingChoice.later": "You can import the recording whole now and transcribe it later.",
   },
   context: {
     _context: {
@@ -4040,6 +4067,18 @@ export const importExport = defineNamespace({
         description:
           "Error shown when the chosen upload is a multi-book project or otherwise not a single document.",
       },
+      "importExport.reimport.mediaCannotReplace": {
+        description:
+          "Shown on a file's Re-import when the chosen upload is an audio or video file, which cannot update a document in place. A button to import it as a new file follows.",
+        placeholders: {
+          fileName: "The chosen audio or video file's name. Do not translate.",
+          name: "The name of the file being re-imported. Do not translate.",
+        },
+      },
+      "importExport.reimport.importMediaAsNew": {
+        description:
+          "Button under the message that a recording or film can't replace a file: imports the chosen audio or video as a new file, through the ordinary import.",
+      },
       "importExport.reimport.update": {
         description:
           "Primary button after the preview. Writes the new source into the file that was chosen in the sidebar.",
@@ -5398,6 +5437,25 @@ export const importExport = defineNamespace({
           count: "Number of values that carried a translation into the exported document.",
         },
       },
+      // AQU-2426: importing and splitting recordings.
+      "importExport.recordingChoice.title": { description: "Title of the last step of importing an audio or video file that came with no subtitle file: the person chooses to bring it in whole or transcribe it.", placeholders: { name: "The recording's file name, e.g. 'Session 4.mp3'." } },
+      "importExport.recordingChoice.titleMany": { description: "Title of the last step of importing several audio or video files that came with no subtitle file; one choice covers all of them.", placeholders: { count: "How many recordings (always 2 or more)." } },
+      "importExport.recordingChoice.description": { description: "Description under the title of the last import step for one recording with no subtitle file. Says why there is a choice. 'Lines' are the file's rows of text and audio." },
+      "importExport.recordingChoice.descriptionMany": { description: "Description under the title when several recordings with no subtitle file are imported together; one choice applies to all.", placeholders: { count: "How many recordings (always 2 or more)." } },
+      "importExport.recordingChoice.wholeNote": { description: "Note under the recording's name in the last import step: what 'Import whole recording' does. '⋯' is the More menu." },
+      "importExport.recordingChoice.wholeNoteMany": { description: "Same note as importExport.recordingChoice.wholeNote, for several recordings." },
+      "importExport.recordingChoice.captionsNotRead": { description: "Note in the last import step when ONE film (.mp4) or recording (.m4a) was too big to be read for captions stored inside it, so it is offered as if it had none. Says so and what to do.", placeholders: { name: "The file's name, e.g. 'Episode 101.mp4'.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.captionsNotReadMany": { description: "The same note when SEVERAL of the files being imported were too big to be read for captions stored inside them.", placeholders: { count: "How many files were not checked.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.inAll": { description: "Label of the total row under a list of recordings to import, before their total length.", maxLength: 20 },
+      "importExport.recordingChoice.list": { description: "Accessible name of the list of recordings in the last import step (screen readers only)." },
+      "importExport.recordingChoice.importWhole": { description: "Button in the last import step: bring the recording in as one line, without transcribing it. Singular or plural by how many recordings are being imported.", maxLength: 32 },
+      "importExport.recordingChoice.importTranscribe": { description: "Button in the last import step: transcribe the recording to find its lines; the next step shows what it will cost before anything runs. The ellipsis means a step follows.", maxLength: 32 },
+      "importExport.recordingChoice.whyNot": { description: "Accessible label of the (i) button beside a greyed 'Import and transcribe…' (screen readers only); a click opens the reason." },
+      "importExport.recordingChoice.costTitle": { description: "Title of the step that shows what transcribing one recording will cost, before it runs.", placeholders: { name: "The recording's file name." } },
+      "importExport.recordingChoice.costTitleMany": { description: "Title of the cost step when several recordings are transcribed together.", placeholders: { count: "How many recordings." } },
+      "importExport.recordingChoice.transcribeAndImport": { description: "Primary button of the cost step: import the recording(s) and transcribe them, finding their lines.", maxLength: 32 },
+      "importExport.recordingChoice.findsLines": { description: "Note in the cost step: what transcribing does to the recording." },
+      "importExport.recordingChoice.later": { description: "Added after the reason transcription isn't available, in the last import step." },
     },
   },
   surfaces: [],

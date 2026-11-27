@@ -11,7 +11,7 @@ describe("createMediaFileCommit", () => {
   it.each([
     { type: "audio", name: "clip.mp3", mime: "audio/mpeg" },
     { type: "video", name: "clip.mp4", mime: "video/mp4" },
-  ] as const)("commits original $type with a YouTube picture and an ASR seed", async ({ type, name, mime }) => {
+  ] as const)("commits original $type with a YouTube picture and, chosen to transcribe, a seed", async ({ type, name, mime }) => {
     const requests: Array<{ url: string; init: RequestInit }> = []
     vi.stubGlobal("fetch", vi.fn(async (url, init: RequestInit) => {
       requests.push({ url: String(url), init })
@@ -38,6 +38,7 @@ describe("createMediaFileCommit", () => {
       author: "dev",
       getToken: async () => "token",
       mediaPictureUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+      mediaMode: "transcribe",
     })()
 
     const posts = requests
@@ -119,6 +120,7 @@ describe("createMediaFileCommit", () => {
       author: "dev",
       getToken: async () => "token",
       mediaPictureUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+      mediaMode: "transcribe",
     })
     await expect(commit()).rejects.toThrow("400")
     const result = await commit()
@@ -149,5 +151,40 @@ describe("createMediaFileCommit", () => {
 
     const seed = consumeMediaImportSeed(result.id)
     expect(seed).toBeDefined()
+  })
+
+  // AQU-2426 (Sam, Nov 3 and 5): nothing brought in is cut into lines or
+  // transcribed on its own. With no wording and no choice to transcribe, the
+  // recording comes in whole, as ONE line, and nothing is seeded to run.
+  it("brings a recording in whole by default: one line over its length, nothing to transcribe", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = []
+    vi.stubGlobal("fetch", vi.fn(async (url, init: RequestInit) => {
+      requests.push({ url: String(url), init })
+      return Response.json({ accepted: 1 })
+    }))
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, "createElement").mockImplementation((tag, options) => {
+      const element = createElement(tag, options)
+      if (tag === "audio" || tag === "video") {
+        Object.defineProperty(element, "duration", { value: 125 })
+        Object.defineProperty(element, "src", {
+          set() {
+            queueMicrotask(() => element.dispatchEvent(new Event("loadedmetadata")))
+          },
+        })
+      }
+      return element
+    })
+    const media = new File(["speech with pauses"], "sermon.mp3", { type: "audio/mpeg" })
+    const result = await createMediaFileCommit(media, "audio", { projectId: "p1", author: "dev", getToken: async () => "token" })()
+    const posts = requests.filter((r) => r.init.method === "POST").map((r) => JSON.parse(String(r.init.body)))
+    const cells = posts.flatMap((body) => body.cells ?? [])
+    expect(cells).toHaveLength(1)
+    expect(cells[0]).toMatchObject({ startMs: 0, endMs: 125_000 })
+    const attachments = posts.at(-1).attachments
+    expect(attachments).toHaveLength(1)
+    expect(attachments[0].trimStartMs).toBeUndefined()
+    expect(result.cellCount).toBe(1)
+    expect(consumeMediaImportSeed(result.id)).toBeUndefined()
   })
 })

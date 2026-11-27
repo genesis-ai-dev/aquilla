@@ -32,3 +32,27 @@ describe("whether Film and Sources show", () => {
     expect(filmAndSourcesShown(false, [film])).toBe(false)
   })
 })
+
+// Import map D#25: one recording or film uploaded into a book project turned
+// the tools on for every book.
+describe("a recording or film uploaded as its own file", () => {
+  const video = { orderedBy: "time" as const, type: "video" as const }
+  const audio = { orderedBy: "time" as const, type: "audio" as const }
+
+  it("doesn't stop a book project being one", () => {
+    expect(isBookProject([book, video])).toBe(true)
+    expect(isBookProject([book, audio, unset])).toBe(true)
+  })
+
+  it("leaves the books' tools hidden, and shows them on its own file", () => {
+    expect(filmAndSourcesShown(undefined, [book, video])).toBe(false)
+    expect(filmAndSourcesShown(undefined, [book, video], book)).toBe(false)
+    expect(filmAndSourcesShown(undefined, [book, video], video)).toBe(true)
+  })
+
+  it("on its own, or beside subtitles, changes nothing", () => {
+    expect(isBookProject([audio])).toBe(false)
+    expect(filmAndSourcesShown(undefined, [film, video], film)).toBe(true)
+    expect(filmAndSourcesShown(false, [book, video], video)).toBe(false)
+  })
+})

@@ -171,6 +171,25 @@ describe("how large a picture it is willing to decode", () => {
     expect(instances[0]!.config.capLevelToPlayerSize).toBe(true)
   })
 
+  // AQU-2253: the film track's frame grabber is only ever seeked. Left alone
+  // the player fills 30 s ahead of every seek, several segments per picture.
+  it("a frame grabber buffers only around each seek, from the smallest rendition", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader, maxHeight: 240, bufferSec: 1 }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    expect(instances[0]!.config).toMatchObject({ maxBufferLength: 1, maxMaxBufferLength: 1, backBufferLength: 0, startLevel: 0 })
+  })
+
+  it("the Film panel's player keeps the library's own buffering", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    expect(instances[0]!.config.maxBufferLength).toBeUndefined()
+    expect(instances[0]!.config.backBufferLength).toBe(30)
+  })
+
   it("keeps the playlist's own subtitles off the picture", async () => {
     // We draw captions from the file being translated; the CDN's renditions
     // would be a second set of words over the same frame.

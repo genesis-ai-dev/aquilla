@@ -50,11 +50,9 @@ export interface MediaPanelsMenuProps {
   /** The open file's name, for "your teammates keep their own arrangement of …". */
   fileName: string
   kind: MediaFileKind
-  /** A film is linked but Free timing hides it: the Film row says so. */
-  filmHiddenByTiming: boolean
 }
 
-export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: MediaPanelsMenuProps) {
+export function MediaPanelsMenu({ dock, fileName, kind }: MediaPanelsMenuProps) {
   const t = useT()
   const names = usePanelNames()
   const keys = dockKeys()
@@ -66,7 +64,7 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
   const row = (id: DockPanel | "timeline", n: number) => {
     let where: string
     let showing: boolean
-    let toggle: (() => void) | null = null
+    let toggle: () => void
     if (id === "timeline") {
       showing = v.isOpen("tl")
       where = stateWords([
@@ -75,9 +73,6 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
         full === "tl" && t("editor.dock.stateFull"),
       ])
       toggle = showing ? () => dock.fold("tl") : () => dock.show("timeline")
-    } else if (id === "film" && filmHiddenByTiming) {
-      showing = false
-      where = t("editor.dock.filmHiddenByTiming")
     } else {
       const area = v.areaOf(id)!
       const active = v.activeOf(area)
@@ -100,9 +95,8 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           data-testid={`panels-row-${id}`}
           checked={showing}
           aria-description={where}
-          disabled={!toggle}
           closeOnClick={false}
-          onCheckedChange={() => toggle?.()}
+          onCheckedChange={() => toggle()}
           className="hover:bg-accent/40"
         >
           <span className="min-w-0 flex-1 truncate">{names.panel(id)}</span>
@@ -165,7 +159,7 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
         <DropdownMenuGroup>
           <DropdownMenuLabel data-testid="panels-heading">{t("editor.dock.panels")}</DropdownMenuLabel>
           {row("timeline", 1)}
-          {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
+          {v.present.includes("film") && row("film", 2)}
           {row("text", 3)}
           {v.present.includes("station") && row("station", 4)}
         </DropdownMenuGroup>

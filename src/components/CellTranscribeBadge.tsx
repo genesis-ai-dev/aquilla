@@ -104,6 +104,17 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     )
   }
 
+  if (status.kind === "transcribing" && status.waiting === "limit") {
+    return (
+      <NoteOnClick note={t("workspace.transcribeBadge.waitingForLimitTooltip")}>
+        <Badge variant="secondary" className={cn(PILL, "text-amber-700 dark:text-amber-300")}>
+          <Spinner className="size-2.5" />
+          <span>{t("workspace.transcribeBadge.waitingForLimitPill")}</span>
+        </Badge>
+      </NoteOnClick>
+    )
+  }
+
   if (status.kind === "transcribing" && status.waiting === "model") {
     return (
       <NoteOnClick note={t("workspace.transcribeBadge.waitingForModelTooltip")}>

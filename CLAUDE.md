@@ -88,7 +88,7 @@ pnpm dev:vite     # just the vite dev server
 pnpm build        # pnpm typecheck && vite build && scripts/check-brand-build.ts aquilla
 pnpm typecheck    # tsc -b with a 6 GiB heap (set in the script). Use it instead of a bare
                   #   `tsc -b`: the app project no longer fits Node's default ~4 GiB heap
-pnpm lint         # eslint . with an 8 GiB heap (NODE_OPTIONS in the script; AQU-2084)
+pnpm lint         # eslint . with a 12 GiB heap cap (NODE_OPTIONS in the script; AQU-2084, AQU-2792)
 pnpm test         # vitest run — root suite EXCLUDES e2e/** and all worker packages
                   #   (auth-worker, sync-worker, agent-worker, worker, parity)
 pnpm test:watch

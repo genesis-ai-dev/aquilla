@@ -1,11 +1,16 @@
 /**
  * AQU-1352 §3.6 (AQU-1072): the People & access page renders one server
- * payload two ways (tree by scope, one row per person) and exports it. Spec
+ * payload two ways (a folder tree, one row per person) and exports it. Spec
  * §3.9 says a scope reads identically everywhere, so the CSV scope column must
  * be byte-identical to formatScopePath — the same string the chips show.
+ *
+ * The folder tree is the only place people are added to the organization,
+ * a folder, a project or a language, so it must offer exactly the places and
+ * roles the server would accept, and show both who was added at a place and
+ * who reaches it from a folder above.
  */
 import type { ReactNode } from "react"
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { createMemoryRouter, Outlet, RouterProvider, Navigate } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
@@ -75,7 +80,7 @@ const payload: OrgAccessPayload = {
         { scopePath: [org, other], roleLevel: 200, origin: { kind: "direct" } },
       ],
     },
-    { userId: "1", displayName: "Ruth", isGuest: false, email: "ruth@example.com", lastActiveAt: recent, grants: [
+    { userId: "1", displayName: "Ruth", username: "ruth", isGuest: false, email: "ruth@example.com", lastActiveAt: recent, grants: [
       { scopePath: [org], roleLevel: 700, origin: { kind: "direct" } },
     ] },
     { userId: "4", displayName: "Bare", isGuest: false, lastActiveAt: null, grants: [
@@ -107,10 +112,21 @@ vi.mock("./org-access-data", async (orig) => ({
   ...(await orig<typeof import("./org-access-data")>()),
   fetchOrgAccess: () => Promise.resolve(payload),
 }))
+const applyProjectMove = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+const withLaneSelections = vi.fn((_jwt: string, _org: number, _project: string, attachments: unknown[]) => Promise.resolve(attachments))
+vi.mock("./move-project-data", () => ({
+  applyProjectMove: (...a: unknown[]) => applyProjectMove(...a),
+  withLaneSelections: (jwt: string, org: number, project: string, attachments: unknown[]) => withLaneSelections(jwt, org, project, attachments),
+}))
+const submitGrant = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+vi.mock("./give-access-data", async (orig) => ({
+  ...(await orig<typeof import("./give-access-data")>()),
+  submitGrant: (...a: unknown[]) => submitGrant(...a),
+}))
 vi.mock("@/components/AppShell", () => ({ AppShell: ({ main }: { main: ReactNode }) => <>{main}</> }))
 vi.mock("@/components/org/OrgSidebar", () => ({ OrgSidebar: () => null }))
 vi.mock("@/components/org/OrgBreadcrumb", () => ({ OrgBreadcrumb: () => null }))
-vi.mock("@/context/OrgContext", () => ({ useActiveOrg: () => ({ activeOrg: { id: 1, name: "Biblica ETT" }, activeOrgId: 1 }) }))
+vi.mock("@/context/OrgContext", () => ({ useActiveOrg: () => ({ activeOrg: { id: 1, name: "Biblica ETT", role: { level: 700 } }, activeOrgId: 1, activeGuestOrg: null }) }))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "ruth" } }) }))
 
 const { OrgAccessPage } = await import("@/pages/OrgAccessPage")
@@ -124,8 +140,15 @@ function renderPage() {
   return router
 }
 
-function placeButton(name: string) {
-  return screen.getByRole("button", { name: (accessible) => accessible.includes(name) })
+/** The row of the folder tree for one place. */
+function folderRow(scope: { type: "org" | "team" | "project" | "lane"; id: string }) {
+  return screen.getByTestId(accessNodeId(scope))
+}
+
+/** Opens the list behind a row's avatars and returns it. */
+async function openPeople(scope: { type: "org" | "team" | "project" | "lane"; id: string }) {
+  fireEvent.click(within(folderRow(scope)).getByTestId("folder-people"))
+  return screen.findByTestId("folder-people-list")
 }
 
 function peopleFilter(label: string) {
@@ -138,41 +161,148 @@ function personRow(name: string) {
   return row
 }
 
-describe("OrgAccessPage Give access (AQU-2320)", () => {
-  it("is disabled where the viewer may grant nowhere", async () => {
+describe("OrgAccessPage folder tree", () => {
+  it("is organization → folder → project → languages, with each kind labelled", async () => {
     renderPage()
-    await screen.findByTestId("access-tree")
-    // No grantable map (or nothing grantable): the server would refuse every grant.
-    expect(screen.getByTestId("give-access-open")).toBeDisabled()
+    const tree = await screen.findByTestId("access-folder-tree")
+    const order = within(tree).getAllByRole("treeitem").map((item) => item.querySelector("[data-testid^='access-node-']")?.getAttribute("data-testid"))
+    expect(order).toEqual([org, team, project, french, spanish, other].map((scope) => accessNodeId(scope)))
+    expect(folderRow(team)).toHaveTextContent("folder")
+    expect(folderRow(french)).toHaveTextContent(/language/i)
+    expect(folderRow(project)).toHaveTextContent("project")
   })
 
-  it("opens pre-filled with the place selected in the lens", async () => {
-    payload.grantable = { "org:1": { ok: true, cap: 700 }, "project:p1": { ok: true, cap: 700 } }
+  it("stacks up to three avatars of the people added at a place, then +n", async () => {
+    const extra = [3, 5, 8].map((n) => ({ userId: `x${n}`, displayName: `Extra ${n}`, roleLevel: 100, isGuest: false, source: "direct" as const }))
+    const projectNode = payload.tree[0].children[0].children[0]
+    const before = projectNode.directGrantees
+    projectNode.directGrantees = [...before, ...extra]
     try {
       renderPage()
-      await screen.findByTestId("access-tree")
-      fireEvent.click(placeButton("Pattani"))
-      fireEvent.click(screen.getByTestId("give-access-open"))
-      const dialog = await screen.findByTestId("give-access-dialog")
-      expect(within(dialog).getByTestId("give-place")).toHaveTextContent("Pattani")
+      await screen.findByTestId("access-folder-tree")
+      expect(within(folderRow(project)).getByTestId("folder-people-more")).toHaveTextContent("+2")
+      expect(within(folderRow(org)).queryByTestId("folder-people-more")).toBeNull()
+    } finally {
+      projectNode.directGrantees = before
+    }
+  })
+
+  it("lists the people added here, then everyone who reaches it from above with where it comes from, and marks you", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const list = await openPeople(project)
+    const direct = within(list).getAllByTestId("direct-person").map((row) => row.textContent ?? "")
+    expect(direct.some((text) => text.includes("Naladda") && text.includes("Reviewer"))).toBe(true)
+    expect(direct.some((text) => text.includes("Member") && text.includes("Contributor"))).toBe(true)
+    const ruth = within(list).getAllByTestId("inherited-person").find((row) => row.textContent?.includes("Ruth"))
+    expect(ruth?.textContent).toContain(`from ${org.name}`)
+    expect(ruth?.textContent).toContain("Maintainer")
+    expect(within(ruth!).getByTestId("you-tag")).toBeTruthy()
+    expect(within(list).queryAllByTestId("you-tag")).toHaveLength(1)
+    const teamRow = within(list).getByTestId("inherited-team")
+    expect(teamRow.textContent).toContain(team.name)
+    expect(teamRow.textContent).toContain("Contributor")
+    // AQU-2323: a name opens that person's page.
+    expect(within(list).getByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
+    expect(within(list).getByRole("link", { name: "Open Ruth" })).toHaveAttribute("href", "/orgs/1/access/people/1")
+  })
+
+  it("does not list someone added here again among those reaching it from above", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const list = await openPeople(french)
+    expect(within(list).getAllByTestId("direct-person").map((row) => row.textContent)).toEqual([expect.stringContaining("LaneOnly")])
+    expect(within(list).getAllByTestId("inherited-person").some((row) => row.textContent?.includes("Naladda"))).toBe(true)
+  })
+
+  it("offers no add-person button where the viewer may grant nowhere", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    expect(screen.queryAllByTestId("folder-add-person")).toHaveLength(0)
+  })
+
+  it("offers a Project lead their project's roles up to Project lead, and adds the person there", async () => {
+    payload.grantable = { "org:1": { ok: false, denial: "owner_only" }, "project:p1": { ok: true, cap: 500 } }
+    submitGrant.mockClear()
+    try {
+      renderPage()
+      await screen.findByTestId("access-folder-tree")
+      expect(within(folderRow(org)).queryByTestId("folder-add-person")).toBeNull()
+      fireEvent.click(within(folderRow(project)).getByTestId("folder-add-person"))
+      const popover = await screen.findByTestId("add-person-popover")
+      const levels = Array.from(popover.querySelectorAll("[data-role-level]")).map((el) => Number(el.getAttribute("data-role-level")))
+      expect(levels).toEqual([500, 400, 300, 200, 100])
+      fireEvent.click(within(popover).getByRole("option", { name: (n) => n.includes("Stale") }))
+      expect(within(popover).getByTestId("add-person-chosen")).toHaveTextContent("Stale")
+      fireEvent.click(within(popover).getByTestId("add-person-submit"))
+      await waitFor(() => expect(submitGrant).toHaveBeenCalledOnce())
+      const [, orgId, grant] = submitGrant.mock.calls[0] as [string, number, { person: { userId: string }; roleLevel: number; place: { key: string } }]
+      expect(orgId).toBe(1)
+      expect(grant.person.userId).toBe("stale")
+      expect(grant.roleLevel).toBe(400)
+      expect(grant.place.key).toBe("project:p1")
     } finally {
       delete payload.grantable
     }
   })
+
+  it("offers a new folder or a new project on the organization, and a new project in a folder", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    fireEvent.click(within(folderRow(org)).getByTestId("folder-new"))
+    expect(await screen.findByTestId("folder-new-team")).toBeTruthy()
+    expect(screen.getByTestId("folder-new-project")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("folder-new-team"))
+    expect(await screen.findByTestId("new-folder-row")).toBeTruthy()
+    expect(within(folderRow(team)).getByRole("button", { name: "New project" })).toBeTruthy()
+    // A language is a leaf; nothing goes inside it.
+    expect(within(folderRow(french)).queryByTestId("folder-new")).toBeNull()
+  })
+})
+
+describe("OrgAccessPage moving projects between folders", () => {
+  it("moves a project out of its folder from the Move to menu, and the folder's access goes with it", async () => {
+    applyProjectMove.mockClear()
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    fireEvent.click(within(folderRow(project)).getByTestId("folder-move"))
+    // Where it is now is ticked and cannot be picked again.
+    expect(await screen.findByTestId("move-to-7")).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(screen.getByTestId("move-to-org"))
+    await waitFor(() => expect(applyProjectMove).toHaveBeenCalledOnce())
+    expect(applyProjectMove.mock.calls[0]).toEqual(["jwt", 1, "p1", { attach: [], detach: ["7"] }])
+  })
+
+  it("drops a project onto a folder like a file, giving the folder's people the default Viewer role", async () => {
+    applyProjectMove.mockClear()
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" }
+    expect(folderRow(other)).toHaveAttribute("draggable", "true")
+    fireEvent.dragStart(folderRow(other), { dataTransfer })
+    fireEvent.dragOver(folderRow(team), { dataTransfer })
+    expect(folderRow(team)).toHaveAttribute("data-drop-target", "true")
+    fireEvent.drop(folderRow(team), { dataTransfer })
+    await waitFor(() => expect(applyProjectMove).toHaveBeenCalledOnce())
+    expect(applyProjectMove.mock.calls[0]).toEqual(["jwt", 1, "p2", { attach: [{ folderId: "7", roleLevel: 100 }], detach: [] }])
+  })
+
+  it("does not take a drop where the project already is, and only projects drag", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" }
+    fireEvent.dragStart(folderRow(other), { dataTransfer })
+    fireEvent.dragOver(folderRow(org), { dataTransfer })
+    expect(folderRow(org)).not.toHaveAttribute("data-drop-target")
+    expect(folderRow(team)).not.toHaveAttribute("draggable")
+    expect(folderRow(french)).not.toHaveAttribute("draggable")
+  })
 })
 
 describe("OrgAccessPage", () => {
-  it("AQU-2323: a name on the Places lens, granted here or reaching here, opens that person's inspector", async () => {
-    renderPage()
-    await screen.findByTestId("access-tree")
-    fireEvent.click(placeButton("Pattani"))
-    expect(await screen.findByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
-    expect(screen.getByRole("link", { name: "Open Ruth" })).toHaveAttribute("href", "/orgs/1/access/people/1")
-  })
-
   it("lists members, guests, and invites, and a Guests CSV repeats the breadcrumbs on screen", async () => {
     renderPage()
-    await screen.findByTestId("access-tree")
+    await screen.findByTestId("access-folder-tree")
     expect(screen.getByTestId(accessNodeId(team)).id).toBe(accessNodeId(team))
     expect(screen.queryByRole("button", { name: /^Print/ })).toBeNull()
 
@@ -247,79 +377,24 @@ describe("OrgAccessPage", () => {
     fireEvent.click(peopleFilter("Everyone"))
     expect(screen.getAllByTestId("people-row")).toHaveLength(1)
     fireEvent.click(screen.getByRole("tab", { name: "Places" }))
-    expect(within(screen.getByTestId("access-tree")).queryByRole("button", { name: (n) => n.includes(other.name) })).toBeNull()
-    expect(within(screen.getByTestId("access-tree")).getByRole("button", { name: (n) => n.includes(project.name) })).toBeTruthy()
+    expect(screen.queryByTestId(accessNodeId(other))).toBeNull()
+    expect(screen.getByTestId(accessNodeId(project))).toBeTruthy()
   })
 
-  it("shows who is granted at a place and who reaches it, and the URL remembers the place", async () => {
-    const router = renderPage()
-    await screen.findByTestId("access-tree")
-
-    fireEvent.click(placeButton(project.name))
-    expect(router.state.location.search).toContain("project")
-
-    const granted = screen.getAllByTestId("granted-here-row")
-    const reaches = screen.getAllByTestId("reaches-here-row")
-    const summary = screen.getByTestId("place-summary").textContent ?? ""
-    expect(Number(summary.match(/^(\d+)/)?.[1])).toBe(granted.length + reaches.length)
-    expect(Number(summary.match(/(\d+) (?:is|are) granted here/)?.[1])).toBe(granted.length)
-    expect(Number(summary.match(/(\d+) reach/)?.[1])).toBe(reaches.length)
-
-    const reviewer = granted.find((row) => row.textContent?.includes("Naladda"))
-    const member = granted.find((row) => row.textContent?.includes("Member"))
-    expect(reviewer?.querySelector("[data-origin]")?.getAttribute("data-origin")).toBe("direct")
-    expect(reviewer?.querySelector("[data-origin]")?.className).not.toContain("border-dashed")
-    expect(reviewer?.textContent).toContain("Reviewer")
-    expect(within(reviewer!).getByTestId("guest-badge")).toBeTruthy()
-    expect(within(member!).queryByTestId("guest-badge")).toBeNull()
-
-    const maintainer = reaches.find((row) => row.textContent?.includes("Ruth"))
-    const teamRow = reaches.find((row) => row.textContent?.includes(team.name))
-    expect(maintainer?.querySelector("[data-origin]")?.getAttribute("data-origin")).toBe("inherited")
-    expect(maintainer?.querySelector("[data-origin]")?.className).toContain("border-dashed")
-    expect(maintainer?.textContent).toContain("Maintainer")
-    expect(within(maintainer!).getByTestId("reaches-reason").textContent).toContain(org.name)
-    expect(teamRow?.querySelector("[data-origin]")?.className).toContain("border-dashed")
-    expect(teamRow?.textContent).toContain("Contributor")
-    expect(teamRow?.textContent).toContain("4")
-
-    fireEvent.click(within(teamRow!).getByRole("button", { name: /show the grant/i }))
-    expect(router.state.location.search).toContain("team")
-    expect(placeButton(team.name).getAttribute("aria-current")).toBe("true")
-    await act(async () => { await router.navigate(-1) })
-    expect(router.state.location.search).toContain("project")
-    expect(placeButton(project.name).getAttribute("aria-current")).toBe("true")
-
-    fireEvent.click(placeButton(french.name))
-    const laneGranted = screen.getAllByTestId("granted-here-row")
-    const laneReaches = screen.getAllByTestId("reaches-here-row")
-    expect(laneGranted.some((row) => row.textContent?.includes("LaneOnly"))).toBe(true)
-    expect(laneGranted.some((row) => row.textContent?.includes("Naladda"))).toBe(false)
-    expect(laneReaches.some((row) => row.textContent?.includes("Via project"))).toBe(true)
-    fireEvent.click(placeButton(spanish.name))
-    expect(screen.queryByText("LaneOnly")).toBeNull()
-    expect(screen.getAllByTestId("reaches-here-row").some((row) => row.textContent?.includes("Via project"))).toBe(true)
-
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Naladda" } })
-    expect(within(screen.getByTestId("access-tree")).queryByRole("button", { name: (n) => n.includes(other.name) })).toBeNull()
-    expect(within(screen.getByTestId("access-tree")).getByRole("button", { name: (n) => n.includes(project.name) })).toBeTruthy()
+  it("marks the place a link opens on, and a search keeps matching places and their folders", async () => {
+    const router = createMemoryRouter(
+      [{ path: "/orgs/:orgId/access", element: <OrgAccessPage /> }],
+      { initialEntries: ["/orgs/1/access?place=project:p1"] },
+    )
+    render(<RouterProvider router={router} />)
+    await screen.findByTestId("access-folder-tree")
+    expect(folderRow(project).closest("[role=treeitem]")).toHaveAttribute("aria-selected", "true")
+    expect(folderRow(other).closest("[role=treeitem]")).toHaveAttribute("aria-selected", "false")
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Other" } })
-    const tree = within(screen.getByTestId("access-tree"))
-    expect(tree.queryByRole("button", { name: (n) => n.includes(project.name) })).toBeNull()
-    expect(tree.getByRole("button", { name: (n) => n.includes(other.name) })).toBeTruthy()
-
-    const lens = screen.getByTestId("places-lens")
-    expect(lens.className).toContain("flex-col")
-    expect(lens.className).toContain("md:flex-row")
-    expect(lens.className).toContain("overflow-x-hidden")
-
-    // AQU-2320: this payload grants the viewer nowhere, so Give access stays
-    // shut (the "Coming next" placeholder is gone; the dialog is real now).
-    const give = screen.getByRole("button", { name: /give access/i })
-    expect(give).toBeDisabled()
-    fireEvent.click(give)
-    expect(screen.queryByRole("dialog", { name: /give access/i })).toBeNull()
+    expect(screen.queryByTestId(accessNodeId(project))).toBeNull()
+    expect(screen.getByTestId(accessNodeId(other))).toBeTruthy()
+    expect(screen.getByTestId(accessNodeId(org))).toBeTruthy()
   })
 
   it("sends the access audit here, on the People lens", async () => {
@@ -344,7 +419,7 @@ describe("OrgAccessPage", () => {
   it("exports a CSV blob named after the org", async () => {
     downloadBlob.mockClear()
     renderPage()
-    await screen.findByTestId("access-tree")
+    await screen.findByTestId("access-folder-tree")
     fireEvent.click(screen.getByRole("button", { name: /export csv/i }))
     await waitFor(() => expect(downloadBlob).toHaveBeenCalled())
     const [blob, name] = downloadBlob.mock.calls[0] as [Blob, string]

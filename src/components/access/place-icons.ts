@@ -1,4 +1,4 @@
-import { Building2, FileText, Layers, Users, type LucideIcon } from "lucide-react"
+import { Building2, Folder, FolderCode, Languages, type LucideIcon } from "lucide-react"
 
 import type { ScopeType } from "@/lib/access/types"
 
@@ -10,7 +10,7 @@ import type { ScopeType } from "@/lib/access/types"
  */
 export const PLACE_ICON: Record<ScopeType, LucideIcon> = {
   org: Building2,
-  team: Users,
-  project: FileText,
-  lane: Layers,
+  team: Folder,
+  project: FolderCode,
+  lane: Languages,
 }

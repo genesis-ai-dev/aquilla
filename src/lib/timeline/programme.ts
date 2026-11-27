@@ -28,8 +28,9 @@ import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { standInEstimator } from "./stand-in"
+import { standInEstimator, STAND_IN_MIN_SEC } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
+import { primaryAudioHome } from "@/lib/audio/linked-takes"
 import { roomMsToStore, storedRoomSec, type LineRoomChange } from "./line-room"
 
 /** A window on some clock, in seconds. */
@@ -379,7 +380,7 @@ export interface BuildProgrammeOptions {
    * line takes its place in the programme (its recording's length once it has
    * one, else this) instead of being left out.
    */
-  standInLenSec?(cell: CellData): number
+  standInLenSec?(cell: CellData): number | null
   /**
    * AQU-2252: which added tracks' takes are laid in — their slots. The
    * transport passes the file's tracks, the ones it plays, and so does the
@@ -543,16 +544,6 @@ function layerTrackLayers(slot: string, cell: CellData, untimed: boolean, lineSt
   return out
 }
 
-/**
- * AQU-2252: whether anything of the line's own sounds in it — its original,
- * its take on the main track, or a take on any other track. A line with none
- * of these has nothing to play of its own (a layer running on over it from the
- * line before is not its own).
- */
-export function slotHasOwnSound(slot: ProgrammeSlot): boolean {
-  return Boolean(slot.sourceWindow || slot.targetWindow || slot.layers?.some((l) => l.window))
-}
-
 export interface Programme {
   slots: ProgrammeSlot[]
   /** Total assembled length — what the ruler and the transport show. AQU-2252:
@@ -650,7 +641,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     const untimed = nominalLenSec <= 0
     if (untimed) {
       if (!opts?.standInLenSec) continue
-      nominalLenSec = Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+      // A line with no times and no words still takes room, the shortest a stand-in gets.
+      nominalLenSec = Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell) ?? STAND_IN_MIN_SEC)
     }
 
     // An untimed line has no window into any source recording to play.
@@ -718,7 +710,14 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     //   - a take whose length isn't known yet keeps the line's own span, which
     //     its chip already borrows;
     //   - a line with no take lasts its stand-in length, from its words (the
-    //     caller's estimator), else its own span;
+    //     caller's estimator), else its own span — a line with no words too
+    //     (Nov 5: a film imported as one section, not yet transcribed);
+    //   - Nov 8 (the film bundle): …but a line with no take that has its OWN
+    //     original to hear lasts that original's length. What plays there is
+    //     the original, whole; a stand-in cut it at a reading-time guess, and
+    //     an imported film's pieces read "cut 2.4 s" on lines nobody had
+    //     recorded. The stand-in stays for a line with nothing to hear (a
+    //     book with no reading, a heard line of an audio cue file);
     // and the source sounds only as long as the line lasts: cut where it ends.
     // AQU-2252 (Sam, Oct 29): …a take on ANY track that sets line lengths,
     // each at its own place and length: the line lasts as long as the longest
@@ -727,11 +726,13 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     // of them, for a line pulled back.
     const recordedLenSec = recordedEndSec > -Infinity ? recordedEndSec + pulledBackSec : 0
     const recorded = lengthTakes.length > 0
-    const usesStandIn = !recorded && (untimed || Boolean(opts?.standInLenSec))
+    const standInSec =
+      !untimed && !recorded && fullSourceStart == null && opts?.standInLenSec ? opts.standInLenSec(cell) : null
+    const usesStandIn = !recorded && (untimed || standInSec != null)
     const unrecordedLenSec = untimed
       ? nominalLenSec
-      : opts?.standInLenSec
-        ? Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+      : standInSec != null
+        ? Math.max(MIN_TARGET_LEN_SEC, standInSec)
         : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
     // AQU-2432 (Sam, Nov 9): AN UNRECORDED LINE'S ROOM. The next take dragged
     // earlier against a line nobody has recorded makes that line's room
@@ -816,6 +817,82 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
   const timed = cells.filter((c) => hasTiming(c))
   if (timed.length > 0) return { lines: sortByLens(timed, "time"), untimed: false }
   return { lines: sortByLens(cells, "sequence"), untimed: cells.length > 0 }
+}
+
+/**
+ * Group D (Nov 5, AQU-2253 + AQU-2227): the cells a file is laid out and played
+ * from when it follows its recordings. A file with an audio cue file keeps its
+ * takes on the cue sheet's heard lines, never on its subtitle lines, so it is
+ * the heard lines that are laid end to end and played. The subtitle cards and
+ * the Source cues row stay with the film, on the film's clock, as a linked
+ * film's own lines do.
+ * Every other file, and every file following its source: its own lines. The
+ * one answer the timeline and the transport both ask, so the dubs drawn are
+ * the dubs played.
+ *
+ * AQU-2227 (review, Nov 9): `heardLines` are handed over only where the
+ * file's takes LIVE on them (`takesLiveOnHeardLines`, the workspace's one
+ * answer: its merged heard lines are null everywhere else), and then they are
+ * what is laid out, whether or not the file has recording lines of its own.
+ * It used to keep a recording's own sections here, from before an imported
+ * film's takes moved onto its own lines (AQU-2460). That left two files
+ * (an uploaded recording with a linked film and an audio cue file; an
+ * imported film whose heard lines already hold takes) laid out from lines
+ * that hold no take, so every take vanished from the timeline and from
+ * playback. An imported recording with no heard lines handed over keeps its
+ * sections, as `programmeLines` has them.
+ */
+export function recordingsLines<L extends readonly CellData[]>(
+  own: L,
+  heardLines: L | null | undefined,
+  followsRecordings: boolean,
+): L {
+  return playsHeardLines(heardLines, followsRecordings) ? (heardLines as L) : own
+}
+
+/**
+ * AQU-2227 (review, Nov 9): whether a file following its recordings is laid
+ * out and played from its heard lines (`recordingsLines`' own test, for the
+ * callers that need the answer and not the lines).
+ */
+export function playsHeardLines(
+  heardLines: readonly CellData[] | null | undefined,
+  followsRecordings: boolean,
+): boolean {
+  return followsRecordings && heardLines != null && heardLines.length > 0
+}
+
+/**
+ * AQU-2253 (Nov 13): the line Play starts from when a line is picked: a
+ * row's own Play, Space and the strip's Play with it selected. Where the file
+ * plays its heard lines (`playsHeardLines`), a subtitle row has no place in
+ * what plays, so it starts from the first heard line that performs it (the
+ * one the mic records on, `primaryAudioHome`), or with none, from the heard
+ * line sounding at the row's start, or else the next one after it. Null when
+ * no heard line is left from there. Every other file plays its own lines, so a row starts from
+ * itself.
+ */
+export function playStartLineId(
+  row: Pick<CellData, "id" | "startTime">,
+  heardLines: readonly CellData[] | null | undefined,
+  followsRecordings: boolean,
+  cuesForText: ReadonlyMap<string, readonly string[]>,
+): string | null {
+  if (!playsHeardLines(heardLines, followsRecordings)) return row.id
+  const lines = heardLines as readonly CellData[]
+  const home = primaryAudioHome(row.id, { cueCells: lines, cuesForText })
+  if (home) return home
+  const from = row.startTime
+  if (from == null) return null
+  let first: CellData | null = null
+  for (const line of lines) {
+    if (line.startTime == null) continue
+    // Only a heard line already over by the row's start is passed by; one
+    // still sounding there counts (review, Nov 13).
+    if (line.startTime < from && (line.endTime ?? line.startTime) <= from) continue
+    if (!first || line.startTime < (first.startTime as number)) first = line
+  }
+  return first?.id ?? null
 }
 
 /**
@@ -917,6 +994,104 @@ export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
 }
 
 /**
+ * AQU-2253 (Sam, Nov 9): following the recordings, a LINKED film playing
+ * behind the lines, as the workspace tells the queue (play-queue's
+ * `setProgrammeFilm`). Its picture and its own sound run on the programme's
+ * clock, so it is the lines' source: see `whatSlotPlays`.
+ */
+export interface ProgrammeFilm {
+  /** The film's length: its end on its own clock, which following the
+   *  recordings is the programme's. Null while it is not known yet. */
+  endSec: number | null
+  /** Every line of the film's file that Play plays: on a book, every
+   *  chapter's, so a chapter that Play all or a pick starts is the film's at
+   *  once, before the workspace's next word. */
+  cellIds: ReadonlySet<string>
+  /** False on one chapter of a book: Play ends with the chapter's lines and
+   *  Play all goes on into the next one. Otherwise a run of the file's whole
+   *  list carries on past its last line to the film's end. */
+  runsOn?: boolean
+}
+
+/** What a film is to a run of lines: how far it plays behind them, on the
+ *  run's clock (`coverSec`: its length, Infinity while that is not known
+ *  yet, 0 when it is not behind them); and where Play runs on to after the
+ *  last line (`runsOnToSec`, 0 for none). */
+export interface FilmOverRun {
+  coverSec: number
+  runsOnToSec: number
+}
+
+const NO_FILM_OVER_RUN: FilmOverRun = { coverSec: 0, runsOnToSec: 0 }
+
+/**
+ * AQU-2253 (Sam, Nov 9): what the film is to a run of these lines (by id).
+ * Behind them when every one is a line of its file; Play runs on past them
+ * only for the file's whole list (one line played on its own, a selection or
+ * a book's chapter ends where its lines end), and only once its length is
+ * known. One answer for the queue, the bottom strip and the timeline's ⋯.
+ */
+export function filmOverRun(film: ProgrammeFilm | null | undefined, ids: Iterable<string>): FilmOverRun {
+  if (!film) return NO_FILM_OVER_RUN
+  let count = 0
+  for (const id of ids) {
+    if (!film.cellIds.has(id)) return NO_FILM_OVER_RUN
+    count++
+  }
+  if (count === 0) return NO_FILM_OVER_RUN
+  const whole = count === film.cellIds.size
+  return {
+    coverSec: film.endSec ?? Infinity,
+    runsOnToSec: whole && film.runsOn !== false && film.endSec != null ? film.endSec : 0,
+  }
+}
+
+/** A line starting this close to the film's end has no film left behind it. */
+const FILM_COVER_MIN_SEC = 0.02
+
+/** AQU-2253: is the linked film playing behind this line (`filmCoverSec`, from
+ *  `filmOverRun`), whatever the line has of its own? */
+export function filmIsBehindSlot(slot: ProgrammeSlot, filmCoverSec: number): boolean {
+  return slot.startSec < filmCoverSec - FILM_COVER_MIN_SEC
+}
+
+/**
+ * What a line of the programme has to play, following the recordings:
+ *  - "sound": its own take or original, or a take on another track sounding
+ *    inside the line, its own or one running on over it from another line
+ *    (AQU-2252, `underLayers`). A take of its own placed wholly outside the
+ *    line is not sound in it (the second check of the q44 fixes, Nov 13): the
+ *    queue crosses the line at once there;
+ *  - "film": nothing of its own, but a linked film is playing behind it
+ *    (AQU-2253, Sam, Nov 9: "the rule 'skip lines with nothing to play'
+ *    should only land when there is literally nothing to play: recorded or
+ *    source", and the film is the source). It plays: the playhead crosses it
+ *    in real time with the film running, whatever the setting says. A
+ *    film whose sound is off still counts, its picture is running. Past the
+ *    film's end there is no film; before its length is known it may cover the
+ *    line, so it counts (`coverSec` Infinity). A hidden line there is crossed
+ *    too, its takes silent, as following the source (Sam, Oct 29): jumping it
+ *    would cut the film forward;
+ *  - "hidden": a hidden line with nothing left to play, which the playhead
+ *    jumps whichever way the setting is (Sam, Oct 29);
+ *  - "nothing": nothing at all, the lines "Skip lines with nothing to play"
+ *    decides about: a verse of a book with no reading nobody has recorded, a
+ *    line of a subtitle file with no audio.
+ */
+export type SlotPlays = "sound" | "film" | "hidden" | "nothing"
+
+export function whatSlotPlays(
+  slot: ProgrammeSlot,
+  hiddenCellIds: ReadonlySet<string>,
+  underLayers: ReadonlySet<string> = new Set(),
+  filmCoverSec = 0,
+): SlotPlays {
+  if (slot.sourceWindow || slot.targetWindow || underLayers.has(slot.cellId)) return "sound"
+  if (filmIsBehindSlot(slot, filmCoverSec)) return "film"
+  return hiddenCellIds.has(slot.cellId) ? "hidden" : "nothing"
+}
+
+/**
  * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
  * to hear (no original, no take the programme can play) and not hidden. A
  * hidden line is skipped whichever way the setting is: following the
@@ -925,13 +1100,17 @@ export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
  *
  * AQU-2252: a take on another track is the line's to play too, and a line a
  * take from another line runs on over (`underLayers`) is held under it.
+ *
+ * AQU-2253 (Sam, Nov 9): …and a line a linked film plays behind
+ * (`filmCoverSec`, from `filmOverRun`) has the film to play (`whatSlotPlays`).
  */
 export function slotHasNothingToPlay(
   slot: ProgrammeSlot,
   hiddenCellIds: ReadonlySet<string>,
   underLayers: ReadonlySet<string> = new Set(),
+  filmCoverSec = 0,
 ): boolean {
-  return !slotHasOwnSound(slot) && !underLayers.has(slot.cellId) && !hiddenCellIds.has(slot.cellId)
+  return whatSlotPlays(slot, hiddenCellIds, underLayers, filmCoverSec) === "nothing"
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

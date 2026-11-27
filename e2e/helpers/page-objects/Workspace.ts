@@ -104,13 +104,30 @@ export class Workspace {
     await expect(dialog.getByTestId("youtube-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
     await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
     await dialog.getByRole("button", { name: "Preview import" }).click()
-    await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
-      .toBeVisible({ timeout: 30_000 })
   }
 
+  /** The original media came with captions: publish them with the film. */
   async confirmYouTubeOriginalMedia(): Promise<void> {
-    await this.page.getByRole("button", { name: "Import media and link the film" }).click()
+    const confirm = this.page.getByRole("button", { name: "Import media and link the film" })
+    await expect(confirm).toBeVisible({ timeout: 30_000 })
+    await confirm.click()
     await this.waitForImportSettled()
+  }
+
+  /**
+   * AQU-2426: a recording with no subtitle file stops at a choice — nothing
+   * is cut or transcribed on its own. "whole" brings it in as one line;
+   * "transcribe" goes through the cost step and starts transcription.
+   */
+  async answerRecordingChoice(choice: "whole" | "transcribe"): Promise<void> {
+    const dialog = this.page.getByTestId("recording-import-choice")
+    await expect(dialog).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    if (choice === "whole") {
+      await dialog.getByTestId("recording-import-whole").click()
+    } else {
+      await dialog.getByTestId("recording-import-transcribe").click()
+      await dialog.getByTestId("recording-import-transcribe-go").click()
+    }
   }
 
   async importPayload(payload: FilePayload): Promise<void> {
@@ -129,9 +146,11 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import media without companion or embedded captions. */
-  async importMediaFile(filePath: string): Promise<void> {
+  /** Import media without companion or embedded captions, answering the
+   *  AQU-2426 recording choice. */
+  async importMediaFile(filePath: string, choice: "whole" | "transcribe"): Promise<void> {
     await this.chooseImportFiles(filePath, { media: true })
+    await this.answerRecordingChoice(choice)
     await this.waitForImportSettled()
   }
 
@@ -145,8 +164,9 @@ export class Workspace {
    * rule themselves, against `modalDialogs()`, so the settle heuristic here
    * would only add a second, flakier copy of it.
    */
-  async startMediaImport(filePath: string, fileName: string): Promise<void> {
+  async startMediaImport(filePath: string, fileName: string, choice: "whole" | "transcribe"): Promise<void> {
     await this.chooseImportFiles(filePath, { media: true })
+    await this.answerRecordingChoice(choice)
     await this.waitForFileInSidebar(fileName)
   }
 
@@ -183,7 +203,9 @@ export class Workspace {
   }
 
   sourceAudioClips(): Locator {
-    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+    // A source recording clip's ⋯ button (AQU-2426) is `tl-card-<id>-more`;
+    // count the clips, not their buttons.
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]:not([data-testid$="-more"])')
   }
 
   async previewCaptionTrack(captions: FilePayload): Promise<void> {

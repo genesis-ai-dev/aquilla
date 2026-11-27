@@ -519,3 +519,37 @@ it("does not resurrect a closed sheet when its file read finishes after reopenin
   expect(props.getCells).not.toHaveBeenCalled()
   expect(props.onConfirm).not.toHaveBeenCalled()
 })
+
+// Import map X-G-dead-drop (Nov 2): the dashed box drew like a drop target, but
+// a dropped file did nothing.
+describe("the drop box", () => {
+  it("takes a dropped sheet, as the button does", async () => {
+    render(<ImportCharactersDialog open textFileName="ep101.vtt" getCells={() => cells}
+      existingCount={0} onConfirm={vi.fn()} onCancel={() => {}} />)
+    const box = screen.getByTestId("import-characters-drop")
+    fireEvent.dragOver(box)
+    expect(box).toHaveAttribute("data-drag-over", "true")
+    const file = new File([CSV(row("00:00:10.000", "JESUS. (On)"), row("00:00:20.000", "MARY (Off)"))],
+      "characters.csv", { type: "text/csv" })
+    fireEvent.drop(box, { dataTransfer: { files: [file] } })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-summary")).toHaveTextContent("2 lines get a character"))
+  })
+})
+
+describe("a dropped sheet, with both sheets possible", () => {
+  it("is read as the side it fits, since no button said which it is", async () => {
+    const onConfirmAudio = vi.fn()
+    render(<ImportCharactersDialog open textFileName="ep101.vtt" getCells={() => cells}
+      audioCues={audioCues} existingCount={0} onConfirm={vi.fn()} onConfirmAudio={onConfirmAudio}
+      onCancel={() => {}} />)
+    const file = new File([AUDIO_CSV(
+      audioRow("00:09:99.000", "LITTLE MARY MAGDALENE (ON)", "Abba?", "ON"),
+      audioRow("00:19:99.000", "LITTLE MARY MAGDALENE (ON)", "I can't sleep.", "ON"),
+    )], "audio-characters.csv", { type: "text/csv" })
+    fireEvent.drop(screen.getByTestId("import-characters-drop"), { dataTransfer: { files: [file] } })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-summary")).toHaveTextContent("2 heard lines get a character"))
+    expect(screen.queryByTestId("import-characters-wrongkind")).toBeNull()
+  })
+})

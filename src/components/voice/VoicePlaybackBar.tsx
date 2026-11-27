@@ -4,6 +4,7 @@
 // volume. It mirrors ElevenLabs' bottom player — the per-line buttons stay for
 // voicing a single line, but listening to the take in sequence happens here.
 
+import { progressSpanFraction, progressSpanSec } from "@/lib/audio/transport"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ChevronDown, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
@@ -17,8 +18,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
-  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
+  linesPlaybackStopsAt, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -28,7 +29,8 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { filmOverRun, layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { fmtClock } from "@/components/timeline/format"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -172,18 +174,40 @@ export function VoicePlaybackBar({
       : 0),
     [showsLaidOut, cells, programmeTracks],
   )
-  const shownLengthSec = showsLaidOut ? laidOutSec : duration
+  // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+  // own clock, so Play runs to whichever ends later: the lines or the film.
+  // The workspace's word about the film, through the queue: where Play runs on
+  // past these lines to the film's end, the length shown before play reaches
+  // it, as the queue's own does once it plays.
+  const film = useProgrammeFilm()
+  const filmCounts = freeTiming && transport.source === "queue"
+  const filmRunsOnToSec = useMemo(
+    () => (filmCounts ? filmOverRun(film, cellIds).runsOnToSec : 0),
+    [filmCounts, film, cellIds],
+  )
+  const shownLengthSec = showsLaidOut ? Math.max(laidOutSec, filmRunsOnToSec) : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving
   // makes the cells file-timed, which hands the file from the picture or the
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
-  // AQU-2495 (review, Nov 9): following the recordings, a take on an added
-  // track plays too, so a chapter recorded only on added tracks can be played.
+  // AQU-2253 (Sam, Nov 9): …or a linked film playing behind the lines, their
+  // source: with nothing recorded yet, Play was off here and the film could
+  // not be watched. Following the source the film is not the queue's to play
+  // here: the lines' own takes and originals alone. Nov 12 (the review of
+  // question 44): one call, the queue's own answer for these lines, with this
+  // bar's timing and tracks (`linesPlaybackStopsAt`). AQU-2495 (review, Nov 9):
+  // following the recordings a take on an added track is a stop there too, so
+  // a chapter recorded only on added tracks can be played.
+  // The check of the q44 fixes (Nov 12): with "Skip lines with nothing to
+  // play" read here and handed on, so a change to it moves Play at once.
+  const skipSilent = useSkipSilentLinesPref()
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || hasAnyPlayableAudio(cells, { freeTiming, tracks: programmeTracks })),
-    [audioLoaded, drivesVideo, cells, freeTiming, programmeTracks],
+    () => audioLoaded && (drivesVideo || linesPlaybackStopsAt(cells, {
+      freeTiming: filmCounts, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent,
+    }).size > 0),
+    [audioLoaded, drivesVideo, filmCounts, film, cells, programmeTracks, skipSilent],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
@@ -294,9 +318,14 @@ export function VoicePlaybackBar({
             if (at + 1 < cells.length) startAt(at >= 0 ? at + 1 : 0)
             return
           }
-          const tracks = { freeTiming, tracks: programmeTracks }
+          // The merge with the film bundle: "anything to play" is the queue's
+          // own answer (`linesPlaybackStopsAt`), the film behind the lines and
+          // "Skip lines with nothing to play" counted as Play counts them.
+          const stops = linesPlaybackStopsAt(cells, {
+            freeTiming, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent,
+          })
           for (let i = (at >= 0 ? at : cells.length) - 1; i >= 0; i--) {
-            if (hasAnyPlayableAudio([cells[i]], tracks)) { startAt(i); return }
+            if (stops.has(cells[i].id)) { startAt(i); return }
           }
           return
         }
@@ -314,10 +343,12 @@ export function VoicePlaybackBar({
         : lineStarts.find((t) => t > from)
       videoController.seek(Math.max(0, next ?? (dir < 0 ? 0 : duration)))
     },
-    [drivesVideo, videoController, currentTime, duration, lineStarts, transport.kind, startCellId, cells, startAt, freeTiming, programmeTracks],
+    [drivesVideo, videoController, currentTime, duration, lineStarts, transport.kind, startCellId, cells, startAt, freeTiming, programmeTracks, film, skipSilent],
   )
 
-  const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
+  // AQU-2711 x AQU-2253 (review, Nov 25): over the clock's span, which starts
+  // at a milestone's first heard line where the line-by-line clock does.
+  const progressFraction = progressSpanFraction(transport.progress)
 
   if (variant === "strip") {
     // The same controls as the bar below, wired identically (the comments on
@@ -390,7 +421,7 @@ export function VoicePlaybackBar({
       <BarScrubber
         fraction={progressFraction}
         disabled={!audioLoaded || !transport.active || duration <= 0}
-        onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
+        onSeek={(f) => (drivesVideo ? videoController?.seek(progressSpanSec(transport.progress, f)) : seekQueueToTime(progressSpanSec(transport.progress, f)))}
       />
 
       {/* Equal flex side columns keep the transport truly centered; stretch +

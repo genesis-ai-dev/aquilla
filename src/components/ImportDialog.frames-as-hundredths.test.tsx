@@ -140,6 +140,31 @@ describe("Upload files: times written as frame numbers in hundredths (AQU-2197)"
     }
   })
 
+  // Import inventory, the frame check's #9: File ⋯ Re-import names its file up
+  // front, so it never passed that file's film and always said "from the
+  // frame numbers".
+  it("File ⋯ Re-import, into a file with a linked film: converts at the film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      render(<ImportDialog {...baseProps}
+        reimportTarget={{ fileId: "existing-101", name: "ep101.vtt" }}
+        existingFiles={[{
+          id: "existing-101", name: "ep101.vtt", coreMediaUrl: "https://cdn.example.test/videos/reimport-film/master.m3u8",
+        }]} />)
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      await act(async () => {
+        Object.defineProperty(input, "files", { value: [new File([VTT], "ep101 v2.vtt", { type: "text/vtt" })], configurable: true })
+        fireEvent.change(input)
+        await new Promise((r) => setTimeout(r, 0))
+        await new Promise((r) => setTimeout(r, 0))
+      })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("a new file says its rate came from the frame numbers", async () => {
     render(<ImportDialog {...baseProps} />)
     await drop()

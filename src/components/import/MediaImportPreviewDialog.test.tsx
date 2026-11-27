@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
 import { extractSrtStrings, extractVttStrings } from "@/lib/parsers/subtitle"
+import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 describe("media import preview", () => {
   it("lets you review and edit wording and timing before committing", () => {
@@ -224,5 +225,48 @@ describe("media import preview", () => {
     expect(screen.queryAllByRole("textbox")).toHaveLength(0)
     expect(screen.queryAllByRole("spinbutton")).toHaveLength(0)
     expect(screen.getByRole("status")).toHaveTextContent("300 captions · 0:00–4:59.9")
+  })
+})
+
+// AQU-2197 / import map M-frames: captions dropped with their recording or
+// film, or built into it, are checked for frame numbers written as hundredths
+// like every other way timed text comes in.
+describe("media import preview: the frame-number check", () => {
+  const framed = () => ({
+    cues: extractVttStrings(framesAsHundredthsVtt()),
+    artifact: { name: "ep101.vtt", format: "vtt" as const, bytes: new ArrayBuffer(1) },
+  })
+  const sample = (call: unknown) =>
+    (call as { cues: { original: string; start?: number }[] }).cues.find((cue) => cue.original === SAMPLE_CUE.text)!.start!
+
+  it("warns, and imports the times converted at the frame numbers' rate", async () => {
+    const onConfirm = vi.fn()
+    render(<MediaImportPreviewDialog mediaName="ep101.mov" durationMs={4 * 60_000}
+      sources={[{ id: "sidecar", label: "ep101.vtt", source: framed() }]}
+      frameCheck={{ filmFile: new Blob([new Uint8Array(64)]) }}
+      onConfirm={onConfirm} onCancel={() => {}} />)
+    expect(await screen.findByTestId("frames-as-hundredths")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+      .toHaveTextContent("Converted at 24 frames a second, from the frame numbers."))
+    fireEvent.click(screen.getByRole("button", { name: "Continue import" }))
+    expect(sample(onConfirm.mock.calls[0][0])).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+  })
+
+  it("keeps the times as delivered when asked", async () => {
+    const onConfirm = vi.fn()
+    render(<MediaImportPreviewDialog mediaName="ep101.mov" durationMs={4 * 60_000}
+      sources={[{ id: "sidecar", label: "ep101.vtt", source: framed() }]}
+      frameCheck={{ filmFile: new Blob([new Uint8Array(64)]) }}
+      onConfirm={onConfirm} onCancel={() => {}} />)
+    fireEvent.click(await screen.findByTestId("frames-as-hundredths-keep"))
+    fireEvent.click(screen.getByRole("button", { name: "Continue import" }))
+    expect(sample(onConfirm.mock.calls[0][0])).toBeCloseTo(SAMPLE_CUE.start, 6)
+  })
+
+  it("says nothing when the caller runs the check itself", () => {
+    render(<MediaImportPreviewDialog mediaName="ep101.mov" durationMs={4 * 60_000}
+      sources={[{ id: "sidecar", label: "ep101.vtt", source: framed() }]}
+      onConfirm={() => {}} onCancel={() => {}} />)
+    expect(screen.queryByTestId("frames-as-hundredths")).not.toBeInTheDocument()
   })
 })

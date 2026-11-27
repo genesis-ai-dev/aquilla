@@ -35,5 +35,13 @@ export default defineConfig({
       "lib/desktop-release.test.ts",
     ],
     passWithNoTests: false,
+    // Stall watchdogs, not speed limits (AGENTS.md rule 15), the same ceilings
+    // the app project has in the root `vite.config.ts`. Without them this
+    // project ran on Vitest's 5 s default, and these tests start real
+    // processes: `npx tsx` in `lib/spawn-command.test.ts` took 6.4 s to cold
+    // start on a loaded hosted runner and failed six pull requests that had
+    // not touched it. A passing test is unaffected.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 })

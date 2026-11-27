@@ -11,15 +11,11 @@ import {
   type TranslationBaseline,
 } from "./coverage"
 import type { SourceHashes } from "./catalog-export"
-import { CATALOGS } from "./messages/all"
 import type { Catalog, MessageKey } from "./messages/en"
-// Read as text, not as JSON modules: an `import x from "./x.json"` makes `tsc -b`
-// type every key, and source-hashes.json alone (~129k lines) took the app
-// project past Node's default heap in the Workers preview build.
-import sourceHashesRaw from "./source-hashes.json?raw"
+// Read as text, not as a JSON module: an `import x from "./x.json"` makes
+// `tsc -b` type every key.
 import committedBaselineRaw from "./translation-baseline.json?raw"
 
-const sourceHashes = JSON.parse(sourceHashesRaw) as Record<string, SourceHashes>
 const committedBaseline = JSON.parse(committedBaselineRaw) as TranslationBaseline
 
 // Three made-up keys and a hash function that is just the key's current
@@ -122,25 +118,14 @@ describe("renderBaseline", () => {
   })
 })
 
-// The gate itself, against the real catalogs. `pnpm i18n:check` runs the same
-// comparison in CI's lint job and prints the fix; this keeps `pnpm test` honest.
-describe("committed catalogs against translation-baseline.json", () => {
-  const gaps = allLocaleGaps(CATALOGS, sourceHashes)
+// Whether the committed catalogs are fully translated is not asserted here
+// (AQU-2792). It was, and a pull request that merged without its translations
+// then failed this file on every other open pull request. `pnpm i18n:coverage`
+// makes the comparison, and the fill job runs it after translating
+// (.github/workflows/i18n-fill.yml). What a branch can still get wrong by hand
+// is the file's shape.
+describe("the committed translation-baseline.json", () => {
   const baseline = committedBaseline
-
-  it("translates every English message outside the baseline in every locale", () => {
-    const violations = coverageViolations(gaps, baseline).map((v) => `${v.locale}: ${v.key} (${v.kind})`)
-    expect(
-      violations,
-      "New or reworded English must ship translated. Run pnpm i18n:todo --new, fill " +
-        "i18n-todo/<locale>.todo.json, then pnpm i18n:import-todo (docs/I18N-CONTEXT-CATALOG.md).",
-    ).toEqual([])
-  })
-
-  it("has no baseline entry that is already translated or no longer exists", () => {
-    const stale = unprunedEntries(gaps, baseline).map(({ key, locale }) => `${locale}: ${key}`)
-    expect(stale, "Run pnpm i18n:baseline to prune these entries.").toEqual([])
-  })
 
   it("is in its canonical one-key-per-line form", () => {
     expect(renderBaseline(baseline)).toBe(renderBaseline(JSON.parse(JSON.stringify(baseline))))

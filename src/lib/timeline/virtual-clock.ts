@@ -33,7 +33,7 @@
 // number in the timeline and one in the playback bar. Routing it through the
 // workspace would re-render that whole tree on every tick.
 
-import { useEffect, useRef, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 import type { VideoController } from "./video-controller"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 
@@ -72,11 +72,6 @@ let rate = 1
 let volume = 1
 /** End of the last cue. Playback stops here (Sam: no looping). 0 = unknown. */
 let durationSec = 0
-/** AQU-2711 x AQU-2253 (review, Nov 25): where Play from the start begins. 0
- *  for a whole file; with Split into milestones on, a subtitle file's audio
- *  cue file starts at the milestone's first heard line, so Play does not run
- *  silence from 0:00 up to it. */
-let startSec = 0
 /** Null when nothing is driving — the file has a master of its own, or none of
  *  this applies. Mirrors `video-clock`'s "cleared" state exactly. */
 let driving = false
@@ -226,21 +221,16 @@ function startTimer(): void {
   timer = setInterval(tickVirtualClock, TICK_MS)
 }
 
-/** Take the transport. Idempotent; refreshes the duration. `start` is where
- *  Play from the start begins (`startSec`). Called again while driving, it
- *  moves the start in place: a playing clock plays on from where it is, and
- *  a paused one before the new start moves up to it. */
-export function startVirtualClock(duration: number, start = 0): void {
+/** Take the transport. Idempotent; refreshes the duration. */
+export function startVirtualClock(duration: number): void {
   durationSec = Number.isFinite(duration) && duration > 0 ? duration : 0
-  startSec = Number.isFinite(start) && start > 0 ? start : 0
   if (driving) {
-    if (!playing && anchorSec < startSec) reanchor(startSec)
     notify()
     return
   }
   driving = true
   playing = false
-  reanchor(startSec)
+  reanchor(0)
   notify()
 }
 
@@ -251,7 +241,6 @@ export function stopVirtualClock(): void {
   driving = false
   playing = false
   anchorSec = 0
-  startSec = 0
   jumps = []
   clearActiveAudioIf(clockAudio)
   notify()
@@ -261,9 +250,7 @@ export function virtualClockPlay(): void {
   if (!driving || playing) return
   // Pressing play at the very end restarts, which is what a media element does
   // and what the button plainly means there.
-  if (durationSec > 0 && anchorSec >= durationSec) anchorSec = startSec
-  // Play from before the start (the milestone's first heard line) starts there.
-  if (anchorSec < startSec) anchorSec = startSec
+  if (durationSec > 0 && anchorSec >= durationSec) anchorSec = 0
   playing = true
   reanchor(anchorSec)
   startTimer()
@@ -282,10 +269,7 @@ export function virtualClockPause(): void {
 
 export function virtualClockSeek(sec: number): void {
   if (!driving) return
-  let clamped = Number.isFinite(sec) ? Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec) : 0
-  // Playing, it never goes before the start: it would play the silence from
-  // 0:00 up to the milestone's first heard line. Paused, Play moves it there.
-  if (playing) clamped = Math.max(clamped, startSec)
+  const clamped = Number.isFinite(sec) ? Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec) : 0
   reanchor(clamped)
   notify()
 }
@@ -356,34 +340,6 @@ export function getVirtualClockPlaying(): boolean {
  * recorder calls `getVideoController()?.pause()`, so a transport that did not
  * register would keep playing underneath a take.
  */
-/**
- * AQU-2711 x AQU-2253 (review, Nov 25): the workspace's hold on the clock.
- * Taken while `owns`, handed back when not. Taken again from the start when
- * the file's length or the milestone on the timeline changes. A change to the
- * start alone (the milestone's first heard line retimed, or an earlier one
- * added) moves it in place, so playback never stops for it.
- */
-export function useVirtualClockForFile({ owns, durationSec: duration, startSec: start, milestoneKey }: {
-  owns: boolean
-  durationSec: number
-  startSec: number
-  milestoneKey: string | null
-}): void {
-  const startRef = useRef(start)
-  startRef.current = start
-  useEffect(() => {
-    if (!owns) {
-      stopVirtualClock()
-      return
-    }
-    startVirtualClock(duration, startRef.current)
-    return () => stopVirtualClock()
-  }, [owns, duration, milestoneKey])
-  useEffect(() => {
-    if (owns) startVirtualClock(duration, start)
-  }, [owns, duration, start])
-}
-
 export const virtualClockController: VideoController = {
   play: virtualClockPlay,
   pause: virtualClockPause,
@@ -431,7 +387,6 @@ export function resetVirtualClockForTests(): void {
   rate = 1
   volume = 1
   durationSec = 0
-  startSec = 0
   jumps = []
   clearActiveAudioIf(clockAudio)
   notify()

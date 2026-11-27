@@ -7,8 +7,6 @@
 
 import { describe, it, expect } from "vitest"
 import {
-  progressSpanFraction,
-  progressSpanSec,
   selectTransportForFile,
   videoOwnsFile,
   virtualOwnsFile,
@@ -305,32 +303,5 @@ describe("selectTransportForFile — the virtual arm", () => {
 
   it("is the queue when nothing else is offered — every ordinary file", () => {
     expect(selectTransportForFile(idleQueue, null, null).source).toBe("queue")
-  })
-})
-
-// AQU-2711 x AQU-2253 (review, Nov 25): split into milestones, a subtitle
-// file's line-by-line clock starts at the milestone's first heard line (10:00
-// here) and runs to its end (11:00). The bar covers that span only, so it
-// starts empty, and a press on it lands inside the milestone.
-describe("a clock that starts later than 0:00: the bar covers its span", () => {
-  const idle = idleQueue
-  it("starts empty at the milestone's start and is full at its end", () => {
-    const at = (sec: number) =>
-      progressSpanFraction(selectTransportForFile(idle, null, virtual({ currentSec: sec, durationSec: 660, startSec: 600 })).progress)
-    expect(at(600)).toBe(0)
-    expect(at(630)).toBeCloseTo(0.5, 6)
-    expect(at(660)).toBe(1)
-  })
-
-  it("a press on the bar seeks inside the milestone", () => {
-    const { progress } = selectTransportForFile(idle, null, virtual({ currentSec: 600, durationSec: 660, startSec: 600 }))
-    expect(progressSpanSec(progress, 0)).toBe(600)
-    expect(progressSpanSec(progress, 0.5)).toBe(630)
-  })
-
-  it("no start: the whole file, as before", () => {
-    const { progress } = selectTransportForFile(idle, null, virtual({ currentSec: 160, durationSec: 640 }))
-    expect(progressSpanFraction(progress)).toBeCloseTo(0.25, 6)
-    expect(progressSpanSec(progress, 0.5)).toBe(320)
   })
 })

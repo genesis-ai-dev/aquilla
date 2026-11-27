@@ -4,12 +4,12 @@
 //
 // Two rules, decided with the removal, and the later one for the drawing:
 //
-//   - THE WHOLE FILE, EVERY CHAPTER, unless Split into milestones is on.
-//     Off, the timeline lays the book out end to end, so scrolling carries
-//     you into the next chapter. On, it draws only the milestone the table
-//     is on (`timelineCellsForMilestoneSplit`). The chapter picker still
-//     names a chapter: a pick while playback is running jumps the playhead
-//     to that chapter's first line.
+//   - THE WHOLE FILE, EVERY CHAPTER. The timeline lays the book out end to
+//     end, so scrolling carries you into the next chapter. The chapter picker
+//     still names a chapter: a pick while playback is running jumps the
+//     playhead to that chapter's first line on this same clock. Split into
+//     milestones pages the Text view only; the timeline ignores it (Sam,
+//     Nov 27, question 121).
 //   - HEADINGS FOLLOW THE PROJECT'S "Count headings as translatable content"
 //     (`countStructuralCells`; Sam's decision 2): counted, a heading or
 //     section break sits on the timeline like any line — its take, or a dashed
@@ -20,8 +20,6 @@
 //     and caches their waveforms, so length costs nothing; parts only added
 //     moving pieces. Only divisions that came from the file are chapters —
 //     the 50-line "Part"s the table pages a file with none by are not.
-//     Split into milestones is the exception: the timeline then shows the
-//     part, time range, or chapter the table is on.
 //
 // Pure. The workspace feeds the chapters from the cell store's own navigation
 // index (the one the chapter picker reads) and the cells from the merged read.
@@ -107,136 +105,6 @@ export function sequenceTimelineCells<T extends CellData>(
 ): T[] {
   const inChapter = chapter ? new Set(chapter.cellIds) : null
   return cells.filter((cell) => (inChapter == null || inChapter.has(cell.id)) && !staysOffSequenceTimeline(cell, countStructural))
-}
-
-/** One milestone the table can page to, including a part or a time range. */
-export interface MilestoneTimelinePage {
-  key: string
-  cellIds: readonly string[]
-}
-
-/**
- * Lines the timeline draws.
- *
- * Split into milestones off: `cells` itself. A book stays one clock from
- * the first chapter through the last, and a file with no milestones is
- * unchanged.
- * Split into milestones on: only the milestone the table is on. A missing
- * or unknown key opens the first milestone, the page the table opens on.
- * The same array comes back when every drawn line is already on that page.
- */
-export function timelineCellsForMilestoneSplit<T extends { id: string }>(
-  cells: readonly T[],
-  options: {
-    split: boolean
-    milestones: readonly MilestoneTimelinePage[]
-    milestoneKey: string | null
-  },
-): T[] {
-  if (!options.split || options.milestones.length === 0) return cells as T[]
-  const known = options.milestoneKey != null
-    && options.milestones.some((page) => page.key === options.milestoneKey)
-  const key = known ? options.milestoneKey : options.milestones[0]?.key
-  const page = options.milestones.find((entry) => entry.key === key)
-  if (!page) return cells as T[]
-  const ids = new Set(page.cellIds)
-  const kept: T[] = []
-  let dropped = false
-  for (const cell of cells) {
-    if (ids.has(cell.id)) kept.push(cell)
-    else dropped = true
-  }
-  return dropped ? kept : cells as T[]
-}
-
-type TimedLine = { id: string; startTime?: number | null; endTime?: number | null }
-
-/**
- * AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file's heard lines (its
- * audio cue file's) for the milestone on the timeline, with Split into
- * milestones on. Every heard line belongs to exactly one milestone (`pages`,
- * in the file's order):
- *  - one paired with subtitle lines, to the milestone of its earliest paired
- *    line;
- *  - one paired with none (or with none on any milestone), by where it
- *    starts: to the milestone
- *    whose time range it starts in; in a gap, to the next one; after the last,
- *    to the last; with no times at all, to the first.
- * While the pairs are being worked on, the pairs already settled keep
- * deciding, so no line jumps milestones; one whose pair does not exist yet is
- * unpaired until it does.
- * With the whole file on the timeline (`milestone` is `all`: the split off, or
- * one milestone holding everything) the heard lines come back as they are.
- */
-export function heardLinesOfMilestone<T extends TimedLine>(
-  heard: T[] | null,
-  milestone: readonly TimedLine[],
-  all: readonly TimedLine[],
-  pages: readonly (readonly TimedLine[])[],
-  textForCue: ReadonlyMap<string, readonly string[]>,
-): T[] | null {
-  if (!heard || milestone === all) return heard
-  const pageOf = new Map<string, number>()
-  pages.forEach((page, i) => { for (const line of page) if (!pageOf.has(line.id)) pageOf.set(line.id, i) })
-  const target = milestone.length > 0 ? pageOf.get(milestone[0].id) ?? -1 : -1
-  if (target < 0) return []
-  // Where each milestone's time range ends (-Infinity: no times).
-  const ends = pages.map((page) => {
-    let end = -Infinity
-    for (const line of page) {
-      const e = typeof line.endTime === "number" && Number.isFinite(line.endTime) ? line.endTime : line.startTime
-      if (typeof e === "number" && Number.isFinite(e)) end = Math.max(end, e)
-    }
-    return end
-  })
-  const byTime = (at: number | null | undefined): number => {
-    if (typeof at !== "number" || !Number.isFinite(at)) return 0
-    // The first milestone that has not ended by the time it starts: its own
-    // range, or the next one after a gap; after the last, the last.
-    let lastTimed = 0
-    for (let i = 0; i < ends.length; i++) {
-      if (ends[i] === -Infinity) continue
-      lastTimed = i
-      if (at < ends[i]) return i
-    }
-    return lastTimed
-  }
-  const placeOf = (cue: T): number => {
-    let earliest = Infinity
-    for (const id of textForCue.get(cue.id) ?? []) {
-      const i = pageOf.get(id)
-      if (i != null) earliest = Math.min(earliest, i)
-    }
-    return Number.isFinite(earliest) ? earliest : byTime(cue.startTime)
-  }
-  return heard.filter((cue) => placeOf(cue) === target)
-}
-
-/**
- * AQU-2711 x AQU-2253 (review, Nov 25): is only part of the file on the
- * timeline? `timelineCellsForMilestoneSplit` hands back the file's own list
- * whenever it keeps every line (the split off, no milestones, one milestone
- * holding everything), so a different list is a part.
- */
-export function showsPartOfFile(shown: readonly unknown[], all: readonly unknown[]): boolean {
-  return shown !== all
-}
-
-/**
- * AQU-2711 x AQU-2253 (review, Nov 25): the lines the recorder walks. The
- * milestone's heard lines (`cut`); opened on a line the cut does not hold (a
- * milestone with none, or the table's own record button on a line elsewhere),
- * the whole cue file, so the line it was opened on is there to record. With
- * no cue file, the file's own lines.
- */
-export function recorderLinesFor<T extends { id: string }>(
-  cut: T[] | null,
-  whole: T[] | null,
-  plain: T[],
-  openedOn: string | null,
-): T[] {
-  if (cut && (openedOn == null || cut.some((c) => c.id === openedOn))) return cut
-  return whole ?? plain
 }
 
 /** The lines of one chapter (the whole list when null), in order. */

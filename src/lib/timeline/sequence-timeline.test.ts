@@ -5,15 +5,11 @@ import type { CellData } from "@/hooks/useCells"
 import {
   chapterOfCell,
   hasRealChapters,
-  heardLinesOfMilestone,
-  recorderLinesFor,
-  showsPartOfFile,
   nextPlayableChapter,
   resolveTimelineChapter,
   scopeCells,
   sequenceTimelineCells,
   staysOffSequenceTimeline,
-  timelineCellsForMilestoneSplit,
   timelineChaptersOf,
   type TimelineChapter,
 } from "./sequence-timeline"
@@ -142,41 +138,6 @@ describe("where Play all goes at the end of a chapter", () => {
   })
 })
 
-describe("split into milestones on the timeline", () => {
-  const cells = [line("a"), line("b"), line("c"), line("d")]
-  const milestones = [
-    { key: "m1", cellIds: ["a", "b"] },
-    { key: "m2", cellIds: ["c", "d"] },
-  ]
-
-  it("draws the open milestone when the split is on, and the whole file when it is off", () => {
-    const cases: {
-      name: string
-      split: boolean
-      milestones: { key: string; cellIds: string[] }[]
-      key: string | null
-      want: string[] | "same"
-    }[] = [
-      { name: "split off", split: false, milestones, key: "m2", want: "same" },
-      { name: "the milestone on the page", split: true, milestones, key: "m2", want: ["c", "d"] },
-      { name: "no page chosen yet", split: true, milestones, key: null, want: ["a", "b"] },
-      { name: "a key from another file", split: true, milestones, key: "gone", want: ["a", "b"] },
-      { name: "a file with no milestones", split: true, milestones: [], key: "m1", want: "same" },
-      { name: "the only milestone is the whole file", split: true, milestones: [{ key: "all", cellIds: ["a", "b", "c", "d"] }], key: "all", want: "same" },
-      { name: "an empty milestone", split: true, milestones: [{ key: "empty", cellIds: [] }], key: "empty", want: [] },
-    ]
-    for (const entry of cases) {
-      const shown = timelineCellsForMilestoneSplit(cells, {
-        split: entry.split,
-        milestones: entry.milestones,
-        milestoneKey: entry.key,
-      })
-      if (entry.want === "same") expect(shown, entry.name).toBe(cells)
-      else expect(shown.map((cell) => cell.id), entry.name).toEqual(entry.want)
-    }
-  })
-})
-
 describe("which divisions are chapters", () => {
   it("counts the divisions that came from the file", () => {
     expect(hasRealChapters([{ kind: "chapter" }, { kind: "chapter" }])).toBe(true)
@@ -231,102 +192,5 @@ describe("a file with no chapters, however long", () => {
     ])
     expect(chapters.map((c) => c.key)).toEqual(["RUT 1", "RUT 2"])
     expect(resolveTimelineChapter({ chapters, chosenKey: "RUT 2", queueCellId: null })?.key).toBe("RUT 2")
-  })
-})
-
-// AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an audio
-// cue file, split into milestones. The heard lines are cut to the milestone
-// once, so the timeline, Play and the recorder show the same page as the
-// subtitle cards. Every heard line belongs to exactly one milestone.
-describe("heardLinesOfMilestone", () => {
-  const timed = (id: string, startTime?: number, endTime?: number): CellData =>
-    ({ id, value: id, startTime, endTime } as unknown as CellData)
-  // Three milestones: 0–8, 10–12 (a gap 8–10 before it), 14–16.
-  const s1 = timed("s1", 0, 4), s2 = timed("s2", 4, 8), s3 = timed("s3", 10, 12), s4 = timed("s4", 14, 16)
-  const all = [s1, s2, s3, s4]
-  const pages = [[s1, s2], [s3], [s4]]
-  const heard = [
-    timed("c1", 1, 3), // inside the first
-    timed("c2", 8.5, 9.5), // in the gap before the second: the second's
-    timed("c3", 10.5, 11.5), // inside the second
-    timed("c4", 20, 22), // after the last: the last's
-    timed("c5"), // no times, no pair: the first's
-    timed("c6", 1, 2), // inside the first by time, paired with s4: the third's
-    timed("c7", 14.5, 15), // paired with s2 and s4: its earliest pair's, the first
-  ]
-  const textForCue = new Map<string, readonly string[]>([["c6", ["s4"]], ["c7", ["s4", "s2"]]])
-  const ids = (cells: CellData[] | null) => cells?.map((c) => c.id) ?? null
-
-  it("a paired heard line goes with its earliest paired line's milestone", () => {
-    expect(ids(heardLinesOfMilestone(heard, pages[2], all, pages, textForCue))).toEqual(["c4", "c6"])
-    expect(ids(heardLinesOfMilestone(heard, pages[0], all, pages, textForCue))).toEqual(["c1", "c5", "c7"])
-  })
-
-  it("an unpaired one in a gap goes to the next milestone, one after the last to the last", () => {
-    expect(ids(heardLinesOfMilestone(heard, pages[1], all, pages, textForCue))).toEqual(["c2", "c3"])
-  })
-
-  it("every heard line belongs to exactly one milestone", () => {
-    const seen = pages.flatMap((page) => ids(heardLinesOfMilestone(heard, page, all, pages, textForCue)) ?? [])
-    expect([...seen].sort()).toEqual(heard.map((c) => c.id).sort())
-  })
-
-  // While the pairs are being worked on (the auto-linker, a reconcile, Re-pair
-  // all), the pairs already settled keep deciding: no line jumps milestones.
-  // A line whose pair does not exist yet is placed by time, as any unpaired one.
-  it("while the pairs load, the settled pairs keep deciding; the rest go by time", () => {
-    const settled = new Map<string, readonly string[]>([["c6", ["s4"]]])
-    const placed = pages.map((page) => ids(heardLinesOfMilestone(heard, page, all, pages, settled)))
-    expect(placed).toEqual([["c1", "c5"], ["c2", "c3"], ["c4", "c6", "c7"]])
-  })
-
-  it("the whole file on the timeline (split off, or one milestone holding it all): unchanged", () => {
-    expect(heardLinesOfMilestone(heard, all, all, [all], textForCue)).toBe(heard)
-  })
-
-  it("no heard lines: none", () => {
-    expect(heardLinesOfMilestone(null, pages[0], all, pages, textForCue)).toBeNull()
-  })
-})
-
-// AQU-2711 x AQU-2253 (review, Nov 25): "one milestone" means only part of the
-// file is on the timeline, not the bare preference. A file with no
-// milestones, or with one milestone holding everything, is the whole file.
-describe("showsPartOfFile", () => {
-  const l = (id: string) => ({ id } as unknown as CellData)
-  const lines = [l("a"), l("b"), l("c")]
-  it("the split on but no milestones: the whole file", () => {
-    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [], milestoneKey: null })
-    expect(showsPartOfFile(shown, lines)).toBe(false)
-  })
-  it("one milestone holding every line: the whole file", () => {
-    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [{ key: "m1", cellIds: ["a", "b", "c"] }], milestoneKey: "m1" })
-    expect(showsPartOfFile(shown, lines)).toBe(false)
-  })
-  it("one milestone of two: part of it", () => {
-    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [{ key: "m1", cellIds: ["a"] }, { key: "m2", cellIds: ["b", "c"] }], milestoneKey: "m2" })
-    expect(showsPartOfFile(shown, lines)).toBe(true)
-  })
-})
-
-// AQU-2711 x AQU-2253 (review, Nov 25): what the recorder walks.
-describe("recorderLinesFor", () => {
-  const l = (id: string) => ({ id } as unknown as CellData)
-  const whole = [l("c1"), l("c2"), l("c3")]
-  const plain = [l("s1"), l("s2")]
-  it("the milestone's heard lines, opened on one of them", () => {
-    const cut = [whole[1]]
-    expect(recorderLinesFor(cut, whole, plain, "c2")).toBe(cut)
-  })
-  it("a milestone with no heard lines, or opened on a line it does not hold: the whole cue file", () => {
-    expect(recorderLinesFor([], whole, plain, "c3")).toBe(whole)
-    expect(recorderLinesFor([whole[0]], whole, plain, "c3")).toBe(whole)
-  })
-  it("no cue file: the file's own lines", () => {
-    expect(recorderLinesFor(null, null, plain, "s1")).toBe(plain)
-  })
-  it("closed: the cut", () => {
-    const cut = [whole[0]]
-    expect(recorderLinesFor(cut, whole, plain, null)).toBe(cut)
   })
 })

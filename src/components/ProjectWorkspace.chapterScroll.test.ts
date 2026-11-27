@@ -41,20 +41,28 @@ describe("scrolling a book's table into another chapter (AQU-1758)", () => {
     expect(offenders.map((e) => e.deps)).toEqual([])
   })
 
-  it("lays every chapter on the timeline until split into milestones", () => {
-    const start = source.indexOf("const timelineCells = useMemo(")
+  it("lays every chapter on the timeline", () => {
+    const start = source.indexOf("const timelineCells = ")
     expect(start).toBeGreaterThan(-1)
-    const body = source.slice(start, source.indexOf("\n  )", start))
-    expect(body).toContain("timelineCellsForMilestoneSplit(timelineLines")
-    expect(body).toContain("split: splitByMilestone")
-    expect(body).not.toContain("scopeCells")
+    const line = source.slice(start, source.indexOf("\n", start))
+    expect(line).toContain("timelineLines")
+    expect(line).not.toContain("scopeCells")
   })
 
-  it("a split milestone plays out on its own page", () => {
-    const start = source.indexOf("useEffect(() => onQueueRanOut(")
-    expect(start).toBeGreaterThan(-1)
-    const body = source.slice(start, source.indexOf("\n  }), [])", start))
-    expect(body).toContain("run.oneMilestone")
+  // Sam, Nov 27 (question 121): the timeline is always the whole file.
+  // "Split into milestones" pages the Text view only, so with it on the
+  // timeline, Play, the recorder and the rest of the Media view still hold
+  // every line, and Play all still carries on into the next chapter.
+  it("the timeline shows the whole file even with Split into milestones on", () => {
+    expect(source).not.toContain("milestone-split-pref")
+    expect(source).not.toContain("useMilestoneSplit")
+    expect(source).not.toContain("getMilestoneSplit")
+    expect(source).toContain("const timelineCells = timelineLines\n")
+    const ranOut = source.indexOf("useEffect(() => onQueueRanOut(")
+    expect(ranOut).toBeGreaterThan(-1)
+    const body = source.slice(ranOut, source.indexOf("\n  }), [])", ranOut))
+    expect(body).toContain("nextChapterForPlayAll(")
+    expect(body).not.toMatch(/milestone/i)
   })
 
   it("a chapter pick eases the open media timeline the way the text eases", () => {

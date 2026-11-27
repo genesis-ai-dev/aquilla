@@ -1,5 +1,4 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
-import { useLatchedLines } from "@/hooks/useLatchedLines"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -241,10 +240,9 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
-  chapterOfCell, heardLinesOfMilestone, recorderLinesFor, resolveTimelineChapter, scopeCells, sequenceTimelineCells, showsPartOfFile,
-  timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
+  chapterOfCell, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
-import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { applyChapterPick, nextChapterForPlayAll, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
@@ -258,8 +256,9 @@ import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video
 import {
   getVirtualClockPlaying,
   getVirtualClockSec,
+  startVirtualClock,
+  stopVirtualClock,
   subscribeVirtualClock,
-  useVirtualClockForFile,
   useVirtualClockPlaying,
   virtualClockController,
   virtualClockPause,
@@ -885,8 +884,6 @@ const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_BT_QUEUE_STATE: { waiting: ReadonlySet<string>; pending: number } = { waiting: new Set<string>(), pending: 0 }
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
-const EMPTY_MILESTONE_PAGES: readonly { key: string; cellIds: readonly string[] }[] = []
-const EMPTY_MILESTONE_LINES: readonly (readonly CellData[])[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 /** AQU-2507: the "no cell carries a check flag" answer, allocated once. */
@@ -16807,76 +16804,32 @@ export function ProjectWorkspace() {
   // as the sound is heard on its lines, and a film that cannot play leaves
   // the lines' original audible.
   const [filmFailed, setFilmFailed] = useWorkspaceSlot(filmFailedSlot)
-  // ── A book or document on the timeline ──
+  // ── A book or document on the timeline, the whole file ──
   //
-  // Split into milestones off: a book's timeline lays out EVERY chapter, end
-  // to end, on one clock. The chapter the table is on (`chosenScopeKey`) only
-  // names where the reader is; scrolling the table does not swap the timeline
-  // for that chapter. A file with no chapters is the same list (Sam, Oct 28:
-  // the long-file parts are dropped — the timeline draws the clips in view, so
-  // length costs nothing).
-  // Split into milestones on: the timeline draws only the milestone the table
-  // is on, including a part or a time range the continuous timeline ignores.
-  // The timeline, the bottom strip's Play all and every timeline seek share
-  // ONE list of lines (`timelineCells`), so the programme they each lay out
-  // is the same one. On a book, headings follow "Count headings as translatable
-  // content" and hidden lines stay off unless recorded
-  // (lib/timeline/sequence-timeline.ts).
+  // A book's timeline lays out EVERY chapter, end to end, on one clock. The
+  // chapter the table is on (`chosenScopeKey`) only names where the reader
+  // is; scrolling the table does not swap the timeline for that chapter. A
+  // file with no chapters is the same list (Sam, Oct 28: the long-file parts
+  // are dropped — the timeline draws the clips in view, so length costs
+  // nothing). Split into milestones pages the Text view only: the timeline,
+  // Play, the recorder and the rest of the Media view always hold the whole
+  // file (Sam, Nov 27, question 121). The timeline, the bottom strip's Play
+  // all and every timeline seek share ONE list of lines (`timelineCells`), so
+  // the programme they each lay out is the same one. On a book, headings
+  // follow "Count headings as translatable content" and hidden lines stay off
+  // unless recorded (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
-  const splitByMilestone = useMilestoneSplit()
   const [chosenScopeKey, setChosenScopeKey] = useWorkspaceSlot(chosenScopeKeySlot)
-  // The lines a book's timeline may draw at all, before any chapter.
+  // The lines a book's timeline draws: every chapter's.
   const timelineLines = useMemo(
     () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, null, countStructuralCells) : audioMergedCells),
     [sequenceTimeline, audioMergedCells, countStructuralCells],
   )
-  const milestonePages = useMemo(
-    () => (splitByMilestone
-      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
-      : EMPTY_MILESTONE_PAGES),
-    [splitByMilestone, cellStore, cellStoreVersion],
-  )
-  const timelineCells = useMemo(
-    () => timelineCellsForMilestoneSplit(timelineLines, {
-      split: splitByMilestone,
-      milestones: milestonePages,
-      milestoneKey: chosenScopeKey,
-    }),
-    [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
-  )
-  // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an
-  // audio cue file, split into milestones: the heard lines of the milestone
-  // on the timeline, cut once so the timeline, Play, the recorder and the
-  // line-by-line clock show the same page as the subtitle cards. Every heard
-  // line belongs to exactly one milestone (`heardLinesOfMilestone`): by its
-  // pair, or by where it starts; while the pairs are worked on, the settled
-  // ones keep deciding.
-  // The whole file on the timeline: `audioCueCells` itself.
-  const timelineMilestoneLines = useMemo(() => {
-    if (milestonePages.length === 0) return EMPTY_MILESTONE_LINES
-    const byId = new Map(timelineLines.map((c) => [c.id, c]))
-    return milestonePages.map((page) => page.cellIds.flatMap((id) => byId.get(id) ?? []))
-  }, [milestonePages, timelineLines])
-  const timelineHeardCells = useMemo(
-    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue),
-    [audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks],
-  )
-  // The recorder walks the milestone's heard lines. Opened on a line the cut
-  // does not hold, it walks the whole cue file, so the line it was opened on
-  // is there to record.
-  // Fixed when it opens and kept until it closes (`useLatchedLines`): Next and
-  // Prev move the line it is on, and must never swap the list under it.
-  const recorderCells = useLatchedLines(
-    recordingCellId !== null,
-    recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId),
-    audioCueCells ?? legacyCells,
-  )
+  const timelineCells = timelineLines
   // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
   // live on them) does not play its own recording lines, so the recording
   // cannot be the sound there: the film's own sound is the original.
-  // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines of the milestone on
-  // the timeline: a milestone with none plays as a file with none.
-  const heardLinesPlay = playsHeardLines(timelineHeardCells, timingMode === "audioFirst")
+  const heardLinesPlay = playsHeardLines(audioCueCells, timingMode === "audioFirst")
   const filmVoicesTheProgramme = filmVoicesProgramme({
     kind: filmKind,
     paneOnScreen: showVideoPane,
@@ -16892,10 +16845,7 @@ export function ProjectWorkspace() {
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change
   // needed for video-first dub playback to follow the takes to their new home.
-  // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines the timeline and
-  // Play walk (`timelineHeardCells`): with Split into milestones on, the
-  // milestone's, so the line-by-line clock and the dubs stay on its page.
-  const dubDriverCells = timelineHeardCells ?? audioMergedCells
+  const dubDriverCells = audioCueCells ?? audioMergedCells
   useEffect(() => {
     if (!videoDrivesDubs || !project?.id || !frontierSession) {
       stopExternalDubs()
@@ -16947,32 +16897,14 @@ export function ProjectWorkspace() {
     // AQU-1704: the same answer the playback bar gets through `freeTiming`.
     timingMode === "audioFirst",
   )
-  // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, a
-  // subtitle file's heard lines are the milestone's (`timelineHeardCells`),
-  // still on the file's own time. Play and Space from the start begin at the
-  // milestone's first heard line, not with silence from 0:00 up to it; a
-  // chosen line plays from that line as before. The split off: 0:00.
-  const timelineClockStartSec = useMemo(() => {
-    if (!timelineHeardCells || timelineHeardCells === audioCueCells) return 0
-    let first = Infinity
-    for (const c of timelineHeardCells) {
-      if (typeof c.startTime === "number" && Number.isFinite(c.startTime)) first = Math.min(first, c.startTime)
+  useEffect(() => {
+    if (!virtualIsTransport) {
+      stopVirtualClock()
+      return
     }
-    return Number.isFinite(first) ? first : 0
-  }, [timelineHeardCells, audioCueCells])
-  // The milestone on the timeline, when only part of the file is: a new one
-  // starts the clock again; its first heard line moving does not.
-  const timelineMilestoneKey = useMemo(() => {
-    if (!showsPartOfFile(timelineCells, timelineLines)) return null
-    const first = timelineCells[0]?.id
-    return milestonePages.find((page) => first != null && page.cellIds.includes(first))?.key ?? null
-  }, [timelineCells, timelineLines, milestonePages])
-  useVirtualClockForFile({
-    owns: virtualIsTransport,
-    durationSec: timelineDurationSec,
-    startSec: timelineClockStartSec,
-    milestoneKey: timelineMilestoneKey,
-  })
+    startVirtualClock(timelineDurationSec)
+    return () => stopVirtualClock()
+  }, [virtualIsTransport, timelineDurationSec])
   // REGISTERED AS THE CONTROLLER, which is what keeps the playback bar's six
   // `drivesVideo ? controller : queue` branches two-way instead of three. That
   // store already means "the non-queue transport currently driving" — see
@@ -17032,7 +16964,6 @@ export function ProjectWorkspace() {
     anyCellClockIsFileTime: anyFileCellClockIsFileTime,
     paneOnScreen: showVideoPane,
     timelineDurationSec,
-    timelineStartSec: timelineClockStartSec,
     virtualSoundingCellId,
     freeTiming: timingMode === "audioFirst",
   }
@@ -17050,9 +16981,8 @@ export function ProjectWorkspace() {
     const queue = selectQueueStateForFile(state, fileCellIds)
     return queue.active ? (chapterOfCell(timelineScopes, queue.cellId)?.key ?? null) : null
   })
-  // Remembered so a scroll of the table still has a chapter to name. With the
-  // split off, the timeline itself is `timelineLines`: every chapter, in the
-  // file's order. With the split on, it is the milestone the table is on.
+  // Remembered so a scroll of the table still has a chapter to name. The
+  // timeline itself is `timelineLines`: every chapter, in the file's order.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
       ? (timelineScopes.find((chapter) => chapter.key === queueChapterKey)
@@ -17065,8 +16995,8 @@ export function ProjectWorkspace() {
   // takes live on them, never on its subtitle lines — laid out as the
   // timeline draws them (`recordingsLines`). Every other file: its own lines.
   const playbackCells = useMemo(
-    () => recordingsLines(timelineCells, timelineHeardCells, timingMode === "audioFirst"),
-    [timelineCells, timelineHeardCells, timingMode],
+    () => recordingsLines(timelineCells, audioCueCells, timingMode === "audioFirst"),
+    [timelineCells, audioCueCells, timingMode],
   )
   // AQU-2253 (Nov 13): the line Space and the strip's Play start from with a
   // line selected. Playing the heard lines, a subtitle row has no place in
@@ -17076,9 +17006,9 @@ export function ProjectWorkspace() {
     if (!timelineSelectedCellId) return null
     const row = timelineCells.find((c) => c.id === timelineSelectedCellId)
     return row
-      ? playStartLineId(row, timelineHeardCells, timingMode === "audioFirst", cueLinks.cuesForText)
+      ? playStartLineId(row, audioCueCells, timingMode === "audioFirst", cueLinks.cuesForText)
       : timelineSelectedCellId
-  }, [timelineSelectedCellId, timelineCells, timelineHeardCells, timingMode, cueLinks])
+  }, [timelineSelectedCellId, timelineCells, audioCueCells, timingMode, cueLinks])
   // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
   // own clock, so Play runs to whichever ends later: the lines or the film.
   // The queue is told how long the film is and which lines are this file's,
@@ -17088,11 +17018,6 @@ export function ProjectWorkspace() {
   // plays behind is played, never skipped. Null wherever no film plays behind
   // the lines (`linkedFilmBehindLines`): following the source, an imported
   // film, a film that could not be loaded.
-  // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, Play
-  // ends at the milestone's last line and the film does not run on: the
-  // milestone is laid out from 0:00, so the film's rest would play over an
-  // empty timeline. (Its picture is not yet at the milestone's place in the
-  // film: the programme clock starts at 0:00 for any list of lines.)
   const filmBehind = useMemo(
     () => linkedFilmBehindLines({
       kind: filmKind,
@@ -17100,11 +17025,8 @@ export function ProjectWorkspace() {
       followsRecordings: timingMode === "audioFirst",
       filmFailed,
       durationSec: videoDurationForTable,
-      // Only part of the file is on the timeline. A file with no milestones,
-      // or one milestone holding it all, still runs on to the film's end.
-      oneMilestone: showsPartOfFile(timelineCells, timelineLines),
     }),
-    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, timelineCells, timelineLines],
+    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable],
   )
   // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
   // the timeline and the bottom strip start the queue with must be the same
@@ -17113,9 +17035,7 @@ export function ProjectWorkspace() {
   // chapter's (each chapter's lines are among them), the file's own lines
   // (`playbackCells`) on any other file.
   // Since the whole-book timeline (dev, Nov 13) the timeline's lines ARE every
-  // chapter's, so these are `playbackCells` themselves. With Split into
-  // milestones on (AQU-2711) they are the milestone's: its own lines, or the
-  // heard lines cut to it (`timelineHeardCells`), and Play stops at its end.
+  // chapter's, so these are `playbackCells` themselves.
   const filmLines = playbackCells
   const programmeFilm = useMemo(
     () => programmeFilmFor(filmBehind, filmLines),
@@ -17144,22 +17064,19 @@ export function ProjectWorkspace() {
   )
   // The table reports the chapter on screen as it scrolls. Scrolling is
   // reading, never a pick, so it leaves playback alone — a paused Play all
-  // resumes where it was. With the split off, the timeline keeps every
-  // chapter (lib/timeline/chapter-pick). With it on, the same report is which
-  // milestone the timeline draws. A pick in the chapter picker and a row of
+  // resumes where it was. The timeline keeps every chapter either way
+  // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     viewChapterKeyRef.current = { fileId: activeFileId ?? null, key }
-    // A book timeline, or a timed file split into milestones, follows the
-    // page. Otherwise the report only feeds the batch dialog and must not
-    // re-render this shell.
-    if (sequenceTimeline || splitByMilestone) setChosenScopeKey(key)
-  }, [sequenceTimeline, splitByMilestone, activeFileId])
+    // A book timeline names the chapter on screen. Otherwise the report only
+    // feeds the batch dialog and must not re-render this shell.
+    if (sequenceTimeline) setChosenScopeKey(key)
+  }, [sequenceTimeline, activeFileId])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
-  // it and keeps playing, from its first line. With the split off, that run
-  // stays on the whole book's clock. With the split on, the run is the
-  // milestone picked. Picking one while playback is paused ends that
-  // playback, as before (lib/timeline/chapter-pick).
+  // it and keeps playing, from its first line, on the whole book's clock.
+  // Picking one while playback is paused ends that playback, as before
+  // (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
@@ -17171,8 +17088,6 @@ export function ProjectWorkspace() {
     chapters: readonly TimelineChapter[]
     cells: readonly CellData[]
     onScreen: TimelineChapter | null
-    /** Split into milestones: a pick plays that milestone, and the run stops there. */
-    oneMilestone: boolean
   } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
@@ -17186,10 +17101,7 @@ export function ProjectWorkspace() {
       // What the queue was told: the pick asks at the moment it is made.
       ask: queuePlaybackAsk(),
     })
-    const lines = run?.oneMilestone && plan.kind === "play"
-      ? scopeCells(run.cells, plan.chapter)
-      : run?.cells ?? []
-    return applyChapterPick(plan, { lines, ...chapterPickRunRef.current })
+    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
   // The chapter navigator eases the text so the chapter's first row is at the
   // top. When the Media timeline is open, the same pick eases the timeline so
@@ -17212,14 +17124,9 @@ export function ProjectWorkspace() {
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
-    const milestoneChapters = splitByMilestone && milestonePages.length > 0
-      ? milestonePages.map((page) => ({ key: page.key, cellIds: page.cellIds }))
+    chapterRunRef.current = timelineScopes.length > 0
+      ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter }
       : null
-    chapterRunRef.current = milestoneChapters
-      ? { chapters: milestoneChapters, cells: timelineLines, onScreen: timelineChapter, oneMilestone: true }
-      : timelineScopes.length > 0
-        ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter, oneMilestone: false }
-        : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
       if (!chapter) return
@@ -17231,10 +17138,7 @@ export function ProjectWorkspace() {
   useEffect(() => onQueueRanOut((ctx) => {
     const run = chapterRunRef.current
     // Sam, Nov 12: nor a run of chosen lines ("Play selected").
-    // Split into milestones plays the page on screen and stops. The arrows
-    // turn the page; starting the next milestone here would play lines the
-    // timeline is no longer drawing.
-    if (!run || ctx.snapshot || ctx.only || run.oneMilestone) return
+    if (!run || ctx.snapshot || ctx.only) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     // A run that already holds the later chapters plays them itself. Starting
@@ -19013,23 +18917,19 @@ export function ProjectWorkspace() {
   useSkipSilentLinesOnVirtualClock(dubDriverCells, targetSlots, virtualIsTransport)
 
   // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
-  // is offered only where it can change something. Over the programme Play
-  // all will run — the whole file when the split is off (a book's every
-  // chapter, since Play all carries on into the next), and the milestone on
-  // screen when the split is on — laid out as the queue plays it, or as the
-  // built-in clock does while it drives. Handed over as a question, which
-  // the timeline asks when its ⋯ opens: the answer lays out that programme,
-  // too much to redo on every edit.
+  // is offered only where it can change something. Over the whole file — a
+  // book's every chapter, since Play all carries on into the next — laid out
+  // as the queue plays it, or as the built-in clock does while it drives.
+  // Handed over as a question, which the timeline asks when its ⋯ opens: the
+  // answer lays out every chapter, too much to redo on every edit.
   const skipSilentLinesApplies = useCallback(
     () =>
       skipSilentLinesCanChange({
         timing: timingMode,
-        runs: splitByMilestone
+        runs: timelineScopes.length > 0
+          ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
           // Group D: a cue file following the recordings plays its heard lines.
-          ? [playbackCells]
-          : timelineScopes.length > 0
-            ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
-            : [playbackCells !== timelineCells ? playbackCells : timelineLines],
+          : [playbackCells],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
         // AQU-2252: laid out with the tracks the queue plays them with.
@@ -19037,7 +18937,7 @@ export function ProjectWorkspace() {
         // AQU-2253 (Sam, Nov 9): and the linked film behind the lines, their source.
         film: programmeFilm,
       }),
-    [timingMode, splitByMilestone, timelineScopes, timelineLines, playbackCells, timelineCells, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks, programmeFilm],
+    [timingMode, timelineScopes, timelineLines, playbackCells, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks, programmeFilm],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -21635,7 +21535,7 @@ export function ProjectWorkspace() {
                     onReviewCharacterDisagreements={openCharacterCheck}
                     hasAudioCueTrack={audioCueSibling !== null}
                     audioCues={audioCues}
-                    targetCells={timelineHeardCells}
+                    targetCells={audioCueCells}
                     cueLinks={cueLinks}
                     cueLinksFailed={Boolean(cueLinksError)}
                     cueLinksPending={cueLinksPending}
@@ -22581,11 +22481,7 @@ export function ProjectWorkspace() {
           // Stage 4: with an audio VTT imported, the recorder walks the CUES —
           // the units the picture wants recorded — and Next/Prev, the count-in
           // and the take's window all follow the cue's own timing.
-          // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines of the
-          // milestone on the timeline, with Split into milestones on.
-          // A line opened from outside the milestone (the table's own record
-          // button) still finds its line: the whole cue file then.
-          cells={recorderCells}
+          cells={audioCueCells ?? legacyCells}
           activeCellId={recordingCellId}
           // Where the take lands. "recording" for the default dub row, so its
           // behaviour is byte-for-byte unchanged; an added track's own id when

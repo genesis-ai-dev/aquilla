@@ -304,12 +304,6 @@ export interface QueueProgress {
    */
   programmeClock: boolean
   /**
-   * AQU-2711 x AQU-2253 (review, Nov 25): where the bar's span starts, on
-   * `currentTime`'s clock: the line-by-line clock's start (a milestone's
-   * first heard line), so the bar covers `startSec`..`duration`. Absent: 0.
-   */
-  startSec?: number
-  /**
    * AQU-2253 (Sam, Nov 9): true while the programme's clock is past the last
    * line, running on over a linked film's tail (`progEnterTail`). The queue's
    * state still names the last line there, which is how the run stays its

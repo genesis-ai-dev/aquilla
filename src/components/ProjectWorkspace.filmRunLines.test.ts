@@ -164,20 +164,6 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
     expect(filmOverRun(film, playback.map((c) => c.id))).toEqual({ coverSec: FILM_SEC, runsOnToSec: FILM_SEC })
   })
 
-  // AQU-2711 x AQU-2253 (review, Nov 25): Split into milestones on. The
-  // milestone's lines are laid out from 0:00, so running on would play the
-  // film's rest over an empty timeline. Play ends at the milestone's last line.
-  it("split into milestones: the film is behind the milestone's lines, and Play ends at its last line", () => {
-    const milestone = BOOK().slice(0, 2)
-    const behind = linkedFilmBehindLines({ kind: "linked", paneOnScreen: true, followsRecordings: true, durationSec: FILM_SEC, oneMilestone: true })
-    const film = programmeFilmFor(behind, milestone)
-    expect(filmOverRun(film, milestone.map((c) => c.id))).toEqual({ coverSec: FILM_SEC, runsOnToSec: 0 })
-    setProgrammeFilm(film, "f1")
-    startQueueAtTime(ctxFor(milestone), 0, { play: true })
-    expect(filmIsRunning()).toBe(true)
-    expect(getQueueProgress().duration).toBeLessThan(FILM_SEC)
-  })
-
   // AQU-2253 (Sam, Nov 9): one line fewer used to switch it off too. Those
   // lines are all the film's file's, so the film is behind them now; what one
   // line fewer still loses is Play running on past them.
@@ -218,13 +204,9 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     // Every line of the file Play plays. Since dev's whole-book timeline
     // (Nov 13) the timeline's lines are every chapter's (`timelineCells` IS
     // `timelineLines`), so the film's lines are `playbackCells` themselves.
-    // With Split into milestones on (AQU-2711) the timeline's lines are the
-    // milestone on screen; Play plays its lines, or the heard lines cut to it
-    // (`timelineHeardCells`), and stops at its last line. Which heard lines,
-    // and when the film stops, are held by sequence-timeline.test.ts
-    // (`heardLinesOfMilestone`, `showsPartOfFile`), film-pieces.test.ts and
-    // the milestone run above.
-    expect(workspace).toContain("() => timelineCellsForMilestoneSplit(timelineLines, {")
+    // Split into milestones does not change them (Sam, Nov 27, question 121).
+    expect(workspace).toContain("const timelineCells = timelineLines")
+    expect(workspace).toContain("() => recordingsLines(timelineCells, audioCueCells, timingMode === \"audioFirst\"),")
     expect(workspace).toContain("const filmLines = playbackCells")
     expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")

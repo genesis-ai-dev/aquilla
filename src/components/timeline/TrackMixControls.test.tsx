@@ -205,6 +205,22 @@ describe("the fader", () => {
     expect(onCommit).toHaveBeenCalledWith(-4)
   })
 
+  // Evidence pass, Nov 27: a drag from −14.9 to −28.9, then ⌘Z: the saved
+  // value went −14.9 → −28.9 → −14.9, and the fader showed −28.9 again (what
+  // it had drawn over −14.9). Once the saved value has moved on, what was
+  // drawn is done with.
+  it("shows the saved value when an Undo takes it back to where a drag began", () => {
+    const onCommit = vi.fn()
+    const el = (db: number) => <TrackFader name="Jesus" testKey="t1" db={db} onLive={() => {}} onCommit={onCommit} />
+    const view = render(el(-14.9))
+    const slider = screen.getByRole("slider", { name: "Volume of Jesus" })
+    fireEvent.keyDown(slider, { key: "End" })
+    expect(slider).toHaveAttribute("aria-valuetext", "−∞ dB")
+    view.rerender(el(-Infinity))
+    view.rerender(el(-14.9))
+    expect(slider).toHaveAttribute("aria-valuetext", "−14.9 dB")
+  })
+
   it("does nothing for someone who may not change it, and says why", () => {
     const { slider, onCommit } = setup(0, true)
     expect(slider).toHaveAttribute("aria-disabled", "true")

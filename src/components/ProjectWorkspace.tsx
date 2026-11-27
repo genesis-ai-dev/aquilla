@@ -402,7 +402,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
-import { applyFilmSoundDb, applyPendingVolumes, applyTrackVolumes, FILM_SOUND_TRACK_ID, nextPendingVolume, settledPendingVolumes, withFilmSoundRow, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
+import { applyFilmSoundDb, applyPendingVolumes, applyTrackVolumes, FILM_SOUND_TRACK_ID, nextPendingVolume, pendingVolumesForPatches, settledPendingVolumes, withFilmSoundRow, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
 import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
@@ -18895,9 +18895,37 @@ export function ProjectWorkspace() {
           // Undo and Redo saves what the timeline holds (beforeHistoryMove).
           const revertColors = paintTrackColorsRef.current(colors)
           const revertPlaces = paintTrackPlacesRef.current(changes)
+          // Evidence pass, Nov 27: a volume Undo or Redo is drawn like the
+          // fader's own write, so a drag not read back yet does not stay on the
+          // fader (it never settled once the read went back to the old level).
+          const volumeFileId = activeFileIdRef.current
+          const volumeWriteId = ++trackVolumeWriteId.current
+          const volumeIds = changes.flatMap((c) => (c.patch && "volumeDb" in c.patch ? [c.trackId] : []))
+          if (volumeFileId && volumeIds.length > 0) {
+            setPendingTrackPaint((current) => {
+              const mine = current?.fileId === volumeFileId ? current : null
+              const volumes = pendingVolumesForPatches(
+                mine?.volumes ?? new Map(),
+                changes,
+                (trackId) => serverTracksRef.current.find((tr) => tr.id === trackId)?.volumeDb ?? 0,
+                volumeWriteId,
+              )
+              return volumes ? trackPaintOf(volumeFileId, mine?.colors ?? null, volumes) : current
+            })
+          }
+          const revertVolumes = () => {
+            if (!volumeFileId || volumeIds.length === 0) return
+            setPendingTrackPaint((current) => {
+              if (!current?.volumes || current.fileId !== volumeFileId) return current
+              let volumes = current.volumes
+              for (const trackId of volumeIds) volumes = withoutPendingVolume(volumes, trackId, volumeWriteId)
+              return trackPaintOf(volumeFileId, current.colors, volumes)
+            })
+          }
           return applyTrackPatches(changes as never, "Couldn't undo the track change:", () => {
             revertColors()
             revertPlaces()
+            revertVolumes()
           })
         },
         restoreTakes: async (takes) => {

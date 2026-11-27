@@ -7,6 +7,7 @@ import {
   settledPendingVolumes,
   withoutPendingVolume,
   nextPendingVolume,
+  pendingVolumesForPatches,
   type PendingVolume,
   formatOwnVolume,
   trackVolumeForSlot,
@@ -191,5 +192,38 @@ describe("the film's own sound", () => {
     expect(filmElementVolume(0.8, -6)).toBeCloseTo(0.8 * Math.pow(10, -6 / 20), 6)
     expect(filmElementVolume(1, 6)).toBe(1)
     expect(filmElementVolume(0.5, -Infinity)).toBe(0)
+  })
+})
+
+// Evidence pass, Nov 27: an Undo (or Redo) of a volume change wrote the right
+// level, but the fader kept showing the dragged one: the drag's own pending
+// value was never read back before the Undo's write took the read back to the
+// value before it, so it never settled. An Undo's volume write is drawn the
+// same way a drag's is.
+describe("pendingVolumesForPatches", () => {
+  it("draws an Undo's volume over the drag still waiting to be read back", () => {
+    const drag = new Map<string, PendingVolume>([["source-audio", nextPendingVolume(undefined, -28.9, -14.9, 1)]])
+    const next = pendingVolumesForPatches(drag, [{ trackId: "source-audio", patch: { volumeDb: -14.9 } }], () => -28.9, 2)
+    expect(next).not.toBeNull()
+    expect(next!.get("source-audio")!.db).toBe(-14.9)
+    // Drawn on the track the fader reads.
+    expect(applyPendingVolumes([track("source-audio", "source-audio", -28.9)], next!)[0].volumeDb).toBe(-14.9)
+    // And it settles once the read shows it.
+    expect(settledPendingVolumes(next!, [track("source-audio", "source-audio", -14.9)])).toEqual(["source-audio"])
+  })
+
+  it("reads the stored forms: null is 0 dB, \"-inf\" is silence", () => {
+    const next = pendingVolumesForPatches(new Map(), [
+      { trackId: "a", patch: { volumeDb: null } },
+      { trackId: "b", patch: { volumeDb: "-inf" } },
+    ], () => -6, 7)!
+    expect(next.get("a")!.db).toBe(0)
+    expect(next.get("b")!.db).toBe(-Infinity)
+    expect(next.get("a")!.readBefore).toBe(-6)
+  })
+
+  it("leaves the pending volumes alone when no patch is a volume", () => {
+    const pending = new Map<string, PendingVolume>([["a", nextPendingVolume(undefined, -3, 0, 1)]])
+    expect(pendingVolumesForPatches(pending, [{ trackId: "a", patch: { color: "red" } }, { trackId: "b", patch: null }], () => 0, 2)).toBeNull()
   })
 })

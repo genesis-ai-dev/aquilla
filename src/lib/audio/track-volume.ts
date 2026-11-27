@@ -17,7 +17,7 @@ import type { CellData } from "@/hooks/useCells"
 import { setTrackGainDb } from "./mixer"
 import { slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { overrideVolumeDb, TRACK_KIND_LABELS, type PersistedTrackOverrides, type TimelineTrack } from "@/lib/timeline/tracks"
-import { toStoredVolume } from "./track-volume-store"
+import { fromStoredVolume, toStoredVolume } from "./track-volume-store"
 
 // The fader's scale, its typing and its readout live in fader-scale.ts; what
 // it holds and how that is stored, in track-volume-store.ts.
@@ -200,6 +200,30 @@ export function settledPendingVolumes(pending: ReadonlyMap<string, PendingVolume
     if (!tr || read === p.db || (read !== p.readBefore && !(p.mine ?? []).includes(read))) out.push(id)
   }
   return out
+}
+
+/**
+ * Evidence pass, Nov 27: an Undo or Redo of a track's volume, drawn like a new
+ * write (`nextPendingVolume`) on top of the pending volumes, so a fader whose
+ * drag has not been read back yet shows the level the Undo wrote, and settles
+ * when the read shows it. `patch.volumeDb` is the stored form (null = 0 dB,
+ * "-inf" = silence). Null when no patch changes a volume.
+ */
+export function pendingVolumesForPatches(
+  pending: ReadonlyMap<string, PendingVolume>,
+  changes: ReadonlyArray<{ trackId: string; patch: { volumeDb?: unknown } | Record<string, unknown> | null }>,
+  readNow: (trackId: string) => number,
+  id: number,
+): Map<string, PendingVolume> | null {
+  let next: Map<string, PendingVolume> | null = null
+  for (const c of changes) {
+    if (!c.patch || !("volumeDb" in c.patch)) continue
+    const db = c.patch.volumeDb == null ? 0 : fromStoredVolume(c.patch.volumeDb)
+    if (db === undefined) continue
+    next ??= new Map(pending)
+    next.set(c.trackId, nextPendingVolume(next.get(c.trackId), db, readNow(c.trackId), id))
+  }
+  return next
 }
 
 /** A refused write takes back only itself, never a newer one on the same track. */

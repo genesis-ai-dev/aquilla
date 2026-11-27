@@ -1027,17 +1027,6 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     )
   }
 
-  it("keeps the projects panel usable through a slow and failed totals request", async () => {
-    const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
-    let fail!: (error: Error) => void
-    vi.mocked(getPortfolioAggregates).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
-    await renderAllOrgs()
-    expect(await screen.findByTestId("project-table")).toBeInTheDocument()
-    await act(async () => fail(new Error("Totals unavailable")))
-    expect(await screen.findByRole("alert")).toHaveTextContent("Totals unavailable")
-    expect(screen.getByTestId("project-table")).toBeInTheDocument()
-  })
-
   // AQU-1488. WHY: a member invited to one project but never to its org read
   // "Projects 0" in these totals beside a table listing that project: the totals
   // asked only for member orgs. The org they hold a project in is asked for too

@@ -1,5 +1,6 @@
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import type { SourceTextCell } from "@/lib/cell-text"
 import { checkRulesForCell, rulesPassingSourceGate } from "./rule-engine"
 
 /**
@@ -55,7 +56,7 @@ export function termRulesOf(ruleMap: ReadonlyMap<string, TranslationRule>): Tran
  * the source without compiling their patterns.
  */
 export function selectSourceApplicableTermRules(
-  cell: CellData,
+  cell: SourceTextCell,
   termRules: TranslationRule[],
 ): TranslationRule[] {
   return rulesPassingSourceGate(cell, termRules)

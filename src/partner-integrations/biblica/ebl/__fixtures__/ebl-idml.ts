@@ -4,12 +4,13 @@
  * The shape mirrors a real module guide: one long threaded story carrying the
  * whole guide — cover line, front matter, a module opener, a topic opener and
  * its lessons, back matter — plus the detached single-frame stories InDesign
- * keeps a guide's pull-out boxes in, listed ahead of the body the way the real
- * package's `designmap.xml` lists them.
+ * keeps a guide's pull-out boxes in.
  *
- * That ordering is the point of the fixture: the "30 min" badge is set in the
- * same level-1 style a lesson tag uses, so a reader that took every level-1
- * heading at face value would open the file with a division called "30 min".
+ * The "30 min" badge is set in the same level-1 style a lesson tag uses, so a
+ * reader that took every level-1 heading at face value would open a division
+ * called "30 min". The badge is the whole frame, with no body under it. This
+ * package has no spreads, so stories are read in path order: the badge, then
+ * the guide, then the summary.
  *
  * Style names are written the way InDesign stores them, with the group
  * separator URL-encoded as `%3a`, so the fixtures exercise the decoding the
@@ -208,9 +209,9 @@ export interface EblIdmlStories {
 }
 
 /**
- * Build the package. The two loose frames are listed ahead of the body, which
- * is the order the real guide's `designmap.xml` uses and the order the engine
- * therefore reports its units in.
+ * Build the package. `designmap.xml` still lists the pull-outs ahead of the
+ * body, the way a real guide does. With no spreads, the engine reads the
+ * stories in path order instead.
  */
 export function makeEblIdml(stories: EblIdmlStories = {}): Promise<ArrayBuffer> {
   const members: [string, string, readonly string[]][] = []

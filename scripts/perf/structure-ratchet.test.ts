@@ -28,7 +28,10 @@ interface Ceiling {
 
 const CEILINGS: Ceiling[] = [
   { file: "src/components/ProjectWorkspace.tsx", useState: 126 },
-  { file: "src/components/EditorTable.tsx", useState: 47 },
+  // 49 since AQU-2655 (raised by Ryder): `capturedSelection` and
+  // `pendingIdmlPointerSelection` were refs read in render, which stopped the
+  // React Compiler compiling the file. They are state of the row that renders them.
+  { file: "src/components/EditorTable.tsx", useState: 49 },
 ]
 
 describe("structure ratchet (AQU-2654)", () => {

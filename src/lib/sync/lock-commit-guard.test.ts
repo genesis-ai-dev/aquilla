@@ -40,7 +40,14 @@ import {
 
 vi.mock("./events-emit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./events-emit")>()
-  return { ...actual, emitTargetCellCommit: vi.fn(async () => "evt-commit-1") }
+  const { commitAndValidateDouble } = await import("@/test-utils/commit-and-validate-double")
+  const emitTargetCellCommit = vi.fn(async () => "evt-commit-1")
+  return {
+    ...actual,
+    emitTargetCellCommit,
+    // AQU-2655: a self-validating edit goes through the combined emit.
+    emitTargetCellCommitAndValidate: commitAndValidateDouble(emitTargetCellCommit, vi.fn(async () => "evt-validate-1")),
+  }
 })
 
 // happy-dom has no layout engine, so LegendList may render no rows. Replace it

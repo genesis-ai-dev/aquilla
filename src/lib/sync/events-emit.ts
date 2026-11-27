@@ -568,6 +568,14 @@ export interface CellValidateInput {
  * `cell_validators`), so parentId is omitted.
  */
 export async function emitCellValidate(input: CellValidateInput): Promise<string> {
+  const analytics = noteCellValidate(input)
+  const { eventId } = await enqueueEvent(cellValidateEventInput(input))
+  reportCellValidation(input, analytics)
+  return eventId
+}
+
+/** The milestones a validate gesture reports before its write. */
+function noteCellValidate(input: CellValidateInput): ReturnType<typeof posthog.scope> {
   const analytics = posthog.scope(undefined, input.author)
   // AQU-267: once-per-session first-validate funnel event.
   if (!_firstValidateFired) {
@@ -580,7 +588,11 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
   // Model A/B: validating a cell whose content is an unreported AI draft is
   // the "accepted" gesture. No-op when the cell has no pending assignment.
   reportAbOutcome(input.fileId, input.cellId, "accepted")
-  const { eventId } = await enqueueEvent({
+  return analytics
+}
+
+function cellValidateEventInput(input: CellValidateInput): BuildEventInput<"cell.validate"> {
+  return {
     kind: "cell.validate",
     projectId: input.projectId,
     fileId: input.fileId,
@@ -594,7 +606,11 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
       ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     clientTs: input.clientTs,
-  })
+  }
+}
+
+/** The per-gesture validation event, sent once the write is queued. */
+function reportCellValidation(input: CellValidateInput, analytics: ReturnType<typeof posthog.scope>): void {
   // AQU-1572: the per-gesture event, which the milestone above cannot stand in
   // for — that one fires once per session, so it can say somebody validated
   // and never how much. Counted after the enqueue, so a write that threw is
@@ -609,7 +625,54 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     auto: input.auto,
     surface: input.surface,
   }, analytics)
-  return eventId
+}
+
+/** What became of the validation `emitTargetCellCommitAndValidate` asked for. */
+export type SelfValidationResult =
+  | { ok: true; eventId: string }
+  | { ok: false; error: unknown }
+
+/**
+ * AQU-2655: an edit and the validation it casts for itself, queued in ONE
+ * outbox write — one IndexedDB transaction, one reload-recovery journal entry
+ * and one change notification. Subscribers never see the half-way state (edit
+ * pending, approvals cleared), and a crash cannot keep the edit and lose its
+ * validation.
+ *
+ * Same contract as `emitTargetCellCommit` followed by `emitCellValidate` on
+ * the returned id: the commit's failure throws and queues nothing. A
+ * validation the client refuses before writing (role floor, unresolvable
+ * lane) does not cost the edit — the commit is queued alone and the refusal
+ * comes back as `validation`, as a rejected `emitCellValidate` did.
+ */
+export async function emitTargetCellCommitAndValidate(
+  commit: CellCommitInput,
+  validate: Omit<CellValidateInput, "editEventId">,
+): Promise<{ eventId: string; validation: SelfValidationResult }> {
+  noteTargetCellCommit(commit)
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  refuseEventBelowFloor("target.cell.commit", roleLevel)
+  const commitEvent = buildRawEvent(withResolvedTargetLane(targetCellCommitEventInput(commit)))
+  const validateInput: CellValidateInput = { ...validate, editEventId: commitEvent.id }
+  let validateEvent: OutboxRawEvent<"cell.validate"> | null = null
+  let validation: SelfValidationResult
+  try {
+    refuseEventBelowFloor("cell.validate", roleLevel)
+    validateEvent = buildRawEvent(withResolvedTargetLane(cellValidateEventInput(validateInput)))
+    validation = { ok: true, eventId: validateEvent.id }
+  } catch (error) {
+    validation = { ok: false, error }
+  }
+  if (validateEvent) {
+    await enqueueOutboxEvents([commitEvent, validateEvent] as unknown as Parameters<typeof enqueueOutboxEvents>[0])
+  } else {
+    await enqueueOutboxEvent(commitEvent as unknown as Parameters<typeof enqueueOutboxEvent>[0])
+  }
+  // Reported once the edit is queued, as the two-call sequence did: a commit
+  // that threw never reached its validation.
+  const analytics = noteCellValidate(validateInput)
+  if (validateEvent) reportCellValidation(validateInput, analytics)
+  return { eventId: commitEvent.id, validation }
 }
 
 /** Mirror of `emitCellValidate` for the un-validate gesture. */

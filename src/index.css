@@ -1059,7 +1059,8 @@ textarea,
    Consecutive plain runs are one typing space. An empty plain run shows a
    single faint "Regular" on its first slot, with no box; the plain slots
    after it add neither another word nor a gap. An empty styled run shows
-   its own faint label until the translator types. Labels are not document text. */
+   its own faint label until the translator types. Labels are not document
+   text. */
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps {

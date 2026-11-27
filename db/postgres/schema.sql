@@ -822,6 +822,9 @@ CREATE TABLE files (
     -- AQU-2459: head of the file's revision chain (migration 0197). NULL =
     -- legacy materialized file; set once the revisions route adopts it.
     head_revision_n INTEGER,
+    -- AQU-2459 Phase B (migration 0213): TRUE when source cells live solely in
+    -- the head R2 revision manifest rather than as N rows in `cells`.
+    source_virtual BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (id, project_id)
 );
 
@@ -837,6 +840,9 @@ CREATE TABLE cells (
     anchor_cell_id    TEXT,
     event_id          TEXT NOT NULL,
     source_event_id   TEXT,
+    -- AQU-2459 Phase B (migration 0213): 122-bit content hash of the source
+    -- unit this target cell was committed or repinned against.
+    source_content_hash TEXT,
     last_editor       TEXT,
     last_edit_at      BIGINT NOT NULL,
     validated         INTEGER NOT NULL DEFAULT 0,

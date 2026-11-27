@@ -21,6 +21,7 @@
 import { verifyTokenForProject } from "../auth"
 import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import {
   propagateHealth,
   type PropNode,
@@ -31,6 +32,8 @@ import {
 export interface CellConfidenceEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/cell-confidence$/
@@ -61,7 +64,28 @@ async function loadFileCells(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  r2?: ManifestR2Bucket,
 ): Promise<FileCell[]> {
+  const virtualFile = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+  if (virtualFile) {
+    const tRes = await db
+      .prepare(
+        `SELECT cell_id, value, validated FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'target'`,
+      )
+      .bind(projectId, fileId)
+      .all<{ cell_id: string; value: string; validated: number }>()
+    const tByCell = new Map((tRes.results ?? []).map((r) => [r.cell_id, r]))
+    return virtualFile.rows.slice(0, MAX_FILE_CELLS).map((s) => {
+      const t = tByCell.get(s.cell_id)
+      return {
+        cellId: s.cell_id,
+        sourceText: s.value,
+        targetText: t?.value ?? "",
+        validated: t?.validated === 1,
+      }
+    })
+  }
   const sql =
     "SELECT s.cell_id AS cell_id, s.value AS source_text, " +
     "COALESCE(t.value, '') AS target_text, COALESCE(t.validated, 0) AS validated " +
@@ -149,7 +173,7 @@ export async function handleCellConfidenceRequest(
   const startedAt = Date.now()
 
   // Nodes = translated cells (skip untranslated — not started, not unhealthy).
-  const fileCells = await loadFileCells(env.AQUILLA_PG, projectId, fileId)
+  const fileCells = await loadFileCells(env.AQUILLA_PG, projectId, fileId, env.SNAPSHOTS)
   const nodes: PropNode[] = []
   const nodeIds = new Set<string>()
   const byId = new Map<string, FileCell>()

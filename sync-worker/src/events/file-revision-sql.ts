@@ -71,9 +71,10 @@ export function buildFileRevisionIndexStmts(
     db
       .prepare(
         `UPDATE files SET head_revision_n = GREATEST(COALESCE(head_revision_n, 0), ?),
+           source_virtual = CASE WHEN ? THEN TRUE ELSE source_virtual END,
            updated_at = (extract(epoch from now())*1000)::bigint
          WHERE id = ? AND project_id = ?`,
       )
-      .bind(p.revisionN, fileId, projectId),
+      .bind(p.revisionN, p.sourceVirtual === true, fileId, projectId),
   ]
 }

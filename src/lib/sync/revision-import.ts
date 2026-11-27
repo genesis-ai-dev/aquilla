@@ -16,10 +16,16 @@ import type { BulkImportCell, BulkImportFileMeta } from "./bulk-import"
 /** Kill switch: `VITE_IMPORT_VIA_REVISIONS=0` restores the N-event import. */
 export const REVISION_IMPORT_ENABLED: boolean = import.meta.env?.VITE_IMPORT_VIA_REVISIONS !== "0"
 
-/** The formats whose fresh imports go through the revisions route: exactly the
- *  ones wrapped onto the filter contract (AQU-2384), so a stamp names a walk
- *  that can be re-run. */
-export const REVISION_IMPORT_FORMATS: ReadonlySet<string> = new Set(FORMAT_DESCRIPTORS.map((d) => d.id))
+/** Kill switch: `VITE_VIRTUAL_SOURCE_CELLS=0` falls back to Phase A (writes `cells` rows). */
+export const VIRTUAL_SOURCE_CELLS_ENABLED: boolean = import.meta.env?.VITE_VIRTUAL_SOURCE_CELLS !== "0"
+
+/** The formats whose fresh imports go through the revisions route: the
+ *  filter-contract formats (AQU-2384) plus `usfm` (Paratext/USFM virtual
+ *  source tracer bullet, AQU-2459 Phase B). */
+export const REVISION_IMPORT_FORMATS: ReadonlySet<string> = new Set([
+  ...FORMAT_DESCRIPTORS.map((d) => d.id),
+  "usfm",
+])
 
 /** Locator kinds whose unit key encodes a position (so they pair by alignment,
  *  not by key). Everything else is reference-addressed. */
@@ -53,6 +59,10 @@ export function revisionUnitsFromCells(cells: readonly BulkImportCell[]): Revisi
       ...(cell.valueHtml !== undefined ? { html: cell.valueHtml } : {}),
       ...(cell.type !== undefined ? { type: cell.type } : {}),
       ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
+      ...(cell.medium !== undefined ? { medium: cell.medium } : {}),
+      ...(cell.startMs !== undefined ? { startMs: cell.startMs } : {}),
+      ...(cell.endMs !== undefined ? { endMs: cell.endMs } : {}),
+      ...(cell.paragraphStart !== undefined ? { paragraphStart: cell.paragraphStart } : {}),
       sequenceIndex: cell.sequenceIndex ?? index,
       ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
     }
@@ -115,6 +125,9 @@ export interface PostFileRevisionArgs {
   /** The caller sends the `/import` finalize next, which recomputes the
    *  file's counters; the route then skips its own copy of that scan. */
   finalizeFollows?: boolean
+  /** AQU-2459 Phase B: store source cells solely in the R2 manifest (zero
+   *  Postgres source cell inserts). Defaults to `VIRTUAL_SOURCE_CELLS_ENABLED`. */
+  virtual?: boolean
   getToken: (fileId: string) => Promise<string | null>
   fetchImpl?: typeof fetch
   signal?: AbortSignal
@@ -149,6 +162,7 @@ export async function postFileRevision(args: PostFileRevisionArgs): Promise<File
     ...(args.dryRun ? { dryRun: true } : {}),
     ...(args.realign ? { realign: true } : {}),
     ...(args.returnCellIds ? { returnCellIds: true } : {}),
+    ...((args.virtual ?? VIRTUAL_SOURCE_CELLS_ENABLED) ? { virtual: true } : {}),
     ...(args.toolOrigin !== undefined ? { toolOrigin: args.toolOrigin } : {}),
   })
   let token = await args.getToken(args.fileId)

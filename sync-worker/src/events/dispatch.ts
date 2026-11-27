@@ -61,6 +61,8 @@ export interface DispatchOptions {
    * cell.unvalidate events. Default 1 (N=1 projects: byte-identical behavior).
    */
   validationCount?: number
+  /** AQU-2459 Phase B: tombstone virtual source overlays on source.cell.delete. */
+  virtualSourceTombstone?: boolean
 }
 
 /**

@@ -1242,7 +1242,7 @@
   "synthetic-genesis": {
     "cells": {
       "rows": 9,
-      "sha256": "d0da453fc361c0e9656b6b7d166d4be44efb2d0b005cb0e7033eeb757c5047a1"
+      "sha256": "27e8be455191bcd6c61b5327c2312cccb752d1f0e782eded9778359e06f5815e"
     },
     "cell_validators": {
       "rows": 2,
@@ -1254,7 +1254,7 @@
     },
     "files": {
       "rows": 1,
-      "sha256": "fc0588860158270afb0d5f8b5d85170f8ea69c3c026af149d9006e1b6c870ec3"
+      "sha256": "43479b44152166c610056a1b32f07f8f0ae309ae73a29e55f56a3ff805230915"
     },
     "file_section_progress": {
       "rows": 3,

@@ -257,10 +257,17 @@ export async function handleExportSourceRequest(
     const storedText = stored.ok
       ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: false }).decode(stored.bytes)
       : null
-    const { body, untouched } = await buildPlainTextExport(db, projectId, fileId, lane, {
-      validatedOnly,
-      ...(storedText != null ? { fidelity: detectTextFidelity(storedText) } : {}),
-    })
+    const { body, untouched } = await buildPlainTextExport(
+      db,
+      projectId,
+      fileId,
+      lane,
+      {
+        validatedOnly,
+        ...(storedText != null ? { fidelity: detectTextFidelity(storedText) } : {}),
+      },
+      env.SNAPSHOTS,
+    )
     if (untouched && stored.ok) {
       return withCors(
         new Response(stored.bytes, {
@@ -363,7 +370,7 @@ export async function handleExportSourceRequest(
   // into one shared builder because export-bundle-route.ts carried a
   // character-for-character copy of the translations query with nothing
   // enforcing the duplication.
-  const { overrides, edits } = await buildUsfmExportPlan(db, projectId, fileId, lane, { validatedOnly })
+  const { overrides, edits } = await buildUsfmExportPlan(db, projectId, fileId, lane, { validatedOnly }, env.SNAPSHOTS)
 
   // Safe re-imports intentionally move the immutable original to R2 and
   // atomically repoint file_source_blobs. Resolve either storage generation so

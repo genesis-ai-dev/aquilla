@@ -86,12 +86,20 @@ import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
 import { cellMetadataWireSql } from "../../../db/shared/cell-metadata-sql"
 import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 import { coloOrderCache, setColoOrderCacheForTests } from "./cells-order-cache"
+import {
+  getVirtualFileHead,
+  loadVirtualSourceFile,
+  type ManifestR2Bucket,
+  type VirtualSourceRow,
+} from "../../../db/shared/virtual-source-store"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface CellRowRaw {
@@ -158,6 +166,8 @@ interface CellRowOut {
   metadata: Record<string, unknown> | null
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
   laneId?: string | null
+  /** AQU-2459 Phase B: 122-bit normalized source content hash on virtual source rows. */
+  sourceContentHash?: string
   /**
    * AQU-1422: true while this cell is parked. OMITTED (not `false`) on a visible
    * row — a 30k-cell Bible file would otherwise pay ~15 bytes per row for a field
@@ -227,6 +237,38 @@ function mapRow(row: CellRowRaw): CellRowOut {
     laneId: row.lane_id ?? null,
     // Absent, not `false`, on a visible row — keeps this shape identical to
     // cell-row-serialize.ts's (guarded by the by-ids byte-identity test).
+    ...(row.hidden_at != null ? { hidden: true as const } : {}),
+  }
+}
+
+function mapVirtualSourceRow(row: VirtualSourceRow): CellRowOut {
+  return {
+    cellId: row.cell_id,
+    side: "source",
+    targetLang: "",
+    value: row.value,
+    valueHtml: row.value_html,
+    type: row.type,
+    canonicalRef: row.canonical_ref,
+    anchorCellId: row.anchor_cell_id,
+    eventId: row.event_id,
+    sourceEventId: null,
+    lastEditor: row.last_editor,
+    lastEditAt: row.last_edit_at,
+    validated: false,
+    aiDrafted: false,
+    aiDraft: null,
+    wordCount: row.word_count,
+    endorsementCount: 0,
+    startMs: row.start_ms,
+    endMs: row.end_ms,
+    medium: row.medium,
+    sequenceIndex: row.sequence_index,
+    transcription: row.transcription,
+    cameraState: row.camera_state,
+    metadata: row.metadata,
+    laneId: row.lane_id,
+    sourceContentHash: row.revision_content_hash,
     ...(row.hidden_at != null ? { hidden: true as const } : {}),
   }
 }
@@ -1035,6 +1077,7 @@ export async function handleCellsReadRequest(
           "FROM cells",
           "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
           `WHERE cells.project_id = ? AND cells.file_id = ? AND cells.cell_id IN (${placeholders})`,
+          "AND cells.tombstoned_at IS NULL",
         ]
         const deltaBinds: unknown[] = [projectId, fileId, ...changedCellIds]
         if (sideFilter !== null) {
@@ -1063,6 +1106,33 @@ export async function handleCellsReadRequest(
           .all<CellRowRaw>()
         deltaRows = deltaRes.results
       }
+      const deltaOut: CellRowOut[] = deltaRows.map(mapRow)
+      // AQU-2459 Phase B: for virtual source files, a target edit (or metadata
+      // change) leaves no `side = 'source'` row in Postgres. Without the virtual
+      // source row here, the client's `mergeCellsDelta` would replace the cell's
+      // rows with `[targetOnly]` and drop the row from the editor!
+      if (changedCellIds.length > 0 && sideFilter !== "target" && env.SNAPSHOTS) {
+        const virtualHeadDelta = await getVirtualFileHead(env.AQUILLA_PG, projectId, fileId)
+        if (virtualHeadDelta) {
+          const virtualFileDelta = await loadVirtualSourceFile(
+            env.AQUILLA_PG,
+            env.SNAPSHOTS,
+            projectId,
+            fileId,
+            { head: virtualHeadDelta },
+          )
+          if (virtualFileDelta) {
+            const existingSourceIds = new Set(
+              deltaOut.filter((r) => r.side === "source").map((r) => r.cellId),
+            )
+            for (const cid of changedCellIds) {
+              if (existingSourceIds.has(cid)) continue
+              const vrow = virtualFileDelta.byCellId.get(cid)
+              if (vrow) deltaOut.push(mapVirtualSourceRow(vrow))
+            }
+          }
+        }
+      }
       // No chain-walk: delta rows carry their anchor pointers and the client
       // re-walks the merged set, so order here is irrelevant. A changed
       // cellId with no row below was deleted (or is side-filtered out).
@@ -1070,11 +1140,151 @@ export async function handleCellsReadRequest(
         {
           delta: true,
           changedCellIds,
-          cells: deltaRows.map(mapRow),
+          cells: deltaOut,
           maxServerSeq,
           projectEpoch,
         },
         { headers: cacheHeaders(etag) },
+      )
+    }
+  }
+
+  // AQU-2459 Phase B: Pure virtual source file fast path.
+  // Source cells live solely in the R2 revision manifest (isolate-cached by
+  // immutable `manifest_r2_key`), merged with any sparse `side = 'source'`
+  // overlays and joined against sparse Postgres `side = 'target'` rows.
+  const virtualHead = env.SNAPSHOTS
+    ? await getVirtualFileHead(env.AQUILLA_PG, projectId, fileId)
+    : null
+  if (virtualHead && env.SNAPSHOTS) {
+    const virtualFile = await loadVirtualSourceFile(env.AQUILLA_PG, env.SNAPSHOTS, projectId, fileId, {
+      head: virtualHead,
+    })
+    if (virtualFile) {
+      let sourceOut: CellRowOut[] = []
+      if (sideFilter !== "target") {
+        if (cellIdsFilter && cellIdsFilter.length > 0) {
+          for (const id of cellIdsFilter) {
+            const found = virtualFile.byCellId.get(id)
+            if (found) sourceOut.push(mapVirtualSourceRow(found))
+          }
+        } else {
+          sourceOut = virtualFile.rows.map(mapVirtualSourceRow)
+        }
+      }
+
+      let targetOut: CellRowOut[] = []
+      if (sideFilter !== "source") {
+        const tParts: string[] = [
+          `SELECT ${columns}`,
+          "FROM cells",
+          "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+          "WHERE cells.project_id = ? AND cells.file_id = ? AND cells.side = 'target'",
+        ]
+        const tBinds: unknown[] = [projectId, fileId]
+        if (cellIdsFilter && cellIdsFilter.length > 0) {
+          const placeholders = cellIdsFilter.map(() => "?").join(", ")
+          tParts.push(`AND cells.cell_id IN (${placeholders})`)
+          tBinds.push(...cellIdsFilter)
+        }
+        if (laneFilter !== null) {
+          tParts.push(sourceOrTargetLaneSql())
+          tBinds.push(...targetLaneDualReadBinds(projectId, laneFilter))
+        }
+        const tWall = targetVisibilityClause({
+          laneIds,
+          sideExpr: "cells.side",
+          laneIdExpr: "cells.lane_id",
+        })
+        if (tWall) {
+          tParts.push(tWall.sql)
+          tBinds.push(...tWall.binds)
+        }
+        if (scopeClause) {
+          tParts.push(scopeClause.sql)
+          tBinds.push(...scopeClause.binds)
+        }
+        const tRes = await env.AQUILLA_PG.prepare(tParts.join(" "))
+          .bind(...tBinds)
+          .all<CellRowRaw>()
+        const rawTargets = tRes.results ?? []
+        if (cellIdsFilter && cellIdsFilter.length > 0) {
+          const byId = new Map<string, CellRowRaw[]>()
+          for (const r of rawTargets) {
+            const b = byId.get(r.cell_id)
+            if (b) b.push(r)
+            else byId.set(r.cell_id, [r])
+          }
+          for (const id of cellIdsFilter) {
+            for (const r of byId.get(id) ?? []) targetOut.push(mapRow(r))
+          }
+        } else {
+          const orderedTargets: CellRowRaw[] = []
+          for (const laneGroup of targetLanesInWalkOrder(rawTargets)) {
+            orderedTargets.push(...(walkAnchorChain(laneGroup) as CellRowRaw[]))
+          }
+          targetOut = orderedTargets.map(mapRow)
+        }
+      }
+
+      let combined: CellRowOut[]
+      if (cellIdsFilter && cellIdsFilter.length > 0) {
+        const byId = new Map<string, CellRowOut[]>()
+        for (const r of [...sourceOut, ...targetOut]) {
+          const b = byId.get(r.cellId)
+          if (b) b.push(r)
+          else byId.set(r.cellId, [r])
+        }
+        combined = []
+        for (const id of cellIdsFilter) {
+          const b = byId.get(id)
+          if (b) combined.push(...b)
+        }
+      } else if (paired) {
+        const byCell = new Map<string, CellRowOut[]>()
+        for (const r of sourceOut) {
+          const b = byCell.get(r.cellId)
+          if (b) b.push(r)
+          else byCell.set(r.cellId, [r])
+        }
+        for (const r of targetOut) {
+          const b = byCell.get(r.cellId)
+          if (b) b.push(r)
+          else byCell.set(r.cellId, [r])
+        }
+        combined = [...byCell.values()].flat()
+      } else {
+        combined = [...sourceOut, ...targetOut]
+      }
+
+      const vLivePin: CursorPin | null =
+        liveWatermarks !== null
+          ? {
+              maxSeq: liveWatermarks.maxSeq,
+              rebuiltSeq: liveWatermarks.rebuiltSeq,
+              epoch: liveWatermarks.epoch,
+              seq: maxServerSeq!,
+            }
+          : null
+      const offset = completePageStart(combined, cursor?.offset ?? 0, paired, (r) => r.cellId)
+      const pageEnd = completePageEnd(combined, offset, limit, paired, (r) => r.cellId)
+      const pageCells = combined.slice(offset, pageEnd)
+      const nextOffset = offset + pageCells.length
+      const hasMore = nextOffset < combined.length
+
+      return Response.json(
+        {
+          cells: pageCells,
+          nextCursor: hasMore ? encodeCursor({ offset: nextOffset, ...(vLivePin ? { pin: vLivePin } : {}) }) : null,
+          ...(pageSize !== null && hasMore
+            ? { pageCursors: laterPageCursors(combined, nextOffset, pageSize, paired, (r) => r.cellId, vLivePin) }
+            : {}),
+          total: combined.length,
+          ...(maxServerSeq !== null ? { maxServerSeq } : {}),
+          ...(projectEpoch !== null ? { projectEpoch } : {}),
+          ...(paired ? { completeRows: true } : {}),
+        },
+        etag ? { headers: cacheHeaders(etag) } : undefined,
       )
     }
   }

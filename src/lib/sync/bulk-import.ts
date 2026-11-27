@@ -472,6 +472,84 @@ export async function reviseSourceImport(
  * the same worker transaction as `file.restore`, so collaborators can never
  * observe a published media file without its playable clip metadata.
  */
+export interface PublishStagedImportBatchArgs {
+  projectId: string
+  files: Array<{ fileId: string; publishEventId?: string }>
+  getToken: (fileId: string) => Promise<string | null>
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * AQU-2459 Phase B: publish a batch of staged files in one HTTP request
+ * (`POST /api/v1/projects/:projectId/import/publish-batch`), eliminating 66
+ * serial publish round-trips on a whole-Bible Paratext import.
+ */
+export async function publishStagedImportBatch(args: PublishStagedImportBatchArgs): Promise<void> {
+  if (args.files.length === 0) return
+  if (args.files.length === 1) {
+    return publishStagedImport({
+      projectId: args.projectId,
+      fileId: args.files[0].fileId,
+      publishEventId: args.files[0].publishEventId,
+      getToken: args.getToken,
+      signal: args.signal,
+      fetchImpl: args.fetchImpl,
+    })
+  }
+  const fetchFn = args.fetchImpl ?? fetch
+  let token = await args.getToken(args.files[0].fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  const body = JSON.stringify({
+    files: args.files.map((f) => ({
+      fileId: f.fileId,
+      publishEventId: f.publishEventId ?? uuidv7(),
+    })),
+    clientTs: Date.now(),
+  })
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}/import/publish-batch`
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body,
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      lastError = error instanceof Error ? error : new Error(String(error))
+    }
+
+    if (response) {
+      if (response.ok) return
+      const detail = await response.text().catch(() => "")
+      lastError = new Error(
+        `Batch import publication failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      )
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.files[0].fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+    }
+  }
+  throw lastError ?? new Error("Batch import publication failed")
+}
+
 export async function publishStagedImport(args: PublishStagedImportArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
   let token = await args.getToken(args.fileId)

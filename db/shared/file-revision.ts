@@ -210,6 +210,10 @@ export interface RevisionUnitInput {
   readonly type?: string
   readonly canonicalRef?: string
   readonly sequenceIndex: number
+  readonly medium?: "text" | "media"
+  readonly startMs?: number
+  readonly endMs?: number
+  readonly paragraphStart?: boolean
   readonly metadata?: Readonly<Record<string, unknown>>
 }
 
@@ -217,6 +221,13 @@ export interface RevisionUnitInput {
 export interface RevisionUnit extends RevisionUnitInput {
   readonly cellId: string
   readonly contentHash: string
+}
+
+/** A manifest unit stored in R2 also remembers which event its source carries. */
+export type StoredRevisionUnit = RevisionUnit & {
+  readonly eventId: string
+  /** Set on units moved to `tombstonedUnits` when deleted by a later revision. */
+  readonly tombstonedAt?: number
 }
 
 export interface RevisionManifest {
@@ -228,6 +239,18 @@ export interface RevisionManifest {
   readonly artifactSha256: string
   /** In document order. */
   readonly units: readonly RevisionUnit[]
+}
+
+export interface StoredRevisionManifest extends Omit<RevisionManifest, "units"> {
+  readonly units: readonly StoredRevisionUnit[]
+  /** True when revision 1 was written from a materialized file's cells. */
+  readonly adopted?: boolean
+  /**
+   * Units removed by this or an earlier revision, kept in the manifest so
+   * virtual files (zero Postgres source rows) still surface orphaned
+   * translations and tombstoned source text for review without touching `cells`.
+   */
+  readonly tombstonedUnits?: readonly StoredRevisionUnit[]
 }
 
 /**

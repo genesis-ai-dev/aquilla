@@ -150,7 +150,7 @@ export async function handleExportBundleRequest(
     // verse and verses removed outright. AQU-1068 moved this into a shared
     // builder: the query above used to be a character-for-character copy of
     // export-route.ts's, with nothing enforcing that they stayed identical.
-    const { overrides, edits } = await buildUsfmExportPlan(db, projectId, file_id, lane, { validatedOnly })
+    const { overrides, edits } = await buildUsfmExportPlan(db, projectId, file_id, lane, { validatedOnly }, env.SNAPSHOTS)
 
     let original = raw_source
     if (!original && r2_key) {
@@ -184,7 +184,7 @@ export async function handleExportBundleRequest(
     // AQU-2383: the builder also reports whether the rebuild is untouched, so
     // the per-file route can serve the stored upload instead. These files have
     // no stored upload by definition, so only the rebuilt body applies here.
-    const { body } = await buildPlainTextExport(db, projectId, file_id, lane, { validatedOnly })
+    const { body } = await buildPlainTextExport(db, projectId, file_id, lane, { validatedOnly }, env.SNAPSHOTS)
     if (!body.trim()) continue
     entries.push({
       name: uniqueZipEntryName(txtName(name ?? "", file_id), usedNames),

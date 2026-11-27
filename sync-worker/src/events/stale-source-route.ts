@@ -44,10 +44,14 @@
 import { verifyTokenForProject } from "../auth"
 import { isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
 import { computeUpstreamStaleCellIds, resolveConsumedTargetLane } from "./inherited-staleness"
+import { contentHashOf } from "../../../db/shared/file-revision"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 
 export interface StaleSourceEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 export interface BehindSeq {
@@ -156,64 +160,138 @@ export async function handleStaleSourceRequest(
   // comparison filtered the row out and the translator was never told the
   // source had changed — a regression the moment those corrections stopped
   // overwriting `value` (which is exactly what they should stop doing).
-  const sql = `
-    SELECT t.cell_id AS cell_id
-    FROM cells t
-    JOIN cells s
-      ON s.project_id = t.project_id
-     AND s.file_id    = t.file_id
-     AND s.cell_id    = t.cell_id
-     AND s.side       = 'source'
-    LEFT JOIN events pinned
-      ON pinned.project_id = t.project_id
-     AND pinned.id         = t.source_event_id
-    WHERE t.project_id      = ?
-      AND t.file_id         = ?
-      AND t.side            = 'target'
-      AND t.source_event_id IS NOT NULL
-      AND s.event_id        != t.source_event_id
-      AND s.tombstoned_at IS NULL
-      AND (
-        pinned.id IS NULL
-        OR COALESCE(NULLIF(s.transcription, ''), s.value)
-             IS DISTINCT FROM COALESCE(
-               NULLIF((pinned.payload::jsonb)->>'transcription', ''),
-               (pinned.payload::jsonb)->>'value',
-               ''
-             )
-      )
-  `
+  // AQU-2459 Phase B: virtual source files store source units in R2 manifests
+  // rather than Postgres `cells`. Compare each target's pinned
+  // `source_content_hash` (with automatic revert-to-fresh) or fallback
+  // `source_event_id` directly against the live manifest.
+  const virtualFile = env.SNAPSHOTS
+    ? await loadVirtualSourceFile(env.AQUILLA_PG, env.SNAPSHOTS, projectId, fileId)
+    : null
 
   let staleCellIds: string[] = []
-  try {
-    const res = await env.AQUILLA_PG.prepare(sql)
-      .bind(projectId, fileId)
-      .all<{ cell_id: string }>()
-    staleCellIds = (res.results ?? []).map((r) => r.cell_id)
-  } catch (err) {
-    // Defensive: if the cells projection isn't fully shaped yet (e.g.,
-    // a migration not applied), the query fails on a missing column.
-    // Return an empty list rather than 500 — staleness is a soft signal,
-    // the editor must not break on its absence.
-    console.warn("stale-source query failed:", err)
-    staleCellIds = []
-  }
-
-  // 3. Tombstoned cells (AQU-476 §5): upstream deleted this line — the
-  // downstream's local source row is kept (never deleted) so the orphaned
-  // target stays visible; `tombstoned_at` flags it here for the review UI.
   let tombstonedCellIds: string[] = []
-  try {
-    const res = await env.AQUILLA_PG.prepare(
-      `SELECT cell_id FROM cells
-       WHERE project_id = ? AND file_id = ? AND side = 'source' AND tombstoned_at IS NOT NULL`,
-    )
-      .bind(projectId, fileId)
-      .all<{ cell_id: string }>()
-    tombstonedCellIds = (res.results ?? []).map((r) => r.cell_id)
-  } catch (err) {
-    console.warn("tombstoned-cells query failed:", err)
-    tombstonedCellIds = []
+  if (virtualFile) {
+    tombstonedCellIds = virtualFile.tombstonedRows.map((r) => r.cell_id)
+    try {
+      const targetRes = await env.AQUILLA_PG.prepare(
+        `SELECT cell_id, source_event_id, source_content_hash
+         FROM cells
+         WHERE project_id = ? AND file_id = ? AND side = 'target'
+           AND (source_event_id IS NOT NULL OR source_content_hash IS NOT NULL)`,
+      )
+        .bind(projectId, fileId)
+        .all<{ cell_id: string; source_event_id: string | null; source_content_hash: string | null }>()
+      const legacyCheck: Array<{ cellId: string; pinnedEventId: string; effectiveSource: string }> = []
+      const staleSet = new Set<string>()
+      for (const t of targetRes.results ?? []) {
+        const src = virtualFile.byCellId.get(t.cell_id)
+        if (!src || src.tombstoned_at != null) continue
+        const effectiveSource =
+          src.transcription && src.transcription.trim() !== "" ? src.transcription : src.value
+        if (t.source_content_hash) {
+          const currentHash =
+            src.transcription && src.transcription.trim() !== ""
+              ? contentHashOf(effectiveSource)
+              : src.revision_content_hash
+          if (t.source_content_hash !== currentHash) staleSet.add(t.cell_id)
+        } else if (t.source_event_id && t.source_event_id !== src.event_id) {
+          legacyCheck.push({
+            cellId: t.cell_id,
+            pinnedEventId: t.source_event_id,
+            effectiveSource,
+          })
+        }
+      }
+      if (legacyCheck.length > 0) {
+        const eventIds = [...new Set(legacyCheck.map((x) => x.pinnedEventId))]
+        const ph = eventIds.map(() => "?").join(", ")
+        const evRes = await env.AQUILLA_PG.prepare(
+          `SELECT id, payload FROM events WHERE project_id = ? AND id IN (${ph})`,
+        )
+          .bind(projectId, ...eventIds)
+          .all<{ id: string; payload: string }>()
+        const payloadById = new Map<string, { value?: string; transcription?: string }>()
+        for (const ev of evRes.results ?? []) {
+          try {
+            payloadById.set(ev.id, JSON.parse(ev.payload) as { value?: string; transcription?: string })
+          } catch {
+            /* ignore malformed */
+          }
+        }
+        for (const item of legacyCheck) {
+          const p = payloadById.get(item.pinnedEventId)
+          if (!p || (p.value === undefined && p.transcription === undefined)) {
+            staleSet.add(item.cellId)
+          } else {
+            const pinnedText =
+              p.transcription && p.transcription.trim() !== "" ? p.transcription : (p.value ?? "")
+            if (pinnedText !== item.effectiveSource) staleSet.add(item.cellId)
+          }
+        }
+      }
+      staleCellIds = [...staleSet]
+    } catch (err) {
+      console.warn("virtual stale-source check failed:", err)
+      staleCellIds = []
+    }
+  } else {
+    const sql = `
+      SELECT t.cell_id AS cell_id
+      FROM cells t
+      JOIN cells s
+        ON s.project_id = t.project_id
+       AND s.file_id    = t.file_id
+       AND s.cell_id    = t.cell_id
+       AND s.side       = 'source'
+      LEFT JOIN events pinned
+        ON pinned.project_id = t.project_id
+       AND pinned.id         = t.source_event_id
+      WHERE t.project_id      = ?
+        AND t.file_id         = ?
+        AND t.side            = 'target'
+        AND t.source_event_id IS NOT NULL
+        AND s.event_id        != t.source_event_id
+        AND s.tombstoned_at IS NULL
+        AND (
+          pinned.id IS NULL
+          OR COALESCE(NULLIF(s.transcription, ''), s.value)
+               IS DISTINCT FROM COALESCE(
+                 NULLIF((pinned.payload::jsonb)->>'transcription', ''),
+                 (pinned.payload::jsonb)->>'value',
+                 ''
+               )
+        )
+    `
+
+    try {
+      const res = await env.AQUILLA_PG.prepare(sql)
+        .bind(projectId, fileId)
+        .all<{ cell_id: string }>()
+      staleCellIds = (res.results ?? []).map((r) => r.cell_id)
+    } catch (err) {
+      // Defensive: if the cells projection isn't fully shaped yet (e.g.,
+      // a migration not applied), the query fails on a missing column.
+      // Return an empty list rather than 500 — staleness is a soft signal,
+      // the editor must not break on its absence.
+      console.warn("stale-source query failed:", err)
+      staleCellIds = []
+    }
+
+    // 3. Tombstoned cells (AQU-476 §5): upstream deleted this line — the
+    // downstream's local source row is kept (never deleted) so the orphaned
+    // target stays visible; `tombstoned_at` flags it here for the review UI.
+    try {
+      const res = await env.AQUILLA_PG.prepare(
+        `SELECT cell_id FROM cells
+         WHERE project_id = ? AND file_id = ? AND side = 'source' AND tombstoned_at IS NOT NULL`,
+      )
+        .bind(projectId, fileId)
+        .all<{ cell_id: string }>()
+      tombstonedCellIds = (res.results ?? []).map((r) => r.cell_id)
+    } catch (err) {
+      console.warn("tombstoned-cells query failed:", err)
+      tombstonedCellIds = []
+    }
   }
 
   // 4. behindSeq (§6): link-level "you have unmirrored changes" — non-null
@@ -261,12 +339,15 @@ export async function handleStaleSourceRequest(
   let ancestorBehind = false
   if (upstreamProjectId && linkMode === "live") {
     try {
-      const fileCellIdsRes = await env.AQUILLA_PG.prepare(
-        `SELECT DISTINCT cell_id FROM cells WHERE project_id = ? AND file_id = ?`,
-      )
-        .bind(projectId, fileId)
-        .all<{ cell_id: string }>()
-      const fileCellIds = (fileCellIdsRes.results ?? []).map((r) => r.cell_id)
+      const fileCellIds = virtualFile
+        ? virtualFile.rows.map((r) => r.cell_id)
+        : ((
+            await env.AQUILLA_PG.prepare(
+              `SELECT DISTINCT cell_id FROM cells WHERE project_id = ? AND file_id = ?`,
+            )
+              .bind(projectId, fileId)
+              .all<{ cell_id: string }>()
+          ).results ?? []).map((r) => r.cell_id)
       const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileId, fileCellIds)
       upstreamStaleCellIds = inherited.upstreamStaleCellIds
       ancestorBehind = inherited.ancestorBehind

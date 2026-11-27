@@ -19,19 +19,19 @@
 // Phase A of the spec: the `cells` source rows are still projected, one
 // statement per 1000 rows, with no per-cell events and no chain claims.
 
-import type { AlignedUnit, RevisionManifest, RevisionUnit, RevisionUnitInput } from '../../../db/shared/file-revision'
+import type {
+  AlignedUnit,
+  RevisionManifest,
+  RevisionUnit,
+  RevisionUnitInput,
+  StoredRevisionManifest,
+  StoredRevisionUnit,
+} from '../../../db/shared/file-revision'
 import { contentHashOf } from '../../../db/shared/file-revision'
 import { buildBulkSourceCellCreateStmt, type PersistedEvent } from './event-projection'
 import { walkAnchorChain } from './cells-read-route'
 
-/** A manifest unit also remembers which event its source row carries. */
-export type StoredRevisionUnit = RevisionUnit & { readonly eventId: string }
-
-export interface StoredRevisionManifest extends Omit<RevisionManifest, 'units'> {
-  readonly units: readonly StoredRevisionUnit[]
-  /** True when revision 1 was written from a materialized file's cells. */
-  readonly adopted?: boolean
-}
+export type { StoredRevisionManifest, StoredRevisionUnit }
 
 export const CELL_UPSERT_ROWS = 1000
 
@@ -233,6 +233,10 @@ function cellStmtsForUnits(
       ...(u.html !== undefined ? { valueHtml: u.html } : {}),
       ...(u.type !== undefined ? { type: u.type } : {}),
       ...(u.canonicalRef !== undefined ? { canonicalRef: u.canonicalRef } : {}),
+      ...(u.medium !== undefined ? { medium: u.medium } : {}),
+      ...(u.startMs !== undefined ? { startMs: u.startMs } : {}),
+      ...(u.endMs !== undefined ? { endMs: u.endMs } : {}),
+      ...(u.paragraphStart !== undefined ? { paragraphStart: u.paragraphStart } : {}),
       sequenceIndex: u.sequenceIndex,
       ...(u.metadata !== undefined ? { metadata: u.metadata } : {}),
     },
@@ -267,11 +271,37 @@ export function buildStoredManifest(
   units: readonly AlignedUnit[],
   revisionEventId: string,
   adopted = false,
+  tombstoned?: {
+    deleted: readonly RevisionUnit[]
+    priorTombstoned?: readonly StoredRevisionUnit[]
+    tombstonedAt: number
+    priorEventIds?: ReadonlyMap<string, string>
+  },
 ): StoredRevisionManifest {
+  const liveIds = new Set(units.map((a) => a.unit.cellId))
+  const tombstonedList: StoredRevisionUnit[] = []
+  const seenTombstoned = new Set<string>()
+  if (tombstoned) {
+    for (const prev of tombstoned.priorTombstoned ?? []) {
+      if (liveIds.has(prev.cellId) || seenTombstoned.has(prev.cellId)) continue
+      seenTombstoned.add(prev.cellId)
+      tombstonedList.push(prev)
+    }
+    for (const del of tombstoned.deleted) {
+      if (liveIds.has(del.cellId) || seenTombstoned.has(del.cellId)) continue
+      seenTombstoned.add(del.cellId)
+      tombstonedList.push({
+        ...del,
+        eventId: tombstoned.priorEventIds?.get(del.cellId) ?? revisionEventId,
+        tombstonedAt: tombstoned.tombstonedAt,
+      })
+    }
+  }
   return {
     ...base,
     ...(adopted ? { adopted: true } : {}),
     units: units.map((aligned) => ({ ...aligned.unit, eventId: unitEventId(aligned, revisionEventId) })),
+    ...(tombstonedList.length > 0 ? { tombstonedUnits: tombstonedList } : {}),
   }
 }
 
@@ -288,6 +318,18 @@ export function validateUnitInputs(raw: unknown): { ok: true; units: RevisionUni
     if (u.html !== undefined && typeof u.html !== 'string') return { ok: false, reason: `units[${i}].html must be a string` }
     if (u.type !== undefined && typeof u.type !== 'string') return { ok: false, reason: `units[${i}].type must be a string` }
     if (u.canonicalRef !== undefined && typeof u.canonicalRef !== 'string') return { ok: false, reason: `units[${i}].canonicalRef must be a string` }
+    if (u.medium !== undefined && u.medium !== 'text' && u.medium !== 'media') {
+      return { ok: false, reason: `units[${i}].medium must be 'text' or 'media'` }
+    }
+    if (u.startMs !== undefined && (typeof u.startMs !== 'number' || !Number.isFinite(u.startMs))) {
+      return { ok: false, reason: `units[${i}].startMs must be a finite number` }
+    }
+    if (u.endMs !== undefined && (typeof u.endMs !== 'number' || !Number.isFinite(u.endMs))) {
+      return { ok: false, reason: `units[${i}].endMs must be a finite number` }
+    }
+    if (u.paragraphStart !== undefined && typeof u.paragraphStart !== 'boolean') {
+      return { ok: false, reason: `units[${i}].paragraphStart must be a boolean` }
+    }
     if (u.metadata !== undefined && (!u.metadata || typeof u.metadata !== 'object' || Array.isArray(u.metadata))) {
       return { ok: false, reason: `units[${i}].metadata must be an object` }
     }
@@ -298,7 +340,11 @@ export function validateUnitInputs(raw: unknown): { ok: true; units: RevisionUni
       ...(u.html !== undefined ? { html: u.html } : {}),
       ...(u.type !== undefined ? { type: u.type } : {}),
       ...(u.canonicalRef !== undefined ? { canonicalRef: u.canonicalRef } : {}),
-      sequenceIndex: typeof u.sequenceIndex === 'number' && Number.isInteger(u.sequenceIndex) ? u.sequenceIndex : i,
+      ...(u.medium !== undefined ? { medium: u.medium } : {}),
+      ...(u.startMs !== undefined ? { startMs: u.startMs } : {}),
+      ...(u.endMs !== undefined ? { endMs: u.endMs } : {}),
+      ...(u.paragraphStart !== undefined ? { paragraphStart: u.paragraphStart } : {}),
+      sequenceIndex: typeof u.sequenceIndex === 'number' && Number.isFinite(u.sequenceIndex) ? u.sequenceIndex : i,
       ...(u.metadata !== undefined ? { metadata: u.metadata as Record<string, unknown> } : {}),
     })
   }

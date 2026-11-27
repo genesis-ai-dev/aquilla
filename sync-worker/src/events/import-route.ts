@@ -25,7 +25,7 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyDocScope, verifySyncToken, type SyncTokenClaims } from '../auth'
+import { verifyDocScope, verifySyncToken, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import type { EventKind, RawEvent } from './types'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE, requiredRoleFor } from './role-policy'
@@ -53,6 +53,8 @@ import {
   buildSettleSeqRangeStmt,
 } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
+import type { ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 import { withLongOperationTimeout } from '../../../db/shim/postgres'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import {
@@ -168,6 +170,7 @@ export interface ImportRouteEnv {
   SYNC_SECRET_KEY?: string
   ProjectSync?: DurableObjectNamespace
   LANE_READ_WALL?: string
+  SNAPSHOTS?: R2Bucket
 }
 
 interface ImportFileMeta {
@@ -355,11 +358,117 @@ async function importAttachmentRefusal(
  * Returns: { accepted: number, fileId } | error
  * Returns null if the URL doesn't match (chainable in the fetch dispatcher).
  */
+const PUBLISH_BATCH_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/import\/publish-batch$/
+const MAX_PUBLISH_BATCH_FILES = 500
+
+async function handleBatchPublishRequest(
+  request: Request,
+  env: ImportRouteEnv,
+  match: RegExpExecArray,
+  ctx?: ExecutionContext,
+): Promise<Response> {
+  if (!env.AQUILLA_PG) {
+    return withCors(new Response('AQUILLA_PG binding not configured', { status: 500 }), request)
+  }
+  const db = env.AQUILLA_PG
+  const projectId = decodeURIComponent(match[1])
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const auth = await verifyTokenForProject(
+    authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null,
+    projectId,
+    env.SYNC_SECRET_KEY,
+  )
+  if (!auth.ok) return withCors(new Response(auth.reason, { status: auth.status }), request)
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for batch publish', { status: 403 }), request)
+  }
+
+  let body: { files?: unknown; clientTs?: unknown }
+  try {
+    const parsed = (await request.json()) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid')
+    body = parsed as { files?: unknown; clientTs?: unknown }
+  } catch {
+    return withCors(new Response('invalid JSON body', { status: 400 }), request)
+  }
+  if (!Array.isArray(body.files) || body.files.length === 0 || body.files.length > MAX_PUBLISH_BATCH_FILES) {
+    return withCors(new Response('files must be a non-empty array (max 500)', { status: 400 }), request)
+  }
+  const entries: Array<{ fileId: string; publishEventId: string }> = []
+  for (const item of body.files) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return withCors(new Response('invalid file entry in publish-batch', { status: 400 }), request)
+    }
+    const e = item as Record<string, unknown>
+    if (typeof e.fileId !== 'string' || !e.fileId || typeof e.publishEventId !== 'string' || !e.publishEventId) {
+      return withCors(new Response('each entry needs fileId and publishEventId', { status: 400 }), request)
+    }
+    entries.push({ fileId: e.fileId, publishEventId: e.publishEventId })
+  }
+
+  const author =
+    typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
+      ? auth.claims.username
+      : `user:${auth.claims.userId}`
+  const now = Date.now()
+  const clientTs = typeof body.clientTs === 'number' && Number.isFinite(body.clientTs) ? body.clientTs : now
+
+  try {
+    const firstSeq = await allocateSeqRange(db, projectId, entries.length)
+    const eventRows = entries.map((entry, idx) => ({
+      id: entry.publishEventId,
+      schemaVersion: 1,
+      projectId,
+      fileId: entry.fileId,
+      cellId: null,
+      parentId: null,
+      kind: 'file.restore' as const,
+      author,
+      payloadJson: '{}',
+      clientTs,
+      serverTs: now + idx,
+      serverSeq: firstSeq + idx,
+    }))
+    const fileIds = entries.map((e) => e.fileId)
+    const stmts: AquillaStatement[] = [
+      ...buildBulkEventInsertStmts(db, eventRows),
+      buildSettleSeqRangeStmt(db, projectId, firstSeq),
+      db
+        .prepare(
+          `UPDATE files SET deleted_at = NULL, updated_at = ?
+            WHERE project_id = ? AND id IN (${fileIds.map(() => '?').join(', ')})`,
+        )
+        .bind(now, projectId, ...fileIds),
+    ]
+    const finalizeDb = withLongOperationTimeout(db, 'import-finalize')
+    if (finalizeDb.batchPipelined) await finalizeDb.batchPipelined(stmts)
+    else await finalizeDb.batch(stmts)
+
+    if (env.ProjectSync) {
+      const notify = notifyProjectDoFileProgressChanged(env, projectId, fileIds[0], true).catch((err) =>
+        console.warn('[import] batch publish notify failed:', err),
+      )
+      if (ctx) ctx.waitUntil(notify)
+      else await notify
+    }
+    return withCors(Response.json({ ok: true, published: entries.length }), request)
+  } catch (err) {
+    console.error('[import] batch publish failed:', err)
+    return withCors(Response.json({ error: 'Batch publication failed' }, { status: 500 }), request)
+  }
+}
+
 export async function handleBulkImportRequest(
   request: Request,
   env: ImportRouteEnv,
   ctx?: ExecutionContext,
 ): Promise<Response | null> {
+  const reqUrl = new URL(request.url)
+  const batchPublishMatch = PUBLISH_BATCH_PATH_RE.exec(reqUrl.pathname)
+  if (batchPublishMatch) {
+    if (request.method !== 'POST') return null
+    return handleBatchPublishRequest(request, env, batchPublishMatch, ctx)
+  }
   const url = new URL(request.url)
   if (url.pathname !== '/import') return null
   if (request.method !== 'POST') {
@@ -629,7 +738,12 @@ export async function handleBulkImportRequest(
     // statement, and a chunk's statements are bounded by the client's chunk
     // size. See LONG_OPERATION_TIMEOUTS in db/shim/postgres.ts.
     const finalizeDb = withLongOperationTimeout(db, 'import-finalize')
-    const finalizeStmts: AquillaStatement[] = [
+    const virtualProgress = await buildVirtualFileProgressStmts(db, env.SNAPSHOTS, {
+      projectId: body.projectId,
+      fileId: body.fileId,
+      updatedAt: finalizedAt,
+    })
+    const finalizeStmts: AquillaStatement[] = virtualProgress ?? [
       fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
       ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
     ]

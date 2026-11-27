@@ -10,12 +10,17 @@ import { liveSourceSql } from './tombstoned-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
 import { loadEffectiveThreshold } from '../../../db/shared/validation-threshold'
 import { bothApprovedFromHistogram } from '../../../src/lib/lanes/lane-delivers'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
+import { resolveVirtualPlanKeys } from './virtual-progress'
+import { STRUCTURAL_CELL_TYPES } from './structural-cells'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface ProgressRow {
@@ -601,6 +606,7 @@ export async function readFirstOpenCell(
   unit: string,
   kind: PlanLandingKind,
   lane: string,
+  r2?: ManifestR2Bucket,
 ): Promise<string | null> {
   // EACH QUEUE PAYS ONLY FOR ITS OWN QUESTION. This query walks every source
   // cell of the unit, so anything computed per row is multiplied by the file:
@@ -612,7 +618,7 @@ export async function readFirstOpenCell(
   // fraction of it; production files are twenty times that size.
   const wantsText = kind === 'untranslated' || kind === 'unvalidated'
   const wantsAudio = kind === 'unrecorded' || kind === 'unsigned'
-  const [countStructural, validationCount, validationCountAudio, sheet, takeLaneSql] = await Promise.all([
+  const [countStructural, validationCount, validationCountAudio, sheet, takeLaneSql, virtualFile] = await Promise.all([
     readCountStructuralCells(db, projectId),
     // Only the unvalidated queue compares endorsements against the threshold.
     kind === 'unvalidated' ? readValidationCount(db, projectId) : Promise.resolve(1),
@@ -631,9 +637,71 @@ export async function readFirstOpenCell(
     // AQU-1591: this lane's take filter, interpolated into the fragments below.
     // Only the audio queues ask, and it is one point lookup on the lanes PK.
     wantsAudio ? takeLaneFilterSql(db, projectId, lane) : Promise.resolve(''),
+    r2 ? loadVirtualSourceFile(db, r2, projectId, fileId) : Promise.resolve(null),
   ])
   const sheetId = sheet?.id ?? ''
   const onSheet = sheetId !== ''
+
+  // AQU-2459 Phase B: virtual source file fast path.
+  if (virtualFile) {
+    const structuralSet = new Set<string>(STRUCTURAL_CELL_TYPES)
+    const visible = virtualFile.rows.filter((r) => r.hidden_at == null && r.tombstoned_at == null)
+    const { keys } = resolveVirtualPlanKeys(visible)
+    const scoped = visible.filter((r) => {
+      if (!countStructural && structuralSet.has(r.type ?? '')) return false
+      if (!unit) return true
+      const pk = keys.get(r.cell_id)
+      const sec = pk?.sectionKey ?? ''
+      return sec === unit || sec.startsWith(`${unit} `) || pk?.bookKey === unit
+    })
+    if (scoped.length === 0) return null
+    if (kind === 'first') return scoped[0].cell_id
+
+    const targetsByCell = new Map<string, { value: string; endorsements: number }>()
+    if (wantsText) {
+      const tRes = await db
+        .prepare(
+          `SELECT cell_id, value, endorsement_count FROM cells
+            WHERE project_id = ? AND file_id = ? AND side = 'target' AND ${targetLaneDualReadSql()}`,
+        )
+        .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
+        .all<{ cell_id: string; value: string; endorsement_count: number | string }>()
+      for (const r of tRes.results ?? []) {
+        targetsByCell.set(r.cell_id, { value: r.value, endorsements: Number(r.endorsement_count ?? 0) })
+      }
+    }
+    const audioByCell = new Map<string, { hasTake: boolean; signed: boolean }>()
+    if (wantsAudio && !onSheet) {
+      const aRes = await db
+        .prepare(
+          `SELECT a.cell_id,
+                  MAX(CASE WHEN a.deleted = 0 AND a.selected = 1 AND a.role = 'dub' THEN 1 ELSE 0 END) AS has_take,
+                  MIN(CASE WHEN a.deleted = 0 AND a.selected = 1 AND a.role = 'dub' AND ${takeSoundsOnItsTrackSql('a')}
+                           THEN a.validator_count END) AS min_votes
+             FROM cell_audio a
+            WHERE a.project_id = ? AND a.file_id = ? ${takeLaneSql}
+            GROUP BY a.cell_id`,
+        )
+        .bind(projectId, fileId)
+        .all<{ cell_id: string; has_take: number | string; min_votes: number | string | null }>()
+      for (const r of aRes.results ?? []) {
+        audioByCell.set(r.cell_id, {
+          hasTake: Number(r.has_take) === 1,
+          signed: r.min_votes != null && Number(r.min_votes) >= validationCountAudio,
+        })
+      }
+    }
+    for (const r of scoped) {
+      const t = targetsByCell.get(r.cell_id)
+      const filled = (t?.value ?? '').trim().length > 0
+      const a = audioByCell.get(r.cell_id)
+      if (kind === 'untranslated' && !filled) return r.cell_id
+      if (kind === 'unvalidated' && filled && (t?.endorsements ?? 0) < validationCount) return r.cell_id
+      if (kind === 'unrecorded' && !a?.hasTake) return r.cell_id
+      if (kind === 'unsigned' && a?.hasTake && !a.signed) return r.cell_id
+    }
+    return null
+  }
   const key = chapterKeySql('s')
   const linkedCues = (predicate: string) =>
     `(SELECT COUNT(*) FROM cell_links l
@@ -793,7 +861,7 @@ export async function handleProgressReadRequest(
       return new Response(`unknown kind: ${kindParam}`, { status: 400 })
     }
     const kind = kindParam as PlanLandingKind
-    const cellId = await readFirstOpenCell(env.AQUILLA_PG, projectId, fileId, unit, kind, lane)
+    const cellId = await readFirstOpenCell(env.AQUILLA_PG, projectId, fileId, unit, kind, lane, env.SNAPSHOTS)
     const body: PlanFirstOpenResponse = { fileId, unit, kind, cellId }
     // A click, not a poll: no ETag, and nothing to keep — the answer moves
     // with every edit and the reader is about to be taken to it.
@@ -806,15 +874,66 @@ export async function handleProgressReadRequest(
     // interpolated into the SQL below, so it has to exist before the string
     // does. The text threshold is only compared to a column afterwards, which
     // is why it can still ride along in the Promise.all.
-    const [countStructural, validationCountAudio, takeLaneSql] = await Promise.all([
+    const [countStructural, validationCountAudio, takeLaneSql, virtualFile] = await Promise.all([
       readCountStructuralCells(env.AQUILLA_PG, projectId),
       readValidationCountAudio(env.AQUILLA_PG, projectId),
       // AQU-1591: and for the same reason — the take fragments below are
       // interpolated, so the lane they filter on has to be resolved first.
       takeLaneFilterSql(env.AQUILLA_PG, projectId, lane),
+      env.SNAPSHOTS ? loadVirtualSourceFile(env.AQUILLA_PG, env.SNAPSHOTS, projectId, fileId) : Promise.resolve(null),
     ])
+
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
-      env.AQUILLA_PG.prepare(
+      virtualFile
+        ? (async () => {
+            const structuralSet = new Set<string>(STRUCTURAL_CELL_TYPES)
+            const visible = virtualFile.rows.filter((r) => r.hidden_at == null && r.tombstoned_at == null)
+            const { keys } = resolveVirtualPlanKeys(visible)
+            const matching = visible.filter((r) => {
+              if (!countStructural && structuralSet.has(r.type ?? '')) return false
+              return keys.get(r.cell_id)?.sectionKey === sectionKey
+            })
+            const [tRes, aRes] = await Promise.all([
+              env.AQUILLA_PG!.prepare(
+                `SELECT cell_id, value, endorsement_count FROM cells
+                  WHERE project_id = ? AND file_id = ? AND side = 'target' AND ${targetLaneDualReadSql()}`,
+              )
+                .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
+                .all<{ cell_id: string; value: string; endorsement_count: number | string }>(),
+              env.AQUILLA_PG!.prepare(
+                `SELECT a.cell_id,
+                        MAX(CASE WHEN a.deleted = 0 AND a.selected = 1 AND a.role = 'dub' THEN 1 ELSE 0 END) AS has_take,
+                        MIN(CASE WHEN a.deleted = 0 AND a.selected = 1 AND a.role = 'dub' AND ${takeSoundsOnItsTrackSql('a')}
+                                 THEN a.validator_count END) AS min_votes
+                   FROM cell_audio a
+                  WHERE a.project_id = ? AND a.file_id = ? ${takeLaneSql}
+                  GROUP BY a.cell_id`,
+              )
+                .bind(projectId, fileId)
+                .all<{ cell_id: string; has_take: number | string; min_votes: number | string | null }>(),
+            ])
+            const tByCell = new Map((tRes.results ?? []).map((r) => [r.cell_id, r]))
+            const aByCell = new Map((aRes.results ?? []).map((r) => [r.cell_id, r]))
+            return {
+              results: matching.map((r) => {
+                const t = tByCell.get(r.cell_id)
+                const a = aByCell.get(r.cell_id)
+                return {
+                  cell_id: r.cell_id,
+                  canonical_ref: r.canonical_ref,
+                  structural: structuralSet.has(r.type ?? ''),
+                  inherited_key: null,
+                  place_ref: null,
+                  inherited_depth: null,
+                  target_value: t?.value ?? '',
+                  endorsement_count: t?.endorsement_count ?? 0,
+                  has_take: Number(a?.has_take ?? 0) === 1,
+                  take_signed: a?.min_votes != null && Number(a.min_votes) >= validationCountAudio,
+                }
+              }),
+            }
+          })()
+        : env.AQUILLA_PG.prepare(
         `SELECT s.cell_id,
                 s.canonical_ref,
                 ${structuralPredicateSql('s')} AS structural,

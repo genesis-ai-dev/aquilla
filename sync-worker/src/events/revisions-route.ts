@@ -54,6 +54,8 @@ import {
 import type { EventPayloads } from './types'
 import { mergeFileMeta, type ReconcileFileMeta } from './import-reconcile-route'
 import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
+import { cacheVirtualManifest, loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/revisions$/
 const SHA256_RE = /^[0-9a-f]{64}$/
@@ -102,12 +104,17 @@ interface RevisionRequestBody {
   /** Smart Extensions: the extension this write is attributed to. Verified
    *  like `/import`'s, and refused when it does not verify. */
   toolOrigin?: unknown
+  /** AQU-2459 Phase B: store source cells solely in the R2 revision manifest
+   *  (zero `cells` source rows written to Postgres). Once a file is virtual,
+   *  later revisions stay virtual automatically. */
+  virtual?: boolean
 }
 
 interface FileRow {
   id: string
   head_revision_n: number | null
   meta: string | null
+  source_virtual?: boolean | null
 }
 
 interface RevisionRow {
@@ -165,11 +172,12 @@ export async function handleRevisionsRequest(
   const file = await db
     // No deleted_at filter: an import stages the file as soft-deleted until it
     // publishes, and the revision lands inside that window.
-    .prepare('SELECT id, head_revision_n, meta FROM files WHERE id = ? AND project_id = ?')
+    .prepare('SELECT id, head_revision_n, meta, source_virtual FROM files WHERE id = ? AND project_id = ?')
     .bind(fileId, projectId)
     .first<FileRow>()
   if (!file) return withCors(new Response('file not found', { status: 404 }), request)
 
+  const isVirtual = body.virtual === true || file.source_virtual === true
   const prefix = r2KeyPrefix(env)
   const serverTs = Date.now()
 
@@ -215,8 +223,51 @@ export async function handleRevisionsRequest(
     // Per-cell source writes since the head (edit, split, reconcile, agent,
     // mirror) leave the manifest behind `cells`. Re-adopt the live rows as the
     // next revision so alignment, and a later rebuild, start from what the
-    // file actually holds.
-    const drifted = liveUnitsIfDrifted(head, await loadAdoptableUnits(db, projectId, fileId))
+    // file actually holds. For a virtual file, drift only exists if sparse
+    // source overlay rows landed in `cells` since the head revision.
+    let drifted: StoredRevisionManifest['units'] | null = null
+    if (file.source_virtual === true) {
+      const virtualLive = await loadVirtualSourceFile(db, env.SNAPSHOTS, projectId, fileId, {
+        head: {
+          projectId,
+          fileId,
+          headRevisionN: row.revision_n,
+          manifestR2Key: row.manifest_r2_key,
+          revisionEventId: '',
+          author,
+          createdAt: serverTs,
+        },
+        manifest: head,
+      })
+      if (virtualLive?.hasSparseOverlays) {
+        const seen = new Map<string, number>()
+        const liveUnits = virtualLive.rows.map((r, index) => {
+          const baseKey = r.canonical_ref ?? `cell:${r.cell_id}`
+          const n = (seen.get(baseKey) ?? 0) + 1
+          seen.set(baseKey, n)
+          const unitKey = n === 1 ? baseKey : `${baseKey}#${n}`
+          return {
+            unitKey,
+            positional: !r.canonical_ref,
+            text: r.value,
+            ...(r.value_html ? { html: r.value_html } : {}),
+            ...(r.type ? { type: r.type } : {}),
+            ...(r.canonical_ref ? { canonicalRef: r.canonical_ref } : {}),
+            ...(r.medium === 'text' || r.medium === 'media' ? { medium: r.medium as 'text' | 'media' } : {}),
+            ...(r.start_ms != null ? { startMs: r.start_ms } : {}),
+            ...(r.end_ms != null ? { endMs: r.end_ms } : {}),
+            sequenceIndex: r.sequence_index ?? index,
+            ...(r.metadata ? { metadata: r.metadata } : {}),
+            cellId: r.cell_id,
+            contentHash: r.revision_content_hash,
+            eventId: r.event_id,
+          }
+        })
+        drifted = liveUnitsIfDrifted(head, liveUnits)
+      }
+    } else {
+      drifted = liveUnitsIfDrifted(head, await loadAdoptableUnits(db, projectId, fileId))
+    }
     if (drifted && body.dryRun) {
       head = { ...head, revisionN: head.revisionN + 1, parentRevisionN: head.revisionN, adopted: true, units: drifted }
       adopted = true
@@ -233,6 +284,7 @@ export async function handleRevisionsRequest(
         author,
         serverTs,
         prefix,
+        sourceVirtual: file.source_virtual === true,
       })
       if (!readopted.ok) return withCors(new Response(readopted.reason, { status: 500 }), request)
       head = readopted.manifest
@@ -297,6 +349,7 @@ export async function handleRevisionsRequest(
     return withCors(Response.json({ noop: true, revisionN: alignHead.revisionN, adopted, counts: delta.counts, ...cellIds }), request)
   }
   const eventId = revisionEventId(fileId, revisionN, body.artifactSha256, body.stamp)
+  const priorEventIds = new Map((alignHead?.units ?? []).map((u) => [u.cellId, u.eventId]))
   const manifest = buildStoredManifest(
     {
       fileId,
@@ -308,17 +361,37 @@ export async function handleRevisionsRequest(
     },
     delta.units,
     eventId,
+    false,
+    isVirtual
+      ? {
+          deleted: delta.deleted,
+          priorTombstoned: head?.tombstonedUnits,
+          tombstonedAt: serverTs + 1,
+          priorEventIds,
+        }
+      : undefined,
   )
-  const cellStmts = buildRevisionCellStmts(db, {
-    projectId,
-    fileId,
-    revisionEventId: eventId,
-    author,
-    serverTs: serverTs + 1,
-    clientTs: serverTs,
-    units: delta.units,
-    deleted: delta.deleted,
-  })
+  // Phase B (virtual): ZERO source cell inserts into Postgres `cells`!
+  // On revision N+1 of a virtual (or newly-virtualized) file, clear any
+  // sparse `side = 'source'` overlay rows now folded into the new manifest.
+  const cellStmts: AquillaStatement[] = isVirtual
+    ? head !== null || file.source_virtual !== true
+      ? [
+          db
+            .prepare(`DELETE FROM cells WHERE project_id = ? AND file_id = ? AND side = 'source'`)
+            .bind(projectId, fileId),
+        ]
+      : []
+    : buildRevisionCellStmts(db, {
+        projectId,
+        fileId,
+        revisionEventId: eventId,
+        author,
+        serverTs: serverTs + 1,
+        clientTs: serverTs,
+        units: delta.units,
+        deleted: delta.deleted,
+      })
   // Re-import: the file's own row moves with its cells, in one batch.
   const fileStmts: AquillaStatement[] = []
   if (body.file) {
@@ -354,6 +427,8 @@ export async function handleRevisionsRequest(
     cellStmts: [...cellStmts, ...fileStmts],
     prefix,
     skipRecompute: body.finalizeFollows === true,
+    sourceVirtual: isVirtual,
+    freshEmptyTargets: isVirtual && head === null,
   })
   if (!applied.ok) return withCors(new Response(applied.reason, { status: 500 }), request)
 
@@ -408,6 +483,7 @@ async function writeAdoptedRevision(
     author: string
     serverTs: number
     prefix: string
+    sourceVirtual?: boolean
   },
 ): Promise<{ ok: true; manifest: StoredRevisionManifest } | { ok: false; reason: string }> {
   const manifest: StoredRevisionManifest = {
@@ -431,6 +507,8 @@ async function writeAdoptedRevision(
     counts: { equal: 0, changed: 0, moved: 0, inserted: args.units.length, deleted: 0 },
     cellStmts: [],
     prefix: args.prefix,
+    sourceVirtual: args.sourceVirtual,
+    skipRecompute: true,
   })
   return applied.ok ? { ok: true, manifest } : applied
 }
@@ -448,12 +526,16 @@ interface WriteArgs {
   prefix: string
   /** See RevisionRequestBody.finalizeFollows. */
   skipRecompute?: boolean
+  /** Phase B: virtual source mode (zero `cells` source rows). */
+  sourceVirtual?: boolean
+  /** True on a brand-new virtual revision 1 (0 targets/audio). */
+  freshEmptyTargets?: boolean
 }
 
 /**
  * Manifest to R2 first, then one batch: the event row, the index row + head,
- * the cells, the counters. A failed batch removes the manifest object so a
- * retry starts clean.
+ * the cells (Phase A only), the counters. A failed batch removes the manifest
+ * object so a retry starts clean.
  */
 async function writeRevision(
   db: AquillaDb,
@@ -464,6 +546,7 @@ async function writeRevision(
   await env.SNAPSHOTS.put(manifestKey, JSON.stringify(args.manifest), {
     httpMetadata: { contentType: 'application/json' },
   })
+  cacheVirtualManifest(manifestKey, args.manifest)
   const payload: EventPayloads['file.revision'] = {
     revisionN: args.manifest.revisionN,
     parentRevisionN: args.manifest.parentRevisionN,
@@ -474,6 +557,7 @@ async function writeRevision(
     unitCount: args.manifest.units.length,
     counts: args.counts,
     origin: args.origin,
+    ...(args.sourceVirtual ? { sourceVirtual: true } : {}),
   }
   const event: PersistedEvent<'file.revision'> = {
     id: args.eventId,
@@ -511,9 +595,32 @@ async function writeRevision(
     ]
     buildEventProjectionStmts(db, event, stmts)
     stmts.push(...args.cellStmts)
-    if (args.cellStmts.length > 0 && !args.skipRecompute) {
-      stmts.push(fileCountersRecomputeStmt(db, args.projectId, args.fileId, args.serverTs))
-      stmts.push(...fullProgressRecomputeStmts(db, args.projectId, args.fileId, args.serverTs))
+    if (!args.skipRecompute) {
+      if (args.sourceVirtual) {
+        const virtualProgress = await buildVirtualFileProgressStmts(db, env.SNAPSHOTS, {
+          projectId: args.projectId,
+          fileId: args.fileId,
+          updatedAt: args.serverTs,
+          preloaded: {
+            head: {
+              projectId: args.projectId,
+              fileId: args.fileId,
+              headRevisionN: args.manifest.revisionN,
+              manifestR2Key: manifestKey,
+              revisionEventId: args.eventId,
+              author: args.author,
+              createdAt: args.serverTs,
+            },
+            manifest: args.manifest,
+            freshEmptyTargets: args.freshEmptyTargets,
+            revisionSeq: seq,
+          },
+        })
+        if (virtualProgress) stmts.push(...virtualProgress)
+      } else if (args.cellStmts.length > 0) {
+        stmts.push(fileCountersRecomputeStmt(db, args.projectId, args.fileId, args.serverTs))
+        stmts.push(...fullProgressRecomputeStmts(db, args.projectId, args.fileId, args.serverTs))
+      }
     }
     const longDb = withLongOperationTimeout(db, 'import-finalize')
     if (longDb.batchPipelined) await longDb.batchPipelined(stmts)
@@ -564,7 +671,7 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
   if ((r.artifactId === undefined) !== (r.rawSourceFormat === undefined)) {
     return { ok: false, reason: 'artifactId and rawSourceFormat must be provided together' }
   }
-  for (const flag of ['dryRun', 'realign', 'returnCellIds'] as const) {
+  for (const flag of ['dryRun', 'realign', 'returnCellIds', 'virtual'] as const) {
     if (r[flag] !== undefined && typeof r[flag] !== 'boolean') return { ok: false, reason: `${flag} must be a boolean` }
   }
   if (r.cellKeys !== undefined) {
@@ -589,6 +696,7 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
       ...(r.dryRun === true ? { dryRun: true } : {}),
       ...(r.realign === true ? { realign: true } : {}),
       ...(r.returnCellIds === true ? { returnCellIds: true } : {}),
+      ...(r.virtual === true ? { virtual: true } : {}),
       ...(r.toolOrigin !== undefined ? { toolOrigin: r.toolOrigin } : {}),
     },
   }

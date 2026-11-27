@@ -14,6 +14,8 @@ export interface ConceptOccurrencesEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/concepts\/([^/]+)\/occurrences$/
@@ -82,6 +84,7 @@ export async function handleConceptOccurrencesRequest(
       loaded.concept,
       loaded.termMatching,
       paging,
+      env.SNAPSHOTS,
     )
     return Response.json(page)
   } catch (err) {

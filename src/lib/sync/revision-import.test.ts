@@ -46,9 +46,11 @@ describe("revisionUnitsFromCells", () => {
 
 describe("canImportAsRevision", () => {
   const base = { fileType: "docx", reimport: false as const, hasTargets: false, hasOriginalBytes: true, cells: [cell(0)] }
-  it("takes a fresh, source-only, filter-backed import with its bytes", () => {
+  it("takes a fresh, source-only, filter-backed or usfm import with its bytes", () => {
     expect(REVISION_IMPORT_FORMATS.has("docx")).toBe(true)
+    expect(REVISION_IMPORT_FORMATS.has("usfm")).toBe(true)
     expect(canImportAsRevision(base)).toBe(true)
+    expect(canImportAsRevision({ ...base, fileType: "usfm" })).toBe(true)
   })
   // Why: "Update existing" is a plain revision; review apply and "Make updated
   // copy" unvalidate, repin and clone, which only /import/reconcile does yet.
@@ -59,7 +61,7 @@ describe("canImportAsRevision", () => {
   })
   it("refuses bilingual rows, formats without a filter, missing bytes and media rows", () => {
     expect(canImportAsRevision({ ...base, hasTargets: true })).toBe(false)
-    expect(canImportAsRevision({ ...base, fileType: "usfm" })).toBe(false)
+    expect(canImportAsRevision({ ...base, fileType: "unknown-format" })).toBe(false)
     expect(canImportAsRevision({ ...base, hasOriginalBytes: false })).toBe(false)
     expect(canImportAsRevision({ ...base, cells: [cell(0, { medium: "media" })] })).toBe(false)
     expect(canImportAsRevision({ ...base, cells: [cell(0, { startMs: 0, endMs: 10 })] })).toBe(false)
@@ -88,7 +90,7 @@ describe("postFileRevision", () => {
     expect(result.revisionN).toBe(1)
     expect(calls.map((c) => c.auth)).toEqual(["Bearer old", "Bearer new"])
     expect(calls[0].url).toBe("https://sync.example/api/v1/projects/p%201/files/f1/revisions")
-    expect(calls[1].body).toMatchObject({ artifactSha256: "a".repeat(64), stamp: "docx@1", origin: "import" })
+    expect(calls[1].body).toMatchObject({ artifactSha256: "a".repeat(64), stamp: "docx@1", origin: "import", virtual: true })
   })
 
   it("surfaces the server's refusal", async () => {

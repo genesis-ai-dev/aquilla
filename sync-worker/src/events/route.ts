@@ -26,8 +26,15 @@ import { authorize } from './authorize'
 import { stampToolProvenance } from './tool-provenance'
 import { dispatchEvent, type DispatchOutcome } from './dispatch'
 import { allocateSeqRange, buildSettleSeqRangeStmt } from './event-insert'
-import { CELL_ROW_COLUMNS, mapCellRow, type CellRowOut, type CellRowRaw } from './cell-row-serialize'
 import {
+  CELL_ROW_COLUMNS,
+  mapCellRow,
+  mapVirtualSourceRowToOut,
+  type CellRowOut,
+  type CellRowRaw,
+} from './cell-row-serialize'
+import {
+  buildBulkSourceCellCreateStmt,
   CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
   isChainArbitrated,
@@ -36,6 +43,13 @@ import {
   RESTORED_REMOVAL_SQL,
   type PersistedEvent,
 } from './event-projection'
+import {
+  getVirtualFileHead,
+  loadVirtualSourceCellHeads,
+  loadVirtualSourceFile,
+  type ManifestR2Bucket,
+} from '../../../db/shared/virtual-source-store'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
 import {
   GENESIS_PARENT_KEY,
   eventQualifiedParentKey,
@@ -127,6 +141,7 @@ function cellRowsKey(project: string, file: string, cell: string): string {
 async function readEventAppliedRows(
   db: AquillaDb,
   entries: ReadonlyArray<{ eventFrame: { kind: string; project: string; file?: string; cell?: string } }>,
+  r2?: ManifestR2Bucket,
 ): Promise<Map<string, CellRowOut[]> | null> {
   const slots = new Map<string, [string, string, string]>()
   for (const { eventFrame: f } of entries) {
@@ -146,7 +161,7 @@ async function readEventAppliedRows(
   try {
     const result = await db
       .prepare(
-        `SELECT ${CELL_ROW_COLUMNS}, project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
+        `SELECT ${CELL_ROW_COLUMNS}, project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN (${placeholders}) AND tombstoned_at IS NULL`,
       )
       .bind(...tuples.flat())
       .all<CellRowRaw & { project_id: string; file_id: string }>()
@@ -156,6 +171,40 @@ async function readEventAppliedRows(
       const mapped = mapCellRow(raw)
       if (bucket) bucket.push(mapped)
       else out.set(key, [mapped])
+    }
+    // AQU-2459 Phase B: a virtual source file has no `side = 'source'` row in
+    // Postgres `cells` (unless manually edited). Without including the live
+    // virtual source row here, `applied[].rows` would carry only the target
+    // row and the client would drop the cell from the editor immediately on
+    // commit!
+    if (r2) {
+      const missingSourceByFile = new Map<string, { projectId: string; fileId: string; cellIds: string[] }>()
+      for (const [key, [projectId, fileId, cellId]] of slots) {
+        const bucket = out.get(key)
+        if (bucket?.some((r) => r.side === 'source')) continue
+        const fk = `${projectId}\0${fileId}`
+        let group = missingSourceByFile.get(fk)
+        if (!group) {
+          group = { projectId, fileId, cellIds: [] }
+          missingSourceByFile.set(fk, group)
+        }
+        group.cellIds.push(cellId)
+      }
+      for (const { projectId, fileId, cellIds } of missingSourceByFile.values()) {
+        const head = await getVirtualFileHead(db, projectId, fileId)
+        if (!head) continue
+        const vf = await loadVirtualSourceFile(db, r2, projectId, fileId, { head })
+        if (!vf) continue
+        for (const cellId of cellIds) {
+          const vrow = vf.byCellId.get(cellId)
+          if (!vrow) continue
+          const key = cellRowsKey(projectId, fileId, cellId)
+          const bucket = out.get(key)
+          const mapped = mapVirtualSourceRowToOut(vrow)
+          if (bucket) bucket.unshift(mapped)
+          else out.set(key, [mapped])
+        }
+      }
     }
   } catch (err) {
     // Best-effort: without rows the client refetches exactly as before.
@@ -253,6 +302,8 @@ export interface EventsRouteEnv {
   BASE_URL?: string
   /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
   /** PostHog Logs project token; unset (local dev, e2e) makes telemetry a no-op. */
   POSTHOG_KEY?: string
   POSTHOG_HOST?: string
@@ -973,18 +1024,34 @@ export async function handleEventsWriteRequest(
     }
   }
   const [
-    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, validateTargets,
+    existingIds, chainWinners, cellHeads, virtualCellHeads, liveMirrorLocks, commentAuthors, validateTargets,
     takeRecorders, knownEditIds,
   ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
       prefetchCellHeads(db, [...chainCells.values()]),
+      env.SNAPSHOTS
+        ? loadVirtualSourceCellHeads(db, env.SNAPSHOTS, [...chainCells.values()])
+        : Promise.resolve(new Map()),
       prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
       prefetchCommentAuthors(db, foreignComments),
       prefetchLastEditors(db, [...validateCells.values()]),
       prefetchTakeRecorders(db, [...validateTakes.values()]),
       readExistingEventIds(db, validateEditIds),
     ])
+
+  // AQU-2459 Phase B: supplement `cellHeads` with virtual source cell heads
+  // from R2 manifests when no sparse Postgres `side = 'source'` overlay row
+  // exists yet, so pinned target commits and sparse source edits pass head
+  // validation without materializing N source rows at import time.
+  const unmaterializedVirtualSources = new Set<string>()
+  for (const [cellKey, vhead] of virtualCellHeads) {
+    const sourceHeadKey = `${cellKey}\0source\0`
+    if (!cellHeads.has(sourceHeadKey)) {
+      cellHeads.set(sourceHeadKey, vhead.eventId)
+      unmaterializedVirtualSources.add(cellKey)
+    }
+  }
 
   // PERF-2: project_settings is read at most once per (request, project) —
   // and, since perf/events-write-path, that ONE memo is shared with the
@@ -1796,6 +1863,12 @@ export async function handleEventsWriteRequest(
     // `rejected` instead falls through to markOutboxAttempt, burns the retry
     // budget, terminates as `failed` and stays visible in the inspector —
     // no client change, and no reclassification for the other 40+ kinds.
+    const isVirtualSourceDelete =
+      rawEvent.kind === 'source.cell.delete' &&
+      rawEvent.fileId != null &&
+      rawEvent.cellId != null &&
+      virtualCellHeads.has(cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId))
+
     let outcome: DispatchOutcome
     try {
       outcome = dispatchEvent(db, authResult.event, serverTs, {
@@ -1803,6 +1876,7 @@ export async function handleEventsWriteRequest(
         updateProjection,
         deferFileCounters: true,
         validationCount: validationCountForDispatch,
+        virtualSourceTombstone: isVirtualSourceDelete,
       })
     } catch (err) {
       console.error(`[events] handler for ${rawEvent.kind} failed:`, err)
@@ -1823,6 +1897,56 @@ export async function handleEventsWriteRequest(
     }
 
     const stmtsBefore = pendingStmts.length
+    let seedOffset = 0
+    // AQU-2459 Phase B: if a manual source mutation (or source audio transcript)
+    // touches a virtual source cell that has no sparse row in Postgres `cells`
+    // yet, seed that ONE row from the manifest right before the event's UPDATE
+    // so every existing `UPDATE cells SET ... WHERE side = 'source'` handler
+    // lands cleanly as a sparse overlay.
+    if (
+      updateProjection &&
+      rawEvent.fileId &&
+      rawEvent.cellId &&
+      (rawEvent.kind.startsWith('source.cell.') || rawEvent.kind === 'cell.audio.attach') &&
+      rawEvent.kind !== 'source.cell.create'
+    ) {
+      const ck = cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
+      if (unmaterializedVirtualSources.has(ck)) {
+        const vhead = virtualCellHeads.get(ck)
+        if (vhead) {
+          const u = vhead.unit
+          const seedEvent: PersistedEvent<'source.cell.create'> = {
+            id: u.eventId,
+            schemaVersion: 1,
+            projectId: rawEvent.projectId,
+            fileId: rawEvent.fileId,
+            cellId: u.cellId,
+            parentId: null,
+            kind: 'source.cell.create',
+            author: vhead.head.author,
+            payload: {
+              cellId: u.cellId,
+              anchorCellId: vhead.anchorCellId,
+              value: u.text,
+              ...(u.html !== undefined ? { valueHtml: u.html } : {}),
+              ...(u.type !== undefined ? { type: u.type } : {}),
+              ...(u.canonicalRef !== undefined ? { canonicalRef: u.canonicalRef } : {}),
+              ...(u.medium !== undefined ? { medium: u.medium } : {}),
+              ...(u.startMs !== undefined ? { startMs: u.startMs } : {}),
+              ...(u.endMs !== undefined ? { endMs: u.endMs } : {}),
+              ...(u.paragraphStart !== undefined ? { paragraphStart: u.paragraphStart } : {}),
+              sequenceIndex: u.sequenceIndex,
+              ...(u.metadata !== undefined ? { metadata: u.metadata } : {}),
+            },
+            clientTs: vhead.head.createdAt,
+            serverTs: vhead.head.createdAt,
+          }
+          pendingStmts.push(buildBulkSourceCellCreateStmt(db, [seedEvent]))
+          unmaterializedVirtualSources.delete(ck)
+          seedOffset = 1
+        }
+      }
+    }
     for (const stmt of outcome.result.stmts) {
       pendingStmts.push(stmt)
     }
@@ -1841,14 +1965,20 @@ export async function handleEventsWriteRequest(
       id: rawEvent.id,
       stmtStart: stmtsBefore,
       stmtCount: pendingStmts.length - stmtsBefore,
-      eventInsertStmtIndex: outcome.result.eventInsertStmtIndex,
+      eventInsertStmtIndex:
+        outcome.result.eventInsertStmtIndex !== undefined
+          ? outcome.result.eventInsertStmtIndex + seedOffset
+          : undefined,
       eventFrame: outcome.result.eventFrame,
       serverSeq,
       dirtyEntry,
       author: authResult.event.claims.username,
       viaExternal: authResult.event.claims.src === 'external',
       chainSlot: outcome.result.chainSlot,
-      headStmtIndex: outcome.result.headStmtIndex,
+      headStmtIndex:
+        outcome.result.headStmtIndex !== undefined
+          ? outcome.result.headStmtIndex + seedOffset
+          : undefined,
       counterFile: outcome.result.counterFile,
     })
   }
@@ -1934,7 +2064,13 @@ export async function handleEventsWriteRequest(
     // rewrites, and the push read selects the pass's own output by it. The
     // pass that runs these statements hands the stamp back (recomputeCommitted
     // below) instead of keeping it in a closure this request may never run.
-    const buildRecomputeStmts = (f: CounterImpact, recomputeTs: number): AquillaStatement[] => {
+    const buildRecomputeStmts = async (f: CounterImpact, recomputeTs: number): Promise<AquillaStatement[]> => {
+      const virtualStmts = await buildVirtualFileProgressStmts(db, env.SNAPSHOTS, {
+        projectId: f.projectId,
+        fileId: f.fileId,
+        updatedAt: recomputeTs,
+      })
+      if (virtualStmts) return virtualStmts
       const stmts: AquillaStatement[] = []
       stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
       if (f.fullSections) {
@@ -2056,7 +2192,7 @@ export async function handleEventsWriteRequest(
           // still correct by the time the request responds.
           const pass = await coalesceFileCounterRecompute(impact, async (drained) => {
             const recomputeTs = Date.now()
-            const stmts = buildRecomputeStmts(drained, recomputeTs)
+            const stmts = await buildRecomputeStmts(drained, recomputeTs)
             if (stmts.length === 0) return null
             await runBatch(stmts)
             return { recomputeTs, fullSections: drained.fullSections }
@@ -2272,7 +2408,7 @@ export async function handleEventsWriteRequest(
     // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
     // (the author's own client, which would otherwise refetch after its
     // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
-    const rowsByCell = await readEventAppliedRows(db, newEntries)
+    const rowsByCell = await readEventAppliedRows(db, newEntries, env.SNAPSHOTS)
     const progressPushedFiles = new Set(pushFramesByFile.keys())
     for (const entry of newEntries) {
       appliedFrames.push(buildAppliedFrame(entry, rowsByCell, progressPushedFiles))

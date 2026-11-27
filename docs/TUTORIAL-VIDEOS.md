@@ -1,0 +1,255 @@
+# Tutorial videos
+
+Short how-to videos, one per thing a person does in Aquilla ("Translate a
+verse", "Validate a verse"). Each is a script that drives the real app on the
+curated demo project and is filmed as it runs, with a voice saying the
+script's lines. Nobody records or edits them by hand, so a video is made again
+when the app changes (AQU-552).
+
+They are built on the Showcase recorder (`e2e/recordings/README.md`), in its
+doc mode. What tutorials add to it: one fixed format, a voice timed to the
+screen, an Aquilla frame round the app, a way to tell when a video is out of
+date, and an address the help site can read.
+
+Each video is under a minute and shows one task from start to
+finish.
+
+| Video | For | Id |
+| --- | --- | --- |
+| Find your way around a project | everyone | `find-your-way-around` |
+| Translate a verse | translators | `translate-a-verse` |
+| Validate a verse | reviewers | `validate-a-verse` |
+| Comment on a verse | everyone | `comment-on-a-verse` |
+| Export your work | leads | `export-your-work` |
+| Find help when you're stuck | everyone | `find-help` |
+| Set up Living Memory | leads | `living-memory` |
+| Catch mistakes with built-in checks | everyone | `built-in-checks` |
+| Add a rule and fix what it flags | leads | `add-a-rule` |
+| Keep key terms consistent | everyone | `terminology` |
+| Import a file | leads | `import-a-file` |
+| Find your way around the Media view | translators | `media-view` |
+| Trim and cut a recording | translators | `trim-and-cut` |
+| Set a recording's volume and fades | translators | `volume-and-fades` |
+| Link a project to a source project | leads | `link-a-source` |
+| Create a project | leads | `create-a-project` |
+| Set your personal preferences | everyone | `preferences` |
+| Add people to a project | leads | `invite-people` |
+| Change someone's role | leads | `change-a-role` |
+| Remove someone from a project | leads | `remove-someone` |
+| Add a language lane | leads | `add-a-language-lane` |
+| Put someone on a language lane | leads | `staff-a-lane` |
+| Manage a language lane | leads | `manage-a-language-lane` |
+| See who can access what | leads | `who-has-access` |
+
+Every take starts from the same demo project. The demo sign-in
+(`auth-worker/src/routes/marketing-seed.ts`) drops whatever an earlier take
+added to it — files, recordings, comments, rules and terms — before seeding
+John 1 again. A video that needs more than that gets it in its `setup`
+(`e2e/recordings/tutorials/setup.ts`): the audio videos upload six sample
+recordings from `e2e/recordings/tutorials/fixtures/` there, off camera.
+No audio is played in any video: the audio videos show the Station's controls
+and what they change, with the voice explaining.
+
+The source-projects video links a second demo project, "Jean — Kreyòl Draft",
+which the sign-in seeds empty and unlinked, to the demo's French translation.
+The source project's revision is made in a second page, off camera, so the
+video shows the linked project following it live.
+
+The admin videos work on three made-up teammates the demo sign-in adds to the
+organization (amara.okafor, lena.hartmann, tomas.reyes; no password, so they
+cannot sign in). Each sign-in puts them back on their seeded roles, drops any
+project or language lane a take added, and restores the seeded lane. Teams are
+left out on purpose.
+
+Not filmed yet: making AI voices and dubbing. They need the voice keys
+(`INWORLD_API_KEY`, `VOICE_FORGE_URL`, `VOICE_FORGE_TOKEN`) on the stack that
+films.
+
+## Making them
+
+```sh
+eval "$(bash scripts/e2e-pg-native.sh)"   # or the aquilla-dev-pg container (e2e/README.md)
+pnpm tutorials                            # say, film and put together every video
+pnpm tutorials --only translate-a-verse   # one video
+pnpm tutorials --skip-film                # put together the takes already filmed
+pnpm tutorials --publish                  # and upload what changed, with videos.json
+```
+
+Needs ffmpeg on the PATH and Playwright's Chromium. The finished files land in
+`.video-staging/tutorials/publish/` (git-ignored): for each video
+`<id>/<id>.mp4`, `<id>/<id>.jpg` (the opening card, for a poster) and
+`<id>/<id>.en.vtt` (captions), and `videos.json`. Nothing is uploaded without
+`--publish`.
+
+## The parts
+
+| File | What it does |
+| --- | --- |
+| `e2e/recordings/tutorials/catalog.ts` | every video's id, title, who it is for, and each line its voice says |
+| `e2e/recordings/specs/tutorials/<id>.showcase.ts` | the script: what is pointed at, clicked and typed, and when each line is said |
+| `e2e/recordings/tutorials/tutorial.ts` | `tutorial(id, body)`: signs in to the demo project, holds each line for as long as its voice lasts, reads each line's screen for the look, fails the take when the body does |
+| `e2e/recordings/tutorials/look.ts` | a video's look: each line's screen as text, steadied and hashed |
+| `scripts/tutorials/voice.ts` | says each line once and keeps the recording, named by its words |
+| `scripts/tutorials/cards.ts`, `brand.ts` | the frame, the opening card and the closing card, drawn by the browser in Aquilla's colours and typeface |
+| `scripts/tutorials/compose.ts` | puts a video together with ffmpeg: card, take in the frame, card, voice at -16 LUFS, captions |
+| `scripts/tutorials/manifest.ts` | `videos.json`, and which videos to publish again |
+| `scripts/tutorials/cli.ts` | `pnpm tutorials`: all of the above in order |
+
+## Writing one
+
+1. Add the video to `catalog.ts`. Its first line is "Here's how to …": the
+   help site shows it as the video's description. Write lines a person would
+   say aloud, about what is on the screen at that moment.
+2. Add `e2e/recordings/specs/tutorials/<id>.showcase.ts`:
+
+   ```ts
+   tutorial("translate-a-verse", async (t) => {
+     const ws = new Workspace(t.page)
+     await t.say("intro")
+     await t.show.point(target)        // lead the eye
+     await t.say("click")
+     await ws.activateTargetCell(5)    // the e2e page object does the work
+     ...
+     await expect(target).toContainText(TRANSLATION)   // it must really happen
+     await t.say("outro")
+   })
+   ```
+
+   Drive the app with the e2e page objects (`e2e/helpers/page-objects/`), so
+   a tutorial clicks what a test clicks. Every line in the catalog must be
+   said, and the video must end having shown what its title promises, with an
+   `expect`. A tutorial that cannot finish fails; it is never published half
+   done.
+3. `pnpm tutorials --only <id>` and watch the result.
+
+`find-help` also films the help site. With `TUTORIALS_HELP_SITE_DIR` set to
+a built `aquilla-help` (`pnpm build` there makes `dist/`), the browser is
+served those files at help.aquilla.app, so no network is needed and the video
+shows that checkout of the help site. Without it the live site is filmed
+(`e2e/recordings/tutorials/help-site.ts`).
+
+Every video starts from the same place: the demo project
+(`auth-worker/src/routes/marketing-seed.ts`) is seeded again at each sign-in.
+The demo's content is public domain and no real project is ever filmed.
+
+## Voice
+
+Two voices can say the lines (`scripts/tutorials/voice.ts`):
+
+- **Gemini**, when `GEMINI_API_KEY` is set: the model and voice LangQuest's
+  tutorial videos use (`gemini-3.8-flash-tts`, "Sulafat"). `TUTORIAL_TTS_MODEL`
+  and `TUTORIAL_TTS_VOICE` change them. The key's Google project needs billing
+  on: a free key allows a few requests a minute and stopped after 20 of the 29
+  lines in a day.
+- **ElevenLabs**, when there is no Gemini key: `ELEVENLABS_API_KEY` and
+  `ELEVENLABS_VOICE_ID`, the two variables the Showcase assembler reads.
+
+A line's recording is named by its words and kept in
+`.video-staging/tutorials/voice/`, so only a changed line is said again. The
+recordings are made before filming, so the take can hold each line for exactly
+its length. Changing the voice or the model says every line again.
+
+With no key, nothing is said. The videos are filmed at reading speed and
+carry captions only, and `videos.json` marks them `voiced: false`. When a key
+arrives, the next run says the lines and publishes every video again by
+itself.
+
+## The look
+
+Each video is 1920×1080: an opening card with the title, the app in a window
+under the title, and a closing card. The colours are the marketing site's ink
+and azure (`aquilla-marketing/src/styles/marketing-theme.css`), the typeface
+is the app's Geist, and the mark is `public/favicon-aquilla.svg`. All of it is
+in `scripts/tutorials/brand.ts`.
+
+`FRAME` in `brand.ts` is the frame's version. Raise it when a change to the
+frame should publish every video again.
+
+## When a video is published again
+
+Each run films every video and compares it with the `videos.json` that is up.
+A video is uploaded again when:
+
+- **its screens changed**: its look differs. The look is the accessibility
+  tree of the app at each line, with what differs between two runs taken out
+  (the build stamp, dates, ids, "just now"). A renamed button or a new panel
+  changes it; a colour does not.
+- **its script changed**: a line in the catalog or a step in its spec.
+- **the frame changed** (`FRAME`), or it gained or lost its voice.
+- it has no film yet.
+
+A change the look cannot see (a colour, an icon) is published by raising
+`FRAME`, or by changing the script.
+
+A video whose take fails, or that the run did not film, keeps the film that is
+up, and the run fails and says which.
+
+## On the help site
+
+Everything is served from one place, and the addresses never change when a
+video is filmed again:
+
+```
+https://docs.aquilla.app/media/tutorials/videos.json
+https://docs.aquilla.app/media/tutorials/<id>/<id>.mp4
+https://docs.aquilla.app/media/tutorials/<id>/<id>.jpg
+https://docs.aquilla.app/media/tutorials/<id>/<id>.en.vtt
+```
+
+`videos.json`:
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-11-17T20:10:00.000Z",
+  "base": "https://docs.aquilla.app/media/tutorials",
+  "videos": [
+    {
+      "id": "translate-a-verse",
+      "title": "Translate a verse",
+      "description": "Here's how to translate a verse.",
+      "audience": "translators",
+      "language": "en",
+      "src": "https://docs.aquilla.app/media/tutorials/translate-a-verse/translate-a-verse.mp4",
+      "poster": "https://docs.aquilla.app/media/tutorials/translate-a-verse/translate-a-verse.jpg",
+      "captions": "https://docs.aquilla.app/media/tutorials/translate-a-verse/translate-a-verse.en.vtt",
+      "durationSeconds": 45,
+      "voiced": true,
+      "filmedAt": "2026-11-17T20:10:00.000Z",
+      "commit": "22143b8",
+      "look": "da29c21a1bff7236",
+      "script": "5f0c1e…",
+      "frame": 1
+    }
+  ]
+}
+```
+
+`aquilla-help` already has what embeds one: `src/components/Video.astro` takes
+`src`, `poster`, `title` and `captions`, which are this entry's `src`,
+`poster`, `title` and `captions`. A page can name a video by its fixed
+addresses, or the site can read `videos.json` when it builds and list them
+all.
+
+The files live in the `aquilla-docs` R2 bucket under
+`walkthroughs/tutorials/`, beside the walkthrough videos
+(`docs/walkthroughs/UPLOAD-MANIFEST.tsv`), which is what
+`docs.aquilla.app/media/` serves. `TUTORIALS_PUBLIC_BASE` and
+`TUTORIALS_R2_PREFIX` change the address and the prefix.
+
+## The workflow
+
+`.github/workflows/tutorials.yml` runs `pnpm tutorials` on a GitHub runner:
+by hand for now, with a box to tick to publish. Its header says what to add
+to run it each night, and which secrets it reads. Every run keeps its videos
+as an artifact for 14 days, published or not.
+
+## Not done yet
+
+- **Other languages.** A line is keyed in the catalog so it can be translated,
+  and the captions file is named by language, but only English is made.
+- **A check of each new film's pictures.** A take must pass its own `expect`s,
+  which catch a flow that broke; nothing yet looks at the frames for a layout
+  that broke.
+- **YouTube.** Not planned yet; the files and `videos.json` are what a later
+  upload would read.

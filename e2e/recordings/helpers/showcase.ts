@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test"
+import { type Locator, type Page } from "@playwright/test"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -35,10 +35,24 @@ export interface ShowcaseOpts {
    * Defaults to "promo" to preserve existing takes.
    */
   mode?: "doc" | "promo"
+  /**
+   * What the take draws over the app:
+   *  - "full" (default) → brand bug, chapter lower-thirds, burned-in captions
+   *    and the cursor. A take that stands alone as raw footage.
+   *  - "pointer" → the cursor and click ripple only. For tutorial videos
+   *    (docs/TUTORIAL-VIDEOS.md), whose title sits in the frame around the app
+   *    and whose lines are the voice and a captions track, not pixels.
+   */
+  overlay?: "full" | "pointer"
 }
 
-/** A cursor/zoom target: a CSS selector (resolved to its centre) or a point. */
-export type Target = string | { x: number; y: number }
+/** A cursor/zoom target: a CSS selector or Playwright locator (resolved to its
+ * centre), or a point. */
+export type Target = string | Locator | { x: number; y: number }
+
+function isLocator(target: Target): target is Locator {
+  return typeof target === "object" && "boundingBox" in target
+}
 
 /**
  * Showcase driver — wraps a Playwright Page to produce *legible marketing
@@ -78,7 +92,9 @@ export class Showcase {
 
   /** Inject the caption/lower-third overlay layer + a persistent brand bug. */
   private async ensureOverlay(): Promise<void> {
-    if (this.overlayReady) return
+    // A take that goes to another page (a tutorial that opens the help site)
+    // loses the layer with the page: put it in again there.
+    if (this.overlayReady && (await this.page.locator("#__showcase_layer").count()) > 0) return
     await this.page.addStyleTag({
       content: `
         #__showcase_layer{position:fixed;inset:0;z-index:2147483647;pointer-events:none;font-family:Inter,system-ui,sans-serif}
@@ -111,6 +127,11 @@ export class Showcase {
           100%{opacity:0;transform:translate(-50%,-50%) scale(2.6)}}
       `,
     })
+    if (this.opts.overlay === "pointer") {
+      await this.page.addStyleTag({
+        content: "#__showcase_bug,#__showcase_chapter,#__showcase_caption{display:none}",
+      })
+    }
     await this.page.evaluate(() => {
       const layer = document.createElement("div")
       layer.id = "__showcase_layer"
@@ -148,8 +169,9 @@ export class Showcase {
     await this.page.waitForTimeout(900)
   }
 
-  /** Subtitle line — doubles as the timestamped VO script. */
-  async caption(text: string): Promise<void> {
+  /** Subtitle line — doubles as the timestamped VO script. `holdMs` replaces
+   * the reading-speed hold, for a line whose voice has a known length. */
+  async caption(text: string, { holdMs }: { holdMs?: number } = {}): Promise<void> {
     await this.ensureOverlay()
     this.captions.push({ t: this.now(), text })
     await this.page.evaluate((tx) => {
@@ -159,7 +181,7 @@ export class Showcase {
       el.classList.add("on")
     }, text)
     // Hold long enough to read (~3 wps + base).
-    await this.page.waitForTimeout(Math.min(5000, 700 + text.length * 45))
+    await this.page.waitForTimeout(holdMs ?? Math.min(5000, 700 + text.length * 45))
     await this.page.evaluate(() => document.getElementById("__showcase_caption")?.classList.remove("on"))
   }
 
@@ -187,9 +209,13 @@ export class Showcase {
 
   /** Centre of a selector (Playwright box, so it reflects any active zoom). */
   private async resolvePoint(target: Target): Promise<{ x: number; y: number }> {
-    if (typeof target !== "string") return target
-    const box = await this.page.locator(this.toSelector(target)).first().boundingBox()
-    if (!box) throw new Error(`showcase: cursor target not visible: ${target}`)
+    if (typeof target !== "string" && !isLocator(target)) return target
+    const locator = isLocator(target) ? target : this.page.locator(this.toSelector(target)).first()
+    // Bounded: boundingBox() alone waits for the whole test timeout on a
+    // target that never appears, and the take then fails without saying where.
+    await locator.waitFor({ state: "visible", timeout: 10_000 })
+    const box = await locator.boundingBox()
+    if (!box) throw new Error(`showcase: cursor target not visible: ${String(target)}`)
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
   }
 
@@ -238,7 +264,8 @@ export class Showcase {
     await this.cursorTo(pt, { ms })
     await this.ripple(pt)
     if (!real) return
-    if (typeof target === "string") await this.page.locator(this.toSelector(target)).first().click()
+    if (isLocator(target)) await target.click()
+    else if (typeof target === "string") await this.page.locator(this.toSelector(target)).first().click()
     else await this.page.mouse.click(pt.x, pt.y)
   }
 
@@ -284,8 +311,10 @@ export class Showcase {
    *
    * @param verified whether the take's value/money moment actually rendered
    *   (asserted by the spec). When false the storyboard is a partial cut —
-   *   the assembler/human must not ship it as a value claim. */
-  async save(verified = true): Promise<string> {
+   *   the assembler/human must not ship it as a value claim.
+   * @param extra fields a wrapper adds to the storyboard (a tutorial's lines
+   *   and look). */
+  async save(verified = true, extra: Record<string, unknown> = {}): Promise<string> {
     // Clear any zoom transform so the DOM is pristine for post-take assertions.
     await this.page
       .evaluate(() => {
@@ -319,6 +348,7 @@ export class Showcase {
           chapters: this.chapters,
           captions: this.captions,
           generatedAt: new Date().toISOString(),
+          ...extra,
         },
         null,
         2,

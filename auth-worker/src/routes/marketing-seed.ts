@@ -30,9 +30,32 @@ const M_ORG_NAME = "Riverstone Bible Society"
 const M_PROJECT_ID = "demo-john"
 const M_PROJECT_NAME = "John — Plainspeak Draft"
 const M_FILE_ID = "demo-john-1"
+// A second, empty project in the same organization: a regional team that
+// translates the French draft, not the English. The source-projects video
+// links it to the demo project's French translation (a translation chain).
+const M_CHAIN_ID = "demo-jean-kreyol"
+const M_CHAIN_NAME = "Jean — Kreyòl Draft"
+const CHAIN_TARGET_LANG = "ht"
 const M_FILE_NAME = "John 1"
 const SOURCE_LANG = "en"
 const TARGET_LANG = "fr"
+/** Every table with a lane_id foreign key to lanes (project_member_lane_roles is cleared whole above). */
+const LANE_REFERENCES = [
+  "cell_audio", "cells", "cell_audio_validators", "cell_validators", "file_section_progress", "assignments",
+  "artifact_bindings", "scene_briefs", "contextual_runs", "contextual_drafts", "cell_backtranslations",
+] as const
+const LANGUAGE_NAMES: Record<string, string> = { en: "English", fr: "French", ht: "Haitian Creole" }
+
+/**
+ * Made-up teammates, so the admin videos have people to invite, change the
+ * role of, put on a language lane and remove. They cannot sign in: they have
+ * no password. Every sign-in puts them back as listed here.
+ */
+const TEAMMATES: ReadonlyArray<{ username: string; email: string; projectRole: number | null }> = [
+  { username: "amara.okafor", email: "amara.okafor@example.org", projectRole: ROLE.CONTRIBUTOR },
+  { username: "lena.hartmann", email: "lena.hartmann@example.org", projectRole: ROLE.REVIEWER },
+  { username: "tomas.reyes", email: "tomas.reyes@example.org", projectRole: null },
+]
 
 // John 1:1–6 — public domain. [ref, sourceKJV, targetSegond1910].
 // A couple of target rows are left blank to make "in progress" honest, and
@@ -51,6 +74,107 @@ interface IdRow { id: number }
 function words(s: string): number {
   const t = s.trim()
   return t ? t.split(/\s+/).length : 0
+}
+
+/**
+ * Put the demo organization's people and language lanes back as seeded, so an
+ * admin video never starts from what the last one changed: projects a take
+ * created are dropped, each demo project keeps only its seeded language lane
+ * (renamed, archived or re-delivered ones restored), invites and scopes go,
+ * and the teammates get their seeded roles again.
+ */
+async function resetPeopleAndLanes(db: AquillaDb, ids: { userId: number; orgId: number }): Promise<void> {
+  const { userId, orgId } = ids
+  const demoProjects = [M_PROJECT_ID, M_CHAIN_ID]
+
+  const extra = await db
+    .prepare("SELECT id FROM projects WHERE org_id = ? AND id NOT IN (?, ?)")
+    .bind(orgId, M_PROJECT_ID, M_CHAIN_ID)
+    .all<{ id: string }>()
+  for (const { id } of extra.results ?? []) {
+    for (const table of LANE_REFERENCES) {
+      await db.prepare(`DELETE FROM ${table} WHERE lane_id IN (SELECT id FROM lanes WHERE project_id = ?)`).bind(id).run()
+    }
+    for (const table of ["cells", "events", "files", "lanes", "project_members", "project_member_scopes",
+      "project_member_lane_roles", "project_invites", "project_settings"]) {
+      await db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(id).run()
+    }
+    await db.prepare("DELETE FROM projects WHERE id = ?").bind(id).run()
+  }
+
+  const seededLane: Record<string, string> = { [M_PROJECT_ID]: TARGET_LANG, [M_CHAIN_ID]: CHAIN_TARGET_LANG }
+  for (const projectId of demoProjects) {
+    const tag = seededLane[projectId]
+    await db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id <> ?").bind(projectId, userId).run()
+    await db.prepare("DELETE FROM project_member_scopes WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM project_member_lane_roles WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM project_invites WHERE project_id = ?").bind(projectId).run()
+    // A language lane a take added: whatever points at it goes first (every
+    // foreign key to lanes), then the lane.
+    const added = "SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND COALESCE(legacy_tag, '') <> ?"
+    for (const table of LANE_REFERENCES) {
+      await db.prepare(`DELETE FROM ${table} WHERE lane_id IN (${added})`).bind(projectId, tag).run()
+    }
+    await db.prepare(`DELETE FROM lanes WHERE project_id = ? AND id IN (${added})`).bind(projectId, projectId, tag).run()
+    // Languages by name, with the code beside them, as a team would set them
+    // up: the admin videos show these tables, and "fr" alone reads as a glitch.
+    await db
+      .prepare(
+        `UPDATE lanes SET language = ?, name = NULL, lang_code = ?, archived_at = NULL,
+           delivers = 'text', records_audio = false, updated_at = now()
+         WHERE project_id = ? AND role = 'target'`,
+      )
+      .bind(LANGUAGE_NAMES[tag], tag, projectId)
+      .run()
+    const sourceTag = projectId === M_PROJECT_ID ? SOURCE_LANG : TARGET_LANG
+    await db
+      .prepare("UPDATE lanes SET language = ?, lang_code = ?, updated_at = now() WHERE project_id = ? AND role = 'source'")
+      .bind(LANGUAGE_NAMES[sourceTag], sourceTag, projectId)
+      .run()
+  }
+  await db.prepare("DELETE FROM org_invites WHERE org_id = ?").bind(orgId).run()
+
+  const lane = await db
+    .prepare("SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND archived_at IS NULL ORDER BY position LIMIT 1")
+    .bind(M_PROJECT_ID)
+    .first<{ id: string }>()
+  for (const mate of TEAMMATES) {
+    await db
+      .prepare(
+        `INSERT INTO users (username, email, password_hash, created_at, updated_at)
+         VALUES (?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT(username) DO UPDATE SET email = excluded.email, password_hash = NULL`,
+      )
+      .bind(mate.username, mate.email)
+      .run()
+    const row = await db.prepare("SELECT id FROM users WHERE username = ?").bind(mate.username).first<IdRow>()
+    if (!row) throw new Error(`teammate ${mate.username} not found after upsert`)
+    await db
+      .prepare(
+        `INSERT INTO org_members (org_id, user_id, role_level, granted_by, granted_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(org_id, user_id) DO UPDATE SET role_level = excluded.role_level`,
+      )
+      .bind(orgId, row.id, ROLE.CONTRIBUTOR, userId)
+      .run()
+    if (mate.projectRole === null) continue
+    await db
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role_level, granted_by, granted_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      )
+      .bind(M_PROJECT_ID, row.id, mate.projectRole, userId)
+      .run()
+    if (lane) {
+      await db
+        .prepare(
+          `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by, granted_at)
+           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        )
+        .bind(M_PROJECT_ID, row.id, lane.id, mate.projectRole, userId)
+        .run()
+    }
+  }
 }
 
 async function seedMarketing(db: AquillaDb): Promise<{
@@ -122,6 +246,33 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .bind(M_PROJECT_ID, userId, ROLE.OWNER, userId)
     .run()
 
+  // The chain project starts unlinked at every sign-in: the video links it.
+  await db
+    .prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, org_id = excluded.org_id,
+         source_project_id = NULL, source_link_mode = NULL, source_link_consumes = NULL,
+         source_link_gate = NULL, source_link_cursor = 0, source_link_file_ids = NULL,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(M_CHAIN_ID, M_CHAIN_NAME, orgId, userId)
+    .run()
+  await db
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by, granted_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(project_id, user_id) DO UPDATE SET role_level = excluded.role_level`,
+    )
+    .bind(M_CHAIN_ID, userId, ROLE.OWNER, userId)
+    .run()
+  await ensureProjectLanes(db, M_CHAIN_ID, {
+    lanes: [
+      { role: "source", language: TARGET_LANG },
+      { role: "target", language: CHAIN_TARGET_LANG, legacyTag: CHAIN_TARGET_LANG },
+    ],
+  })
+
   // AQU-1594: the demo is a new project. Source lane plus one target lane
   // whose legacy tag is the language — not the old `''` bridge.
   await ensureProjectLanes(db, M_PROJECT_ID, {
@@ -131,22 +282,41 @@ async function seedMarketing(db: AquillaDb): Promise<{
     ],
   })
 
-  // Idempotent content reseed: drop any prior demo file/cells/events first.
-  // Order matters: cells.event_id FKs events(id), so cells before events.
-  await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").bind(M_FILE_ID, M_PROJECT_ID).run()
-
-  const now = Date.now()
+  await resetPeopleAndLanes(db, { userId, orgId })
 
   // server_seq is NOT NULL + UNIQUE(project_id, server_seq) — assign a
-  // monotonic per-project sequence. Start past any existing max so re-seeds
-  // never collide.
+  // monotonic per-project sequence, past the highest one the project has had.
+  // Read BEFORE the old events are dropped below: read after, a re-seed starts
+  // again at 1 and the file ends on the same MAX(server_seq) as last time, with
+  // new cell ids. The sync-worker keys a file's cell ordering on that number
+  // (cells-read-route.ts, chainCacheKey), so the second sign-in in one worker's
+  // life was served the first one's ordering and the editor showed an empty
+  // file. Recording several takes in one run is exactly that.
   const seqRow = await db
     .prepare("SELECT COALESCE(MAX(server_seq), 0) AS m FROM events WHERE project_id = ?")
     .bind(M_PROJECT_ID)
     .first<{ m: number }>()
   let seq = Number(seqRow?.m ?? 0)
+
+  // Idempotent content reseed: drop every prior file in the demo project, with
+  // its cells, events, comments and recordings, not only the demo file. A take
+  // that imports a file or uploads recordings would otherwise leave them for the
+  // next sign-in, which then opens on "No file selected" instead of John 1.
+  // Order matters: cells.event_id FKs events(id), so cells before events.
+  // Project-level events (no file) stay.
+  for (const projectId of [M_PROJECT_ID, M_CHAIN_ID]) {
+    await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id IS NOT NULL").bind(projectId).run()
+    await db.prepare("DELETE FROM cell_audio WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM cells WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id IS NOT NULL").bind(projectId).run()
+    await db.prepare("DELETE FROM files WHERE project_id = ?").bind(projectId).run()
+    // The project's own rules (settings.rules) and terms: a take that adds a
+    // rule or a term would otherwise mark the next take's verses with it.
+    await db.prepare("DELETE FROM project_settings WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM concepts WHERE project_id = ?").bind(projectId).run()
+  }
+
+  const now = Date.now()
 
   async function insertEvent(opts: { id: string; cellId: string | null; kind: string; payload: unknown }): Promise<void> {
     seq += 1
@@ -202,6 +372,10 @@ async function seedMarketing(db: AquillaDb): Promise<{
     prevCellId = cellId
   }
 
+  // role and kind as a USFM import writes them (src/lib/import.ts). The
+  // recordings upload only offers files whose role is "source"
+  // (src/lib/audio/bulk-upload/load-targets.ts), so a demo file seeded as
+  // "target" could not take a recording.
   // files: 0012 shape — no file_type/source_language columns (those live in
   // `meta`); event_id NOT NULL; meta NOT NULL. fileType is derived by the
   // read route as kind ?? role ?? 'codex'.
@@ -210,7 +384,7 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .prepare(
       `INSERT INTO files (id, project_id, name, role, kind, book_code, event_id,
          cell_count, approved_count, word_count, last_edit_at, created_by, created_at, updated_at, meta, filled_count)
-       VALUES (?, ?, ?, 'target', 'scripture', 'JHN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, 'source', 'usfm', 'JHN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(M_FILE_ID, M_PROJECT_ID, M_FILE_NAME, fileEventId, VERSES.length, approved, totalWords, now, M_USERNAME, now, now, meta, filled)
     .run()

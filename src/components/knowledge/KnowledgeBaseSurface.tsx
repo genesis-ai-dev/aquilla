@@ -50,7 +50,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { formatDateTime, formatFileSize, formatNumber } from "@/lib/i18n/format"
-import { MAX_KB_EXTRACT_INPUT_BYTES, MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
@@ -391,7 +392,7 @@ export function KnowledgeBaseSurface({
           <p className="text-xs text-muted-foreground">
             {t("knowledgeBase.acceptedFormats", {
               limit: formatFileSize(MAX_KB_ORIGINAL_BYTES, locale),
-              docxLimit: formatFileSize(MAX_KB_EXTRACT_INPUT_BYTES, locale),
+              docxLimit: formatFileSize(MAX_DOCX_BYTES, locale),
             })}
           </p>
         ) : (

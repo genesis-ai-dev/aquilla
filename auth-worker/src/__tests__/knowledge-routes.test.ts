@@ -486,12 +486,25 @@ describe("knowledge routes — validation", () => {
     expect(pulled * chunk.length).toBeLessThan(MAX_KB_ORIGINAL_BYTES + 4 * chunk.length)
   })
 
+  // The Knowledge Base and the rule import share one DOCX limit, 2 × 1024 × 1024
+  // bytes ("2 MB"); the Knowledge Base's used to be 2,000,000 bytes ("1.9 MB").
   it(".docx body over 2 MB → 400", async () => {
     const jwt = await setup()
     stubIndexingFetch()
-    const big = new Uint8Array(2_000_001)
+    const big = new Uint8Array(2 * 1024 * 1024 + 1)
     const res = await uploadDoc(PROJECT, jwt, big, "big.docx", new FakeBucket())
     expect(res.status).toBe(400)
+    // Its own code, so the app words it instead of showing this message.
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("docx_too_large")
+  })
+
+  it(".docx of exactly 2 MB is not refused for its size", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    // Not a real .docx, so the extractor refuses it (422), past the size check.
+    const res = await uploadDoc(PROJECT, jwt, new Uint8Array(2 * 1024 * 1024), "edge.docx", new FakeBucket())
+    expect(res.status).toBe(422)
   })
 
   it("extraction yielding empty text (garbage .docx bytes) → 422", async () => {

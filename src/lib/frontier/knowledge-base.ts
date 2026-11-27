@@ -1,8 +1,9 @@
 import { AUTH_BASE } from "@/lib/frontier/auth"
-import { t } from "@/lib/i18n/standalone"
-import type { MessageKey } from "@/lib/i18n/messages/en"
+import { activeLocale, t } from "@/lib/i18n/standalone"
+import { formatFileSize } from "@/lib/i18n/format"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 export type KnowledgeIndexStatus = "pending" | "ready" | "failed"
 
@@ -119,11 +120,19 @@ export class KnowledgeBaseReadError extends Error {
   }
 }
 
+/** A Word file over the DOCX limit, the same sentence whether this client
+ *  caught it or the server did. */
+function docxTooLargeMessage(): string {
+  return t("knowledgeBase.docxTooLarge", { limit: formatFileSize(MAX_DOCX_BYTES, activeLocale()) })
+}
+
 /** Server error codes this client words itself, in place of the server's text. */
-const SERVER_CODE_MESSAGES: Readonly<Record<string, MessageKey>> = {
+const SERVER_CODE_MESSAGES: Readonly<Record<string, () => string>> = {
   // AQU-2551: a PDF reached the server without its text (a page from before
   // PDFs were read in the browser).
-  pdf_text_required: "importExport.errors.pdfServerRefused",
+  pdf_text_required: () => t("importExport.errors.pdfServerRefused"),
+  // Checked here before uploading; the server's check is the backstop.
+  docx_too_large: docxTooLargeMessage,
 }
 
 /** Pull `{ error: { message } }` off a non-OK response, if it has one. The body
@@ -134,7 +143,7 @@ async function readServerMessage(response: Response): Promise<string | undefined
     const body = (await response.clone().json()) as { error?: { code?: unknown; message?: unknown } }
     const code = body.error?.code
     if (typeof code === "string" && Object.prototype.hasOwnProperty.call(SERVER_CODE_MESSAGES, code)) {
-      return t(SERVER_CODE_MESSAGES[code])
+      return SERVER_CODE_MESSAGES[code]()
     }
     const message = body.error?.message
     return typeof message === "string" && message.trim() ? message : undefined
@@ -207,6 +216,9 @@ export async function uploadKnowledgeDocument(
   jwt: string,
   file: File,
 ): Promise<KnowledgeUpload> {
+  if (file.name.toLowerCase().endsWith(".docx") && file.size > MAX_DOCX_BYTES) {
+    throw new KnowledgeBaseReadError(docxTooLargeMessage())
+  }
   const response = await request(scope, jwt, "", {
     method: "POST",
     headers: { "x-doc-name": encodeURIComponent(file.name) },

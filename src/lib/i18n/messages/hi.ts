@@ -6595,6 +6595,7 @@ export const hi: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} अपलोड हो गया।",
   "knowledgeBase.uploadTruncated": "{name} अपलोड हो गया, लेकिन यह बहुत लंबा है: केवल इसके पहले 2 मिलियन अक्षर पढ़े गए।",
   "knowledgeBase.uploadError": "{name} अपलोड नहीं हो सका। फिर कोशिश करें।",
+  "knowledgeBase.docxTooLarge": "यह Word फ़ाइल {limit} से बड़ी है, इसलिए इसे जोड़ा नहीं जा सकता। इसे बाँटें या एक छोटी प्रति सहेजें।",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX या PDF · अधिकतम {limit} (DOCX अधिकतम {docxLimit})",
   "knowledgeBase.emptyTitle": "अभी कोई ज्ञान दस्तावेज़ नहीं",
   "knowledgeBase.emptyDescription": "संदर्भ सामग्री अपलोड करें, ताकि यह इस परियोजना और उसके एजेंटों को उपलब्ध हो।",

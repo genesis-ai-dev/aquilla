@@ -17,8 +17,13 @@ import { DEFAULT_LOCALE, normalizeLocale } from "./locales"
 import { readStoredLocale } from "./store"
 import { translate, type TVars } from "./translate"
 
+/** The app's active locale, outside React (for formatting a number into `t()`'s vars). */
+export function activeLocale(): string {
+  return normalizeLocale(readStoredLocale())
+}
+
 export function t(key: MessageKey, vars?: TVars): string {
-  const locale = normalizeLocale(readStoredLocale())
+  const locale = activeLocale()
   // English until the locale's catalog has arrived (main.tsx fetches it first).
   return translate(catalogFor(locale) ?? catalogFor(DEFAULT_LOCALE), key, vars, locale)
 }

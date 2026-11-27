@@ -6840,6 +6840,7 @@ export const pa: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} ਅੱਪਲੋਡ ਹੋਇਆ.",
   "knowledgeBase.uploadTruncated": "{name} ਅੱਪਲੋਡ ਹੋਇਆ, ਪਰ ਇਹ ਬਹੁਤ ਲੰਮਾ ਹੈ: ਸਿਰਫ਼ ਇਸਦੇ ਪਹਿਲੇ 2 ਮਿਲੀਅਨ ਅੱਖਰ ਪੜ੍ਹੇ ਗਏ.",
   "knowledgeBase.uploadError": "{name} ਅੱਪਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ. ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
+  "knowledgeBase.docxTooLarge": "ਇਹ Word ਫ਼ਾਈਲ {limit} ਤੋਂ ਵੱਡੀ ਹੈ, ਇਸ ਲਈ ਇਸਨੂੰ ਜੋੜਿਆ ਨਹੀਂ ਜਾ ਸਕਦਾ। ਇਸਨੂੰ ਵੰਡੋ ਜਾਂ ਇੱਕ ਛੋਟੀ ਕਾਪੀ ਸੰਭਾਲੋ।",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX ਜਾਂ PDF · {limit} ਤੱਕ (DOCX {docxLimit} ਤੱਕ)",
   "knowledgeBase.emptyTitle": "ਹਾਲੇ ਕੋਈ ਗਿਆਨ ਦਸਤਾਵੇਜ਼ ਨਹੀਂ",
   "knowledgeBase.emptyDescription": "ਇਸ ਪ੍ਰੋਜੈਕਟ ਅਤੇ ਇਸ ਦੇ ਏਜੰਟਾਂ ਲਈ ਉਪਲਬਧ ਕਰਨ ਵਾਸਤੇ ਹਵਾਲਾ ਸਮੱਗਰੀ ਅੱਪਲੋਡ ਕਰੋ.",

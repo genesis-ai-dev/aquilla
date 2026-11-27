@@ -6845,6 +6845,7 @@ export const am: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} ተሰቅሏል።",
   "knowledgeBase.uploadTruncated": "{name} ተሰቅሏል፣ ነገር ግን በጣም ረጅም ነው፦ የተነበቡት የመጀመሪያዎቹ 2 ሚሊዮን ቁምፊዎች ብቻ ናቸው።",
   "knowledgeBase.uploadError": "{name}ን መስቀል አልተቻለም። እንደገና ይሞክሩ።",
+  "knowledgeBase.docxTooLarge": "ይህ የWord ፋይል ከ{limit} ይበልጣል፣ ስለዚህ ሊታከል አይችልም። ይከፋፍሉት ወይም አነስ ያለ ቅጂ ያስቀምጡ።",
   "knowledgeBase.acceptedFormats": "Markdown፣ TXT፣ DOCX ወይም PDF · እስከ {limit} (DOCX እስከ {docxLimit})",
   "knowledgeBase.emptyTitle": "እስካሁን የእውቀት ሰነዶች የሉም",
   "knowledgeBase.emptyDescription": "ለዚህ ፕሮጀክት እና ለወኪሎቹ እንዲገኝ የማጣቀሻ ቁሳቁስ ይስቀሉ።",

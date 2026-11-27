@@ -5592,6 +5592,7 @@ export const id: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} terunggah.",
   "knowledgeBase.uploadTruncated": "{name} terunggah, tetapi sangat panjang: hanya 2 juta karakter pertamanya yang dibaca.",
   "knowledgeBase.uploadError": "Tidak dapat mengunggah {name}. Coba lagi.",
+  "knowledgeBase.docxTooLarge": "File Word ini lebih besar dari {limit}, jadi tidak dapat ditambahkan. Pisahkan atau simpan salinan yang lebih kecil.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, atau PDF · hingga {limit} (DOCX hingga {docxLimit})",
   "knowledgeBase.emptyTitle": "Belum ada dokumen pengetahuan",
   "knowledgeBase.emptyDescription": "Unggah bahan rujukan agar tersedia bagi proyek ini dan agennya.",

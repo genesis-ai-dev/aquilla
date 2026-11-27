@@ -5159,7 +5159,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10303,7 +10304,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -15432,7 +15434,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -20589,7 +20592,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -27020,7 +27024,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -33453,7 +33458,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -39955,7 +39961,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -46506,7 +46513,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -52969,7 +52977,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -61380,7 +61389,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -69795,7 +69805,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -78609,7 +78620,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -87081,7 +87093,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -95914,7 +95927,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -104743,7 +104757,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -113608,7 +113623,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -122459,7 +122475,8 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -131302,6 +131319,7 @@
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
     "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
-    "importExport.errors.pdfReaderSlow": "790f99667cadfae7"
+    "importExport.errors.pdfReaderSlow": "790f99667cadfae7",
+    "knowledgeBase.docxTooLarge": "98aca24133e1639e"
   }
 }

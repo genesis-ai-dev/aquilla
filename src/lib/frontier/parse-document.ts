@@ -21,7 +21,6 @@ import { AUTH_BASE } from "./auth"
 import { t } from "../i18n/standalone"
 import type { MessageKey } from "../i18n/messages/en"
 
-export const MAX_PARSE_FILE_BYTES = 2 * 1024 * 1024 // 2 MB (must match worker)
 
 /** The worker's refusal codes this client words. */
 const REFUSAL: Readonly<Record<string, MessageKey>> = {

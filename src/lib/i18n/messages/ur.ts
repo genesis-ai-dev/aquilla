@@ -6832,6 +6832,7 @@ export const ur: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} اپ لوڈ ہو گئی۔",
   "knowledgeBase.uploadTruncated": "{name} اپ لوڈ ہو گئی، لیکن یہ بہت طویل ہے: صرف اس کے پہلے 2 ملین حروف پڑھے گئے۔",
   "knowledgeBase.uploadError": "{name} اپ لوڈ نہیں ہو سکی۔ دوبارہ کوشش کریں۔",
+  "knowledgeBase.docxTooLarge": "یہ Word فائل {limit} سے بڑی ہے، اس لیے اسے شامل نہیں کیا جا سکتا۔ اسے تقسیم کریں یا ایک چھوٹی کاپی محفوظ کریں۔",
   "knowledgeBase.acceptedFormats": "Markdown، TXT، DOCX، یا PDF · {limit} تک (DOCX {docxLimit} تک)",
   "knowledgeBase.emptyTitle": "ابھی کوئی علمی دستاویز نہیں",
   "knowledgeBase.emptyDescription": "حوالہ مواد اپ لوڈ کریں تاکہ یہ منصوبہ اور اس کے ایجنٹ استعمال کر سکیں۔",

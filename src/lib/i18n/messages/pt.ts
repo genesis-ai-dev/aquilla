@@ -6563,6 +6563,7 @@ export const pt: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} foi enviado.",
   "knowledgeBase.uploadTruncated": "{name} foi enviado, mas é muito longo: só os primeiros 2 milhões de caracteres foram lidos.",
   "knowledgeBase.uploadError": "Não foi possível enviar {name}. Tente novamente.",
+  "knowledgeBase.docxTooLarge": "Este arquivo do Word tem mais de {limit}, então não pode ser adicionado. Divida-o ou salve uma cópia menor.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX ou PDF · até {limit} (DOCX até {docxLimit})",
   "knowledgeBase.emptyTitle": "Ainda não há documentos na base de conhecimento",
   "knowledgeBase.emptyDescription": "Envie material de referência para disponibilizá-lo a este projeto e aos agentes dele.",

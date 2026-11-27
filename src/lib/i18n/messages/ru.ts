@@ -5636,6 +5636,7 @@ export const ru: Catalog = {
   "knowledgeBase.uploadSuccess": "Загружено: {name}.",
   "knowledgeBase.uploadTruncated": "Загружено: {name}, но файл очень длинный: прочитаны только первые 2 миллиона символов.",
   "knowledgeBase.uploadError": "Не удалось загрузить {name}. Попробуйте снова.",
+  "knowledgeBase.docxTooLarge": "Этот файл Word больше {limit}, поэтому его нельзя добавить. Разделите его или сохраните копию поменьше.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX или PDF · до {limit} (DOCX до {docxLimit})",
   "knowledgeBase.emptyTitle": "Документов базы знаний пока нет",
   "knowledgeBase.emptyDescription": "Загрузите справочные материалы, чтобы они были доступны этому проекту и его агентам.",

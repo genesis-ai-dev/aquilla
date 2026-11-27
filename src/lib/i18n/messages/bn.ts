@@ -6854,6 +6854,7 @@ export const bn: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} আপলোড হয়েছে।",
   "knowledgeBase.uploadTruncated": "{name} আপলোড হয়েছে, কিন্তু এটি অনেক দীর্ঘ: শুধু প্রথম 2 মিলিয়ন অক্ষর পড়া হয়েছে।",
   "knowledgeBase.uploadError": "{name} আপলোড হয়নি। আবার চেষ্টা করুন।",
+  "knowledgeBase.docxTooLarge": "এই Word ফাইলটি {limit}-এর চেয়ে বড়, তাই এটি যোগ করা যাবে না। এটি ভাগ করুন বা একটি ছোট কপি সংরক্ষণ করুন।",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, বা PDF · {limit} পর্যন্ত (DOCX {docxLimit} পর্যন্ত)",
   "knowledgeBase.emptyTitle": "এখনো কোনো জ্ঞান নথি নেই",
   "knowledgeBase.emptyDescription": "এই প্রকল্প ও তার এজেন্টদের কাছে আনতে রেফারেন্স উপাদান আপলোড করুন।",

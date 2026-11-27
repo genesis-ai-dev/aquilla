@@ -67,10 +67,10 @@ export interface KnowledgeSnippet {
 }
 
 export const MAX_KB_ORIGINAL_BYTES = 25 * 1024 * 1024
-// DOCX raw-bytes cap for the server's extractor. PDFs no longer go through
-// this check: the app reads a PDF's text in the browser (AQU-2551) and sends
-// it with the original, which only MAX_KB_ORIGINAL_BYTES limits.
-export const MAX_KB_EXTRACT_INPUT_BYTES = 2_000_000
+// A DOCX's raw bytes are also capped by MAX_DOCX_BYTES (shared/docx-limit.ts),
+// the server extractor's limit, shared with the rule import. PDFs are not: the
+// app reads a PDF's text in the browser (AQU-2551) and sends it with the
+// original, which only MAX_KB_ORIGINAL_BYTES limits.
 export const MAX_KB_TEXT_CHARS = 2_000_000 // extracted_text truncation
 export const KB_EXTENSIONS = [".md", ".txt", ".docx", ".pdf"] as const
 

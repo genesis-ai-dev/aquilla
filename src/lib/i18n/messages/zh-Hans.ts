@@ -5520,6 +5520,7 @@ export const zh_Hans: Catalog = {
   "knowledgeBase.uploadSuccess": "已上传 {name}。",
   "knowledgeBase.uploadTruncated": "已上传 {name}，但内容过长：只读取了前 200 万个字符。",
   "knowledgeBase.uploadError": "无法上传 {name}。请再试一次。",
+  "knowledgeBase.docxTooLarge": "此 Word 文件超过 {limit}，无法添加。请将其拆分，或另存一个更小的副本。",
   "knowledgeBase.acceptedFormats": "Markdown、TXT、DOCX 或 PDF · 上限 {limit}（DOCX 上限 {docxLimit}）",
   "knowledgeBase.emptyTitle": "还没有任何知识文档",
   "knowledgeBase.emptyDescription": "上传参考资料，让这个项目及其代理程序都能使用。",

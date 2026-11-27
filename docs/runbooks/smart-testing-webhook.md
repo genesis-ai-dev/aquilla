@@ -13,9 +13,10 @@ is cut alone; a person checks it and ready pull requests are added onto the
 branch. That later push is a new HEAD and starts another run. The runner asks
 GitHub whether the branch still points at the job's commit. A moved branch
 supersedes the old job. Only a result for the current HEAD counts. The report
-is a commit comment on that commit, marker `<!-- aquilla-smart-tests -->`. A
-journey `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and
-`HARNESS UNAVAILABLE` do not hold.
+is a commit comment on that commit, marker `<!-- aquilla-smart-tests -->`.
+The result is advisory since 2026-11-27 (`docs/RELEASE-RISK-GATES.md` §7):
+no verdict holds the deploy, a journey `FAIL` included, though the comment's
+FAIL line still says the HEAD does not deploy.
 
 A SQLite queue survives restarts. One suite runs at a time. Before setup,
 before tests, and before each report, the controller checks that the release
@@ -127,7 +128,8 @@ appears, then tails Playwright's line reporter in `tests.log` and re-renders
 after every `[n/N]` header (a journey started, the previous one finished) and
 every indented `Error:` line (the running journey failed). Progress lines are
 advisory: a failed PATCH is logged and ignored, and the strict `finished`
-report still decides the deploy.
+report is still the run's verdict (itself advisory to the deploy since
+2026-11-27).
 
 The suite already supports four isolated stacks on a larger machine through
 `SMART_TEST_SHARDS=4`. This host deliberately runs one stack. Starting four

@@ -103,10 +103,6 @@ export function orgAccessPath(
   return orgPath(orgId, `/access${query}`)
 }
 
-export function membersPath(orgId: number, tab: "roster" | "matrix" = "roster"): string {
-  return tab === "matrix" ? orgPath(orgId, "/members/matrix") : orgPath(orgId, "/members")
-}
-
 export function archivedPath(orgId: number, tab: "projects" | "files" = "projects"): string {
   return tab === "files" ? orgPath(orgId, "/archived/files") : orgPath(orgId, "/archived")
 }

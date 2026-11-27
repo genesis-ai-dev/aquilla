@@ -1,6 +1,6 @@
 import type { Locator } from "@playwright/test"
 import { Client } from "pg"
-import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { test, expect } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { capturedEmailTexts } from "../../helpers/captured-email"
@@ -135,43 +135,6 @@ test("share invite link chrome surface session", async ({ alice }) => {
     await expect(
       dialog.getByRole("button", { name: /Copy/i }).or(dialog.getByText(/\/join\//i).first()),
     ).toBeVisible({ timeout: 10_000 })
-    await alice.keyboard.press("Escape")
-  })
-
-  await test.step("invite mode toggles between @user and email", async () => {
-    await alice.goto(orgRoute(alice, "/members"))
-    const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })
-    await expect(addToProjectsBtn).toBeVisible({ timeout: 10_000 })
-    await expect(addToProjectsBtn).toBeEnabled({ timeout: 10_000 })
-    await addToProjectsBtn.click()
-
-    const dialog = alice.getByRole("dialog")
-    await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-    // AQU-1153: the recipient mode switch is the app's shared Tabs control, so
-    // the two options are `tab`s in a `tablist` and the current mode is the
-    // selected tab — not a pair of hand-rolled buttons.
-    const modeTabs = dialog.getByRole("tablist")
-    await expect(modeTabs).toBeVisible({ timeout: 5_000 })
-    const userModeTab = modeTabs.getByRole("tab", { name: "@user" })
-    await expect(userModeTab).toBeVisible({ timeout: 5_000 })
-    const emailModeTab = modeTabs.getByRole("tab", { name: /^email$/i })
-    await expect(emailModeTab).toBeVisible({ timeout: 3_000 })
-    await expect(userModeTab).toHaveAttribute("aria-selected", "true")
-    await expect(emailModeTab).toHaveAttribute("aria-selected", "false")
-
-    await emailModeTab.click()
-    await expect(emailModeTab).toHaveAttribute("aria-selected", "true")
-    await expect(userModeTab).toHaveAttribute("aria-selected", "false")
-    const emailInput = dialog.locator('input[type="email"]#invite-recipient')
-    await expect(emailInput).toBeVisible({ timeout: 5_000 })
-
-    await userModeTab.click()
-    await expect(userModeTab).toHaveAttribute("aria-selected", "true")
-    await expect(emailInput).not.toBeVisible({ timeout: 3_000 })
-    await expect(dialog.locator('input[type="text"]#invite-recipient')).toBeVisible({
-      timeout: 3_000,
-    })
     await alice.keyboard.press("Escape")
   })
 

@@ -41,6 +41,12 @@ export const CLIENT_ONLY_FORMATS: readonly string[] = [
   'tmx',
   'usx',
   'idml',
+  // xlsx and epub: the Import dialog takes both (src/lib/import.ts parseFile);
+  // they were missing here, so the route called them "unsupported" instead of
+  // naming the in-app alternative. agent-app-parity.ts holds the two lists
+  // together now.
+  'xlsx',
+  'epub',
   'paratext-project',
   'zip',
 ]
@@ -49,3 +55,26 @@ export const CLIENT_ONLY_HINT =
   'this format is not yet server-parseable — import it through the in-app Import dialog ' +
   '(which runs the full parser set in the browser), or parse it yourself and stage raw ' +
   'PlanImport cells via POST .../changesets'
+
+/** Caller-supplied fileType spellings → canonical parse types. */
+export const FILE_TYPE_ALIASES: Readonly<Record<string, ServerParseFileType>> = {
+  sfm: 'usfm',
+  markdown: 'md',
+  plaintext: 'txt',
+  text: 'txt',
+  word: 'docx',
+}
+
+/**
+ * The prose forms of the tables above, for tool descriptions and the discovery
+ * document. They are BUILT from the tables because the hand-written copies
+ * drifted: when docx became server-parseable the `fileType` hint on
+ * preview_import / prepare_import kept its old list, and on a connection whose
+ * get_capabilities carried no format list that hint was the only statement an
+ * agent could read — so it told a user Aquilla cannot import .docx.
+ */
+export const SERVER_PARSEABLE_PROSE = SERVER_PARSEABLE_FILE_TYPES.join(', ')
+export const CLIENT_ONLY_PROSE = CLIENT_ONLY_FORMATS.join(', ')
+export const FILE_TYPE_OVERRIDE_HINT =
+  `Override format detection: ${SERVER_PARSEABLE_FILE_TYPES.join('|')} ` +
+  `(${Object.keys(FILE_TYPE_ALIASES).join(', ')} accepted as aliases).`

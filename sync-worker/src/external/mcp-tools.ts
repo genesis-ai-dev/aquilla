@@ -8,6 +8,11 @@
 // validate arguments before dispatch.
 
 import { PROJECT_SETTINGS_KEYS } from '../../../db/shared/project-settings-keys'
+import {
+  CLIENT_ONLY_PROSE,
+  FILE_TYPE_OVERRIDE_HINT,
+  SERVER_PARSEABLE_PROSE,
+} from './import-parse-formats'
 
 /** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
  *  when to ask the user before a call: ChatGPT's "ask before changes" setting
@@ -1517,10 +1522,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'MCP OAuth on REST. Preserving the original in storage also enables ' +
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
-      'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
-      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
-      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
+      `Server-parseable formats: ${SERVER_PARSEABLE_PROSE} (format is auto-detected; pass ` +
+      'fileType to override — required for po/properties/obs/sbv, which are not sniffable). ' +
+      `NOT server-parseable yet: ${CLIENT_ONLY_PROSE} — they return validation_failed ` +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +
@@ -1535,8 +1539,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         },
         fileType: {
           type: 'string',
-          description:
-            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+          description: FILE_TYPE_OVERRIDE_HINT,
         },
         fileName: { type: 'string', description: 'Name for the file to be created (default: the artifact name).' },
         sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },
@@ -1580,8 +1583,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         },
         fileType: {
           type: 'string',
-          description:
-            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+          description: FILE_TYPE_OVERRIDE_HINT,
         },
         fileName: { type: 'string', description: 'Name for the created file (default: the artifact name).' },
         sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },

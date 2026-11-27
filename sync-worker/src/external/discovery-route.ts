@@ -15,6 +15,11 @@
 
 import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
 import { PLAN_IMPORT_MAX_CELLS, SET_TRANSLATION_MAX_COMMANDS } from './commands'
+import {
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_PROSE,
+  SERVER_PARSEABLE_FILE_TYPES,
+} from './import-parse-formats'
 import { AGENT_SKILLS } from '../../../db/shared/agent-skills'
 
 const EXTERNAL_ROOT = '/api/v1/external'
@@ -188,9 +193,10 @@ function apiMap(): Record<string, unknown> {
         // validation_failed. Above it, prepare refuses; split the work.
         setTranslationMaxCommands: SET_TRANSLATION_MAX_COMMANDS,
       },
-      serverParseableFormats: ['csv', 'docx', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
+      serverParseableFormats: SERVER_PARSEABLE_FILE_TYPES,
+      clientOnlyFormats: CLIENT_ONLY_FORMATS,
       unsupportedFormats:
-        'pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+        `${CLIENT_ONLY_PROSE} need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.`,
     },
     livingMemory: {
       note:

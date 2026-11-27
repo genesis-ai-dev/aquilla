@@ -149,4 +149,13 @@ export const CHATGPT_TOOLS: McpToolDef[] = [
   }),
   ...operationTools,
 ]
-export const CHATGPT_COMMAND_KINDS = new Set(['SetTranslation', 'PlanImport', 'PatchSettings', ...Object.keys(OPERATIONS)])
+// The kinds confirm_changeset lets through on an OAuth connection: every kind
+// a declared tool above stages. SetBrief, RegenerateBriefSummary and
+// PatchOrthographyExceptions were missing, so their tools staged changesets the
+// same connection could never confirm. agent-app-parity.test.ts now holds this
+// list to the tool list.
+export const CHATGPT_COMMAND_KINDS = new Set([
+  'SetTranslation', 'PlanImport', 'PatchSettings',
+  'SetBrief', 'RegenerateBriefSummary', 'PatchOrthographyExceptions',
+  ...Object.keys(OPERATIONS),
+])

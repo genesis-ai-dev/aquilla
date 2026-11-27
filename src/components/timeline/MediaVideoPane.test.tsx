@@ -156,6 +156,30 @@ describe("MediaVideoPane", () => {
     expect(onVideoDuration).toHaveBeenCalledWith("frontier-audio://imported.mp4", 12)
   })
 
+  // The film bundle's browser pass (Nov 27): a film whose metadata is in
+  // before the pane is on screen (a cached or fast film: the element is made,
+  // with its address, while the workspace is still rendering) fires
+  // `loadedmetadata` when React is not yet listening, and the event never comes
+  // again. The film's length was then never told: the strip read the lines'
+  // 0:24 for the film's 1:00 and Play stopped with the lines.
+  it("tells the film's length it already knows when it comes on screen, with no event to say it", () => {
+    const proto = HTMLMediaElement.prototype
+    const ready = Object.getOwnPropertyDescriptor(proto, "readyState")
+    const dur = Object.getOwnPropertyDescriptor(proto, "duration")
+    Object.defineProperty(proto, "readyState", { get: () => 1, configurable: true })
+    Object.defineProperty(proto, "duration", { get: () => 60, configurable: true })
+    try {
+      const onVideoDuration = vi.fn()
+      renderPane({ onVideoDuration })
+      expect(onVideoDuration).toHaveBeenCalledWith("https://cdn/episode.webm", 60)
+    } finally {
+      if (ready) Object.defineProperty(proto, "readyState", ready)
+      else delete (proto as { readyState?: number }).readyState
+      if (dur) Object.defineProperty(proto, "duration", dur)
+      else delete (proto as { duration?: number }).duration
+    }
+  })
+
   // so everything that used to ask it "what is sounding" and "is it playing"
   // got nothing. Both are now answered by the element itself.
   describe("the picture as the transport", () => {

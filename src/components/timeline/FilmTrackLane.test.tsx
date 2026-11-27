@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { FilmTrackLane } from "./FilmTrackLane"
 import { TimelineOrigin } from "./timeline-origin"
 import { captureSeekSec, FilmFramesContext, type FilmFrameSource } from "./useFilmFrames"
+import { getVideoDurationSec, resetVideoDurationsForTests } from "@/lib/timeline/video-duration"
 
 // AQU-2253 (board 56): the film as one strip on its own clock.
 describe("FilmTrackLane", () => {
@@ -59,6 +60,28 @@ describe("FilmTrackLane", () => {
     expect(grabber.muted).toBe(true)
     expect(grabber.getAttribute("src")).toBe("http://127.0.0.1:5540/showcase-film.webm")
     expect(grabber).toHaveAttribute("aria-hidden")
+  })
+
+  // The film bundle's browser pass (Nov 27): metadata in before React listens
+  // (a cached film) fires no `loadedmetadata` the copy hears; its length is
+  // taken all the same.
+  it("its hidden copy tells the film's length it already knows when it comes on screen", () => {
+    resetVideoDurationsForTests()
+    const proto = HTMLMediaElement.prototype
+    const ready = Object.getOwnPropertyDescriptor(proto, "readyState")
+    const dur = Object.getOwnPropertyDescriptor(proto, "duration")
+    Object.defineProperty(proto, "readyState", { get: () => 1, configurable: true })
+    Object.defineProperty(proto, "duration", { get: () => 60, configurable: true })
+    try {
+      draw({ frameFor: undefined })
+      expect(getVideoDurationSec("http://127.0.0.1:5540/showcase-film.webm")).toBe(60)
+    } finally {
+      if (ready) Object.defineProperty(proto, "readyState", ready)
+      else delete (proto as { readyState?: number }).readyState
+      if (dur) Object.defineProperty(proto, "duration", dur)
+      else delete (proto as { duration?: number }).duration
+      resetVideoDurationsForTests()
+    }
   })
 
   it("a YouTube film has no frames to read: the plain strip, with its sprockets", () => {

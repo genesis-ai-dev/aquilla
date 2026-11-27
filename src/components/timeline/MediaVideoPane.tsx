@@ -106,6 +106,8 @@ import { useT } from "@/lib/i18n/I18nProvider"
 /** `HAVE_FUTURE_DATA` — enough decoded to start and keep going for a moment.
  *  The same bar the play queue's cue gate uses for its audio elements. */
 const VIDEO_READY_STATE = 3
+/** `HAVE_METADATA` — the element knows its length and its shape. */
+const HAVE_METADATA = 1
 /** How long to wait for the picture before starting it anyway. Long enough for
  *  an ordinary seek into an unbuffered range over a slow link, short enough
  *  that a stream which will never report ready is not a dead button. */
@@ -239,6 +241,9 @@ export function MediaVideoPane({
 }: MediaVideoPaneProps) {
   const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
+  /** The elements whose metadata has been taken (`takeMetadata`), so the
+   *  catch-up on screen never takes it twice. */
+  const metadataTakenRef = useRef(new WeakSet<HTMLVideoElement>())
   const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
   const queue = useQueueForFile(cellIdSet)
   const [mode, setModeState] = useState<SubtitleMode>(() => readSubtitleMode())
@@ -1415,6 +1420,49 @@ export function MediaVideoPane({
     targetTextDirection,
   }
 
+  /** What the element knowing its metadata changes: its shape, its length
+   *  (`onVideoDuration`) and a stalled place to resume. `loadedmetadata`, or
+   *  the catch-up below when that event came before anyone listened. */
+  const takeMetadata = (video: HTMLVideoElement) => {
+    metadataTakenRef.current.add(video)
+    setMediaEpoch((n) => n + 1)
+    // The element now knows its real shape — letterbox against THAT
+    // rather than the assumed 16:9.
+    const real = intrinsicAspect(video.videoWidth, video.videoHeight)
+    if (real != null) setAspect(real)
+    onVideoDuration?.(storedSrc, video.duration)
+    // A reload or a rebuild left the picture at the start of the film.
+    // Put it back where the stall caught it, and start it again if that
+    // is still what the transport wants — otherwise recovering from a
+    // freeze would cost the user their place.
+    const resumeAt = resumeAtRef.current
+    if (resumeAt != null) {
+      resumeAtRef.current = null
+      try {
+        video.currentTime = resumeAt
+      } catch {
+        /* not seekable yet — the watchdog will come round again */
+      }
+      publishPositionRef.current(resumeAt)
+      if (wantPlayRef.current) requestPlay(video)
+    }
+  }
+  const takeMetadataRef = useRef(takeMetadata)
+  takeMetadataRef.current = takeMetadata
+  // The film bundle's browser pass (Nov 27): a fast or cached film can have
+  // its metadata in before React listens to the element — it is made, with
+  // its address, while the workspace is still rendering, and a media event
+  // on an element not yet on screen reaches no handler. `loadedmetadata`
+  // never comes again, so the film's length was never told: the strip and
+  // Play ended with the lines, at random. Once the element is on screen, what
+  // it already knows is taken as if the event had just come. A slow film
+  // (a weak network) still tells it by the event, whenever it arrives.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || metadataTakenRef.current.has(video)) return
+    if (video.readyState >= HAVE_METADATA) takeMetadataRef.current(video)
+  }, [src, loadAttempt, pipeline, youTube, failed])
+
   if (failed) {
     // The error card renders the same header WITHOUT a mute control, and that
     // absence is deliberately the only gate: a source that will not load has no
@@ -1530,29 +1578,7 @@ export function MediaVideoPane({
             // to a video that will not load is worse than one sized to the cues.
             onVideoDuration?.(storedSrc, null)
           }}
-          onLoadedMetadata={(e) => {
-            setMediaEpoch((n) => n + 1)
-            // The element now knows its real shape — letterbox against THAT
-            // rather than the assumed 16:9.
-            const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
-            if (real != null) setAspect(real)
-            onVideoDuration?.(storedSrc, e.currentTarget.duration)
-            // A reload or a rebuild left the picture at the start of the film.
-            // Put it back where the stall caught it, and start it again if that
-            // is still what the transport wants — otherwise recovering from a
-            // freeze would cost the user their place.
-            const resumeAt = resumeAtRef.current
-            if (resumeAt != null) {
-              resumeAtRef.current = null
-              try {
-                e.currentTarget.currentTime = resumeAt
-              } catch {
-                /* not seekable yet — the watchdog will come round again */
-              }
-              publishPositionRef.current(resumeAt)
-              if (wantPlayRef.current) requestPlay(e.currentTarget)
-            }
-          }}
+          onLoadedMetadata={(e) => takeMetadata(e.currentTarget)}
           onDurationChange={(e) => {
             setMediaEpoch((n) => n + 1)
             onVideoDuration?.(storedSrc, e.currentTarget.duration)

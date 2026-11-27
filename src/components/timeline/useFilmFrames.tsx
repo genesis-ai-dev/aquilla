@@ -213,8 +213,17 @@ export function useFilmFrames({
   // The capture is attached once the hidden film can say how big it is.
   const [ready, setReady] = useState(false)
   useEffect(() => {
-    setReady(false)
-  }, [src, active])
+    // The film bundle's browser pass (Nov 27): a fast or cached film can know
+    // its size before React listens to the element (MediaVideoPane's
+    // `takeMetadata`), and `loadedmetadata` never comes again: taken here.
+    const video = videoRef.current
+    if (active && video && video.readyState >= 1) {
+      setVideoDurationSec(storedSrc, video.duration)
+      setReady(true)
+    } else {
+      setReady(false)
+    }
+  }, [src, active, storedSrc, stream.pipeline])
   useEffect(() => {
     const video = videoRef.current
     if (!ready || !video) return

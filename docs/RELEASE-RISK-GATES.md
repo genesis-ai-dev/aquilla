@@ -302,7 +302,18 @@ today:
   Three legs. *Additive*: every statement the PR's new migration files run
   is on a short list production's current code cannot notice (a new table,
   a new nullable or defaulted column, a new index, a new type), with the
-  forms that rewrite or lock `events` and `cells` taken off it. *Schema*:
+  forms that rewrite or lock `events` and `cells` taken off it. The list
+  is also what keeps a migration from running anything else as it applies
+  (2026-11-27): `CREATE TABLE … AS` is a query and is off it, and an
+  expression Postgres evaluates over existing rows (an `ADD COLUMN`
+  default, check or generated column, an index expression or `WHERE`) may
+  call only the built-ins in `APPLY_TIME_FUNCTIONS`, because `CREATE
+  FUNCTION` is additive and those are the places a migration could call
+  what it had just created. The gate reads a file through `scanSql`
+  (`scripts/neon-migration-file.ts`) and Postgres runs the file's own
+  text, so the scanner ends a literal where Postgres does: an `E'\''`
+  escape string and a `$` inside an identifier used to hide the statement
+  after them from the list. *Schema*:
   the base commit's `schema.sql` plus the new files is, catalog for
   catalog, the PR's `schema.sql`, which is the drift that answers 500 with
   every test green. *Old code, new schema*: the BASE commit's replay

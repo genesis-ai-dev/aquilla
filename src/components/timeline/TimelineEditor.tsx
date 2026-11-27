@@ -1712,16 +1712,6 @@ export function TimelineEditor({
 
   const selectedTrackIds = selectedIdsInOrder(trackSelection, selectableTrackIds)
   const selectedTrackIdSet = new Set(selectedTrackIds)
-  // Review M4: the rows drawn now, by their audibility keys, so a soloed track
-  // that is deleted or hidden is ignored rather than silencing every other row.
-  const drawnAudioKey = tracks
-    .filter((tr) => !hiddenTrackIds.has(tr.id))
-    .map((tr) => TRACK_RENDER[tr.kind]?.audibilityKey ?? (tr.kind === "audio" ? slotForTrack(tr.id) : null))
-    .filter((k): k is string => k != null)
-    .join("\u0000")
-  useEffect(() => {
-    setDrawnRows(drawnAudioKey ? drawnAudioKey.split("\u0000") : [])
-  }, [drawnAudioKey, fileId])
   // AQU-2664: the workspace's Even out window offers the selection when it is
   // opened from the file menu.
   const selectionKey = selectedTrackIds.join("\u0000")
@@ -2280,6 +2270,23 @@ export function TimelineEditor({
   // AQU-2204: following its recordings, a book with no times lays its lines
   // out in order (see `timelineLanes`).
   const { subtitle, dialogue, untimed } = useMemo(() => timelineLanes(cells, timingMode), [cells, timingMode])
+  // Review M4: the rows drawn now, by their audibility keys, so a soloed track
+  // that is deleted or hidden is ignored rather than silencing every other row.
+  // The film's pinned rows are drawn rows too: its own row carries the
+  // "source" switch when the file has no Source audio recording, and its
+  // folder (heading or Source audio row) always does. Left out, the film's S
+  // lit and nothing went quiet (the film bundle's browser pass, Nov 27).
+  const filmCarriesSourceSwitch = Boolean(coreMediaUrl) && (filmFolder != null || dialogue.length === 0)
+  const drawnAudioKey = [
+    ...(filmCarriesSourceSwitch ? ["source"] : []),
+    ...tracks
+      .filter((tr) => !hiddenTrackIds.has(tr.id))
+      .map((tr) => TRACK_RENDER[tr.kind]?.audibilityKey ?? (tr.kind === "audio" ? slotForTrack(tr.id) : null))
+      .filter((k): k is string => k != null),
+  ].join("\u0000")
+  useEffect(() => {
+    setDrawnRows(drawnAudioKey ? drawnAudioKey.split("\u0000") : [])
+  }, [drawnAudioKey, fileId])
   // A hidden track's captions are not laid out. The parent stops fetching
   // them; this also drops a file that was already in hand when it was hidden.
   const shownTextTrackCells = useMemo(() => {

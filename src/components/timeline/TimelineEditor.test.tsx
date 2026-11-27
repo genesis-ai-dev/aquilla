@@ -13,6 +13,7 @@ import { selectQueueForFile, selectQueueStateForFile } from "@/lib/audio/queue-s
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
@@ -1146,6 +1147,30 @@ describe("TimelineEditor", () => {
       rerender(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={deriveTracksForFile(null)} onRetimeSubtitle={() => {}} />)
       expect(lastAudibility?.drawn).not.toContain("music")
       expect(lastAudibility?.drawn).toContain("target")
+    })
+
+    // The film bundle's browser pass (Nov 27): on a subtitle file with a linked
+    // film and no Source audio row, the film's own row carries the "source"
+    // switch. Its S lit but nothing went quiet: "source" was not among the
+    // drawn rows, so the solo was ignored. The film's row is a drawn row.
+    it("counts the film's row among the drawn rows, so soloing it is heard", () => {
+      localStorage.removeItem("aquilla:timelineAudibility:filmsolo")
+      setVideoDurationSec("https://cdn/linked.webm", 60)
+      render(
+        <TimelineEditor
+          fileId="filmsolo" coreMediaUrl="https://cdn/linked.webm" editable
+          cells={[cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 })]}
+          tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+          timingMode="audioFirst" onRetimeSubtitle={() => {}}
+        />,
+      )
+      const filmRow = screen.getByTestId("tl-film-track-label")
+      fireEvent.click(within(filmRow).getByTestId("tl-solo-source"))
+      expect(lastAudibility?.solo).toEqual(["source"])
+      expect(lastAudibility?.drawn).toContain("source")
+      // dev's one solo rule (track-slots): the film is heard, the takes are not.
+      expect(sourceHeard(lastAudibility!)).toBe(true)
+      expect(slotAudible(lastAudibility!, "recording")).toBe(false)
     })
 
     it("saves the fader once, on Option-click, and only when it changed", () => {

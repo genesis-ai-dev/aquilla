@@ -113,12 +113,13 @@ const TEST_FILE = /\.test\.[jt]sx?$|^e2e\/|^sync-worker\/src\/__tests__\//
 // the same sync-worker chain plus auth-worker's own: its PGlite env, the
 // shared access fixture, the setup file, and the vitest/tsconfig set.
 // db/shared/test-lane-fill.ts is the lane trigger both harness databases
-// install.
+// install, and db/shared/test-pg-harness.ts is the template every one of
+// those databases is copied from and the reset between tests.
 //
 // The offline gate is one directory (src/lib/sync/offline-gate/), and the
 // scripted gates (migration, deps, plan diff) are scripts/gate-*.
 const GATE_MACHINERY =
-  /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts$|permission-matrix\.test\.ts$|helpers\/)|^sync-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$|^scripts\/replay-corpus|^(auth-worker|sync-worker)\/permission-matrix\/|^auth-worker\/src\/__tests__\/(permission-matrix\.test\.ts$|setup-migrations\.ts$|helpers\/)|^auth-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$|^db\/shared\/test-lane-fill\.ts$|^src\/lib\/sync\/offline-gate\/|^scripts\/gate-/
+  /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts$|permission-matrix\.test\.ts$|helpers\/)|^sync-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$|^scripts\/replay-corpus|^(auth-worker|sync-worker)\/permission-matrix\/|^auth-worker\/src\/__tests__\/(permission-matrix\.test\.ts$|setup-migrations\.ts$|helpers\/)|^auth-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$|^db\/shared\/test-(lane-fill|pg-harness)\.ts$|^src\/lib\/sync\/offline-gate\/|^scripts\/gate-/
 
 export function classifyFiles(files) {
   const areas = new Set()

@@ -8,6 +8,7 @@
 import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { loadProjectSettings, patchProjectSettingsShared } from "../db/shared/projects"
+import { TEST_PG_SESSION_SQL, testPgTemplate } from "../db/shared/test-pg-harness"
 import { PostgresDb, type AquillaDb, type PgExecutor } from "../db/shim/postgres"
 import type { ProjectTtsSettings, Voice } from "../src/lib/parsers/types"
 import {
@@ -100,41 +101,13 @@ describe("settingsBackupPath", () => {
 
 // --- the SQL, against real Postgres -----------------------------------------
 
-/** Only the tables the prune's own reads and `patchProjectSettingsShared` touch. */
-const SCHEMA = `
-  CREATE TABLE project_settings (
-    project_id TEXT PRIMARY KEY,
-    settings   TEXT NOT NULL DEFAULT '{}',
-    version    INTEGER NOT NULL DEFAULT 0,
-    updated_at TIMESTAMPTZ DEFAULT now(),
-    updated_by BIGINT,
-    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
-    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
-  );
-  CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    org_id BIGINT,
-    source_project_id TEXT,
-    source_link_mode TEXT,
-    source_link_consumes TEXT,
-    source_link_lane_id TEXT
-  );
-  CREATE TABLE lanes (
-    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, role TEXT NOT NULL, language TEXT,
-    name TEXT, lang_code TEXT, legacy_tag TEXT, position INTEGER, archived_at TIMESTAMPTZ,
-    records_audio BOOLEAN NOT NULL DEFAULT false,
-    -- 0187: what the language delivers (media redesign slice 1).
-    delivers TEXT CHECK (delivers IS NULL OR delivers IN ('text', 'audio', 'text_and_audio'))
-  );
-  -- AQU-1771: a settings write resolves the org's validation defaults (0174).
-  CREATE TABLE org_settings (
-    org_id   BIGINT PRIMARY KEY,
-    settings TEXT NOT NULL DEFAULT '{}',
-    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
-    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
-  );
-`
+// The schema is db/postgres/schema.sql itself, loaded from the template every
+// PGlite harness shares (db/shared/test-pg-harness.ts). This file used to carry
+// its own copy of the four tables a settings write touches. A copy goes stale
+// the moment a merged migration gives that write a new column or table to read:
+// in October that happened three times, and the first left `dev` red for a day
+// and failed 17 unit jobs on pull requests that had not touched this script.
+const template = () => testPgTemplate(() => new PGlite())
 
 function pgliteExecutor(pg: PGlite): PgExecutor {
   const wrap = (q: Pick<PGlite, "query" | "exec">): PgExecutor => ({
@@ -169,7 +142,7 @@ let pg: PGlite
 let db: AquillaDb
 
 async function seedProject(id: string, name: string, tts: ProjectTtsSettings | undefined): Promise<void> {
-  await pg.query(`INSERT INTO projects (id, name) VALUES ($1, $2)`, [id, name])
+  await pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, $2, 1)`, [id, name])
   await pg.query(`INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES ($1, $2, 3, 1)`, [
     id,
     JSON.stringify(tts === undefined ? { validationCount: 2 } : { validationCount: 2, ttsSettings: tts }),
@@ -177,8 +150,11 @@ async function seedProject(id: string, name: string, tts: ProjectTtsSettings | u
 }
 
 beforeEach(async () => {
-  pg = new PGlite({ parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) } })
-  await pg.exec(SCHEMA)
+  pg = new PGlite({
+    loadDataDir: await template(),
+    parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) },
+  })
+  await pg.exec(TEST_PG_SESSION_SQL)
   db = new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb
 
   const voicePhantoms = phantoms(200)

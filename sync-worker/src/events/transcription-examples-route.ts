@@ -25,6 +25,11 @@ import { verifyTokenForProject, WRITE_ROLE_LEVEL } from "../auth"
 import { audioObjectKey, isPathSafeId, safeAudioContentType } from "../audio"
 import { secureCompare } from "../lib/secure-compare"
 import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
+import {
+  loadProjectVirtualSourceFiles,
+  loadVirtualSourceFile,
+  type ManifestR2Bucket,
+} from "../../../db/shared/virtual-source-store"
 
 export interface TranscriptionExamplesEnv {
   AQUILLA_PG?: AquillaDb
@@ -201,7 +206,7 @@ export async function handleTranscriptionExamplesRequest(
     projectId, laneId: laneRow.id, laneTag: lane,
     excludeCellId: cellId || excludeCellId,
     sourceText: sourceText ?? (cellId
-      ? await sourceTextOf(env.AQUILLA_PG, projectId, cellId, url.searchParams.get("fileId") ?? undefined)
+      ? await sourceTextOf(env.AQUILLA_PG, projectId, cellId, url.searchParams.get("fileId") ?? undefined, env.SNAPSHOTS)
       : undefined),
     limit, publicBase: env.DIARIZATION_PUBLIC_BASE?.trim() || `${url.origin}${mountPrefix}`,
   })
@@ -210,13 +215,27 @@ export async function handleTranscriptionExamplesRequest(
 
 /** The source text of the cell being transcribed (ranking input). */
 export async function sourceTextOf(
-  db: AquillaDb, projectId: string, cellId: string, fileId?: string,
+  db: AquillaDb, projectId: string, cellId: string, fileId?: string, r2?: ManifestR2Bucket,
 ): Promise<string | undefined> {
   const row = await db.prepare(
     `SELECT value FROM cells WHERE project_id = ? AND cell_id = ? AND side = 'source'
         ${fileId ? "AND file_id = ?" : ""} LIMIT 1`,
   ).bind(projectId, cellId, ...(fileId ? [fileId] : [])).first<{ value: string }>()
-  return row?.value || undefined
+  if (row?.value) return row.value
+  if (r2) {
+    if (fileId) {
+      const vf = await loadVirtualSourceFile(db, r2, projectId, fileId)
+      const vrow = vf?.byCellId.get(cellId)
+      if (vrow?.value) return vrow.value
+    } else {
+      const vfs = await loadProjectVirtualSourceFiles(db, r2, projectId)
+      for (const vf of vfs) {
+        const vrow = vf.byCellId.get(cellId)
+        if (vrow?.value) return vrow.value
+      }
+    }
+  }
+  return undefined
 }
 
 export interface TranscriptionExample {
@@ -232,7 +251,7 @@ export interface TranscriptionExample {
  *  lane resolution). `onlyCellIds` restricts to caller-named cells; the 2–30 s
  *  rule still applies to them. */
 export async function selectTranscriptionExamples(
-  env: Pick<TranscriptionExamplesEnv, "AQUILLA_PG" | "SYNC_SECRET_KEY">,
+  env: Pick<TranscriptionExamplesEnv, "AQUILLA_PG" | "SYNC_SECRET_KEY" | "SNAPSHOTS">,
   args: {
     projectId: string
     laneId: string
@@ -283,16 +302,33 @@ export async function selectTranscriptionExamples(
     ...(only ?? []), EXAMPLE_MIN_MS, EXAMPLE_MAX_MS, EXAMPLE_CANDIDATE_CAP,
   ).all<CandidateRow>()
 
-  const candidates: ExampleCandidate[] = (res.results ?? []).map(row => ({
-    cellId: row.cell_id,
-    fileId: row.file_id,
-    audioId: row.audio_id,
-    text: row.text,
-    sourceText: row.source_text ?? "",
-    durationMs: Number(row.effective_ms),
-    validated: Boolean(row.validated),
-    createdTs: Number(row.created_ts),
-  }))
+  const rawRows = res.results ?? []
+  const missingSourceFileIds = [...new Set(rawRows.filter(r => r.source_text == null).map(r => r.file_id))]
+  const virtualByFile = new Map<string, Awaited<ReturnType<typeof loadProjectVirtualSourceFiles>>[number]>()
+  if (env.SNAPSHOTS && missingSourceFileIds.length > 0) {
+    const vfs = await loadProjectVirtualSourceFiles(env.AQUILLA_PG, env.SNAPSHOTS, projectId, {
+      fileIds: missingSourceFileIds,
+    })
+    for (const vf of vfs) virtualByFile.set(vf.head.fileId, vf)
+  }
+
+  const candidates: ExampleCandidate[] = rawRows
+    .filter(row => {
+      const vf = virtualByFile.get(row.file_id)
+      if (!vf) return true
+      const vrow = vf.byCellId.get(row.cell_id)
+      return !vrow || vrow.hidden_at == null
+    })
+    .map(row => ({
+      cellId: row.cell_id,
+      fileId: row.file_id,
+      audioId: row.audio_id,
+      text: row.text,
+      sourceText: row.source_text ?? virtualByFile.get(row.file_id)?.byCellId.get(row.cell_id)?.value ?? "",
+      durationMs: Number(row.effective_ms),
+      validated: Boolean(row.validated),
+      createdTs: Number(row.created_ts),
+    }))
   // Belt and braces: the SQL bounds already apply, but the 2–30 s rule is the
   // contract the model depends on, so it holds even if the query changes.
     .filter(c => c.durationMs >= EXAMPLE_MIN_MS && c.durationMs <= EXAMPLE_MAX_MS)

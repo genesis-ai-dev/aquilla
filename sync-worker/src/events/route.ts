@@ -45,8 +45,10 @@ import {
 } from './event-projection'
 import {
   getVirtualFileHead,
+  loadProjectVirtualSourceFiles,
   loadVirtualSourceCellHeads,
   loadVirtualSourceFile,
+  type LoadedVirtualFile,
   type ManifestR2Bucket,
 } from '../../../db/shared/virtual-source-store'
 import { buildVirtualFileProgressStmts } from './virtual-progress'
@@ -1869,6 +1871,20 @@ export async function handleEventsWriteRequest(
       rawEvent.cellId != null &&
       virtualCellHeads.has(cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId))
 
+    let assignmentVirtualFiles: Map<string, LoadedVirtualFile> | undefined
+    if (rawEvent.kind === 'assignment.create' && env.SNAPSHOTS) {
+      const scope = (authResult.event.event.payload as { scope?: Array<{ fileId?: string }> })?.scope
+      const scopeFileIds = [...new Set((scope ?? []).map((e) => e.fileId).filter((id): id is string => Boolean(id)))]
+      if (scopeFileIds.length > 0) {
+        const loaded = await loadProjectVirtualSourceFiles(db, env.SNAPSHOTS, rawEvent.projectId, {
+          fileIds: scopeFileIds,
+        })
+        if (loaded.length > 0) {
+          assignmentVirtualFiles = new Map(loaded.map((vf) => [vf.head.fileId, vf]))
+        }
+      }
+    }
+
     let outcome: DispatchOutcome
     try {
       outcome = dispatchEvent(db, authResult.event, serverTs, {
@@ -1877,6 +1893,7 @@ export async function handleEventsWriteRequest(
         deferFileCounters: true,
         validationCount: validationCountForDispatch,
         virtualSourceTombstone: isVirtualSourceDelete,
+        virtualFiles: assignmentVirtualFiles,
       })
     } catch (err) {
       console.error(`[events] handler for ${rawEvent.kind} failed:`, err)

@@ -26,12 +26,15 @@ import { visibleLanesForRead } from "./lane-read-wall"
 import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from "../lib/confidence/propagate-health"
+import { getProjectVirtualFileHeads, loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 
 export interface HealthRollupEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   /** AQU-730. Unset locally and in e2e. */
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/health-rollup$/
@@ -66,11 +69,19 @@ interface CellRow {
 }
 
 async function loadProjectFiles(db: AquillaDb, projectId: string): Promise<string[]> {
-  const res = await db
-    .prepare("SELECT DISTINCT file_id FROM cells WHERE project_id = ? AND side = 'source' LIMIT ?")
-    .bind(projectId, MAX_FILES)
-    .all<FileRow>()
-  return (res.results ?? []).map((r) => r.file_id)
+  const [res, vHeads] = await Promise.all([
+    db
+      .prepare("SELECT DISTINCT file_id FROM cells WHERE project_id = ? AND side = 'source' LIMIT ?")
+      .bind(projectId, MAX_FILES)
+      .all<FileRow>(),
+    getProjectVirtualFileHeads(db, projectId),
+  ])
+  const ids = new Set((res.results ?? []).map((r) => r.file_id))
+  for (const h of vHeads) {
+    if (ids.size >= MAX_FILES) break
+    ids.add(h.fileId)
+  }
+  return [...ids]
 }
 
 async function loadFileCellsForRollup(
@@ -78,7 +89,32 @@ async function loadFileCellsForRollup(
   projectId: string,
   fileId: string,
   targetLang: string,
-): Promise<CellRow[]> {
+  r2?: ManifestR2Bucket,
+): Promise<{ cells: CellRow[]; isVirtual: boolean }> {
+  const vf = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+  if (vf) {
+    const tRes = await db
+      .prepare(
+        `SELECT cell_id, COALESCE(value, '') AS value, COALESCE(validated, 0) AS validated
+           FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'target'
+            AND lane_id = (SELECT id FROM public.lanes WHERE project_id = cells.project_id AND role = 'target' AND legacy_tag = ?)`,
+      )
+      .bind(projectId, fileId, targetLang)
+      .all<{ cell_id: string; value: string; validated: number }>()
+    const tById = new Map((tRes.results ?? []).map((t) => [t.cell_id, t]))
+    const cells: CellRow[] = []
+    for (const s of vf.rows.slice(0, MAX_FILE_CELLS)) {
+      const t = tById.get(s.cell_id)
+      cells.push({
+        cell_id: s.cell_id,
+        source_text: s.value,
+        target_text: t?.value ?? "",
+        validated: Number(t?.validated ?? 0),
+      })
+    }
+    return { cells, isVirtual: true }
+  }
   // One target lane. Joining every target row duplicated a verse that had
   // two translations and let a hidden lane change the score.
   const sql =
@@ -94,7 +130,7 @@ async function loadFileCellsForRollup(
     .prepare(sql)
     .bind(targetLang, projectId, fileId, MAX_FILE_CELLS)
     .all<CellRow>()
-  return res.results ?? []
+  return { cells: res.results ?? [], isVirtual: false }
 }
 
 /**
@@ -105,9 +141,15 @@ async function computeFileHealth(
   db: AquillaDb,
   verifiedProjectId: string & { __brand: "verified-project-id" },
   fileId: string,
-  opts: { perHopDecay: number; maxHops: number; topK: number; targetLang: string },
+  opts: { perHopDecay: number; maxHops: number; topK: number; targetLang: string; r2?: ManifestR2Bucket },
 ): Promise<{ health: number; cellCount: number }> {
-  const rawCells = await loadFileCellsForRollup(db, verifiedProjectId, fileId, opts.targetLang)
+  const { cells: rawCells, isVirtual } = await loadFileCellsForRollup(
+    db,
+    verifiedProjectId,
+    fileId,
+    opts.targetLang,
+    opts.r2,
+  )
 
   // Only translated cells participate (untranslated = not started, not unhealthy).
   const cells = rawCells.filter((c) => c.target_text.trim() !== "")
@@ -122,24 +164,41 @@ async function computeFileHealth(
   // ever keeps same-file neighbors, so the old project-wide LATERAL sweep was
   // pure wasted compute (minutes per call on large projects).
   const unvalidated = nodes.filter((n) => !n.validated)
-  const neighborMap =
-    unvalidated.length === 0
-      ? new Map<string, never[]>()
-      : await queryFileSourceNeighbors(db, verifiedProjectId, fileId, {
-          topK: opts.topK,
-          targetLang: opts.targetLang,
-        })
   const edges: PropEdges = new Map()
-  for (const node of unvalidated) {
-    const cell = byId.get(node.id)!
-    const cellEdges: PropEdge[] = []
-    for (const n of neighborMap.get(node.id) ?? []) {
-      if (!nodeIds.has(n.cellId)) continue
-      const r = lexicalConfidence(cell.source_text, [n.value])
-      const a = lexicalConfidence(cell.target_text, [n.targetValue])
-      cellEdges.push({ to: n.cellId, r, a })
+  if (isVirtual && unvalidated.length > 0) {
+    // Pure-JS top-k neighbor match over translated virtual cells (same-file).
+    for (const node of unvalidated) {
+      const cell = byId.get(node.id)!
+      const scored: Array<{ id: string; r: number; a: number }> = []
+      for (const other of cells) {
+        if (other.cell_id === node.id) continue
+        const r = lexicalConfidence(cell.source_text, [other.source_text])
+        if (r <= 0) continue
+        scored.push({ id: other.cell_id, r, a: lexicalConfidence(cell.target_text, [other.target_text]) })
+      }
+      scored.sort((x, y) => y.r - x.r)
+      const top = scored.slice(0, opts.topK)
+      if (top.length > 0) edges.set(node.id, top.map((t) => ({ to: t.id, r: t.r, a: t.a })))
     }
-    if (cellEdges.length > 0) edges.set(node.id, cellEdges)
+  } else {
+    const neighborMap =
+      unvalidated.length === 0
+        ? new Map<string, never[]>()
+        : await queryFileSourceNeighbors(db, verifiedProjectId, fileId, {
+            topK: opts.topK,
+            targetLang: opts.targetLang,
+          })
+    for (const node of unvalidated) {
+      const cell = byId.get(node.id)!
+      const cellEdges: PropEdge[] = []
+      for (const n of neighborMap.get(node.id) ?? []) {
+        if (!nodeIds.has(n.cellId)) continue
+        const r = lexicalConfidence(cell.source_text, [n.value])
+        const a = lexicalConfidence(cell.target_text, [n.targetValue])
+        cellEdges.push({ to: n.cellId, r, a })
+      }
+      if (cellEdges.length > 0) edges.set(node.id, cellEdges)
+    }
   }
 
   const health = propagateHealth(nodes, edges, { perHopDecay: opts.perHopDecay, maxHops: opts.maxHops })
@@ -247,6 +306,7 @@ export async function handleHealthRollupRequest(
       const result = await computeFileHealth(env.AQUILLA_PG!, verifiedProjectId, fileId, {
         ...propagation,
         targetLang: tag,
+        r2: env.SNAPSHOTS,
       })
       weighted += result.health * result.cellCount
       cells += result.cellCount

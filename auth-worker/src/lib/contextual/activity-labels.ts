@@ -1,5 +1,6 @@
 import type { AquillaDb } from "../../../../db/shim/postgres"
 import { cellMetadataWireSql } from "../../../../db/shared/cell-metadata-sql"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 import { orderPairs, type CellPair } from "../agent/tools/select-cells"
 import {
   cellDisplayTag,
@@ -111,6 +112,7 @@ export async function loadCellDisplayIndex(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  r2?: ManifestR2Bucket,
 ): Promise<CellDisplayIndex> {
   const { results } = await db
     .prepare(
@@ -120,6 +122,23 @@ export async function loadCellDisplayIndex(
     )
     .bind(projectId, fileId)
     .all<CellLabelRow>()
+  if (results.length === 0 && r2) {
+    const vFile = await loadVirtualSourceFile(db, r2, projectId, fileId)
+    if (vFile) {
+      const vRows: CellLabelRow[] = vFile.rows
+        .filter((r) => r.tombstoned_at == null)
+        .map((r) => ({
+          cell_id: r.cell_id,
+          canonical_ref: r.canonical_ref,
+          sequence_index: r.sequence_index,
+          anchor_cell_id: r.anchor_cell_id,
+          metadata: r.metadata,
+          start_ms: r.start_ms,
+          end_ms: r.end_ms,
+        }))
+      return indexFromRows(vRows)
+    }
+  }
   return indexFromRows(results)
 }
 

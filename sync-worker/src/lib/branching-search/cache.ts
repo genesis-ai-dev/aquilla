@@ -36,12 +36,28 @@ export async function resolveCorpusEventMax(
 ): Promise<string | null> {
   if (!env.AQUILLA_PG) return null
   try {
-    const row = await env.AQUILLA_PG.prepare(
-      "SELECT MAX(event_id) AS max_id FROM cells WHERE project_id = ? AND side = 'source'",
-    )
-      .bind(sourceProjectId)
-      .first<{ max_id: string | null }>()
-    return row?.max_id ?? null
+    const [row, revRow] = await Promise.all([
+      env.AQUILLA_PG.prepare(
+        "SELECT MAX(event_id) AS max_id FROM cells WHERE project_id = ? AND side = 'source'",
+      )
+        .bind(sourceProjectId)
+        .first<{ max_id: string | null }>(),
+      env.AQUILLA_PG.prepare(
+        `SELECT MAX(r.event_id) AS max_id
+           FROM files f
+           JOIN file_revisions r
+             ON r.project_id = f.project_id AND r.file_id = f.id AND r.revision_n = f.head_revision_n
+          WHERE f.project_id = ? AND f.source_virtual = TRUE AND f.deleted_at IS NULL`,
+      )
+        .bind(sourceProjectId)
+        .first<{ max_id: string | null }>()
+        .catch(() => null),
+    ])
+    const a = row?.max_id ?? null
+    const b = revRow?.max_id ?? null
+    if (!a) return b
+    if (!b) return a
+    return a > b ? a : b
   } catch {
     return null
   }

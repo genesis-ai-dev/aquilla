@@ -30,6 +30,7 @@
 
 import { makeVerifiedProjectId, querySimilarSourceCells } from "../events/scoped-search"
 import { lexicalSimilarity } from "../lib/confidence/lexical-confidence"
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import type { SyncTokenClaims } from "../auth"
 import { externalError } from "./errors"
 import { lanesVisibleToCaller, loadLaneResolutionContext } from "./external-lane"
@@ -66,6 +67,7 @@ async function resolveQueryText(
   db: AquillaDb,
   projectId: string,
   url: URL,
+  r2?: ManifestR2Bucket,
 ): Promise<
   { ok: true; text: string; excludeCellId?: string } | { ok: false; response: Response }
 > {
@@ -89,14 +91,20 @@ async function resolveQueryText(
       )
       .bind(projectId, cellId)
       .first<{ value: string }>()
-    if (!row) {
-      return {
-        ok: false,
-        response: externalError("not_found", `no source cell ${cellId} in this project`, 404),
+    if (row) {
+      return { ok: true, text: row.value, excludeCellId: cellId }
+    }
+    if (r2) {
+      const vfs = await loadProjectVirtualSourceFiles(db, r2, projectId)
+      for (const vf of vfs) {
+        const vrow = vf.byCellId.get(cellId)
+        if (vrow) return { ok: true, text: vrow.value, excludeCellId: cellId }
       }
     }
-    // Exclude the query cell itself — a cell is trivially its own best match.
-    return { ok: true, text: row.value, excludeCellId: cellId }
+    return {
+      ok: false,
+      response: externalError("not_found", `no source cell ${cellId} in this project`, 404),
+    }
   }
 
   if (text === null || text.trim() === "") {
@@ -121,7 +129,7 @@ async function handleExternalSimilar(
   if (limited) return limited
 
   const url = new URL(request.url)
-  const resolved = await resolveQueryText(db, projectId, url)
+  const resolved = await resolveQueryText(db, projectId, url, env.SNAPSHOTS)
   if (!resolved.ok) return resolved.response
 
   const { limit, offset } = parsePageParams(url, {

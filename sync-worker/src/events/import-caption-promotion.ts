@@ -35,6 +35,7 @@ import {
 } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { HIDDEN_FILE_ROLES } from '../../../db/shared/counted-files'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 import type { EventPayloads } from './types'
 
 interface PromotionArgs {
@@ -44,6 +45,8 @@ interface PromotionArgs {
   role: number
   clientTs: number
   promotion: CaptionRowsPromotion
+  /** AQU-2459 Phase B: R2 bucket for virtual staged caption files. */
+  r2?: ManifestR2Bucket
 }
 
 type Result = { ok: true; cellCount: number } | { ok: false; status: number; reason: string }
@@ -145,7 +148,15 @@ export async function promoteCaptionsToRows(
   if (!db.transaction) return refuse(503, 'atomic caption promotion is unavailable')
   // Sized outside the transaction (the seq range is allocated on its own
   // connection, as every import write does); re-checked under the locks below.
-  const expected = await liveSourceCount(db, args.projectId, p.contentFileId)
+  const virtualContent = args.r2
+    ? await loadVirtualSourceFile(db, args.r2, args.projectId, p.contentFileId)
+    : null
+  const virtualParent = args.r2
+    ? await loadVirtualSourceFile(db, args.r2, args.projectId, args.fileId)
+    : null
+  const expected = virtualContent
+    ? virtualContent.rows.length
+    : await liveSourceCount(db, args.projectId, p.contentFileId)
   const seqBase = await allocateSeqRange(
     db, args.projectId, expected + (p.trackId ? 3 : 1) + MAX_DERIVED_MOVES,
   )
@@ -188,7 +199,7 @@ export async function promoteCaptionsToRows(
     if (typeof parentMeta.coreMediaUrl !== 'string' || !parentMeta.coreMediaUrl.trim()) {
       return refuse(409, 'only a file linked to a video can take its captions as rows')
     }
-    if (await liveSourceCount(tx, args.projectId, args.fileId) > 0) {
+    if ((virtualParent ? virtualParent.rows.length : await liveSourceCount(tx, args.projectId, args.fileId)) > 0) {
       return refuse(409, 'this file already has rows')
     }
     const child = await tx.prepare(
@@ -215,13 +226,34 @@ export async function promoteCaptionsToRows(
     } else if (child.deleted_at === null || boundTrack !== undefined) {
       return refuse(409, 'caption content is not a staged file for this timeline')
     }
-    const cues = await tx.prepare(
-      `SELECT cell_id, value, value_html, type, canonical_ref, start_ms, end_ms,
-              sequence_index, medium, metadata
-         FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND tombstoned_at IS NULL
-        ORDER BY start_ms ASC NULLS LAST, sequence_index ASC NULLS LAST, cell_id ASC`,
-    ).bind(args.projectId, p.contentFileId).all<CueRow>()
+    const cues = virtualContent
+      ? {
+          results: [...virtualContent.rows]
+            .sort((a, b) =>
+              (a.start_ms ?? Number.POSITIVE_INFINITY) - (b.start_ms ?? Number.POSITIVE_INFINITY)
+              || (a.sequence_index ?? Number.POSITIVE_INFINITY) - (b.sequence_index ?? Number.POSITIVE_INFINITY)
+              || a.cell_id.localeCompare(b.cell_id),
+            )
+            .map((r): CueRow => ({
+              cell_id: r.cell_id,
+              value: r.value,
+              value_html: r.value_html,
+              type: r.type,
+              canonical_ref: r.canonical_ref,
+              start_ms: r.start_ms,
+              end_ms: r.end_ms,
+              sequence_index: r.sequence_index,
+              medium: r.medium,
+              metadata: r.metadata,
+            })),
+        }
+      : await tx.prepare(
+          `SELECT cell_id, value, value_html, type, canonical_ref, start_ms, end_ms,
+                  sequence_index, medium, metadata
+             FROM cells
+            WHERE project_id = ? AND file_id = ? AND side = 'source' AND tombstoned_at IS NULL
+            ORDER BY start_ms ASC NULLS LAST, sequence_index ASC NULLS LAST, cell_id ASC`,
+        ).bind(args.projectId, p.contentFileId).all<CueRow>()
     if (cues.results.length === 0) return refuse(409, 'caption content is empty')
     if (cues.results.length !== expected) return refuse(409, 'the captions changed, try again')
 

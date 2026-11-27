@@ -73,14 +73,14 @@ function matchVirtualText(
     if (!lower.includes(term.toLowerCase())) return { matched: false, score: 0, snippet: '' }
   }
   const combinedRe = new RegExp(terms.map(escapeRegExp).join('|'), 'gi')
-  const matches: Array<{ index: number; text: string }> = []
+  const matches: Array<{ index: number; text: string; groups: string[] }> = []
   let m: RegExpExecArray | null
   while ((m = combinedRe.exec(text)) !== null) {
     if (m[0].length === 0) {
       combinedRe.lastIndex++
       continue
     }
-    matches.push({ index: m.index, text: m[0] })
+    matches.push({ index: m.index, text: m[0], groups: [] })
     if (matches.length >= 64) break
   }
   return {

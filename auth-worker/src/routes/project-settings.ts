@@ -71,6 +71,7 @@ import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { leadMaySaveTtsSettings, incomingRewritesHiddenVoices } from "../../../src/lib/lanes/voice-wall"
 import { ROLE, type AuthUser } from "../types"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
 import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
@@ -1242,6 +1243,7 @@ async function splitsReadyToCopy(
   projectId: string,
   fileId: string,
   splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+  r2?: ManifestR2Bucket,
 ): Promise<SplitCastSource[] | null> {
   const parentOf = new Map<string, string>()
   for (const split of splits) {
@@ -1264,6 +1266,16 @@ async function splitsReadyToCopy(
       .bind(projectId, fileId, ...ids)
       .all<{ cell_id: string; metadata: unknown }>()
     for (const row of rows.results ?? []) found.set(row.cell_id, row.metadata)
+    if (r2 && found.size < wanted.size) {
+      const vFile = await loadVirtualSourceFile(db, r2, projectId, fileId)
+      if (vFile) {
+        for (const id of ids) {
+          if (found.has(id)) continue
+          const vRow = vFile.byCellId.get(id)
+          if (vRow && vRow.tombstoned_at == null) found.set(id, vRow.metadata)
+        }
+      }
+    }
   }
   for (const [pieceId, parentId] of parentOf) {
     if (!splitPieceBelongsTo(found.get(pieceId), parentId)) return null
@@ -1295,7 +1307,7 @@ projectSettings.post(
       return c.json({ error: "role >= project lead required" }, 403)
     }
     const { fileId, splits } = c.req.valid("json")
-    const ready = await splitsReadyToCopy(c.env.AQUILLA_PG, projectId, fileId, splits)
+    const ready = await splitsReadyToCopy(c.env.AQUILLA_PG, projectId, fileId, splits, c.env.SNAPSHOTS)
     if (!ready) return c.json({ error: "not a split piece" }, 422)
     for (let attempt = 0; attempt < 2; attempt++) {
       const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)

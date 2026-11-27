@@ -94,15 +94,17 @@ export async function buildPlainTextExport(
   const virtualFile = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
   const sources = virtualFile
     ? {
-        results: virtualFile.rows.map((r) => ({
+        results: virtualFile.rows.map((r): CellRow => ({
           cell_id: r.cell_id,
           anchor_cell_id: r.anchor_cell_id,
           event_id: r.event_id,
           value: r.value,
           validated: 0,
+          canonical_ref: r.canonical_ref,
+          medium: r.medium,
+          transcription: r.transcription,
           hidden_at: r.hidden_at,
-          tombstoned_at: r.tombstoned_at,
-        })) as CellRow[],
+        })),
       }
     : await db
         .prepare(

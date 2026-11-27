@@ -8,6 +8,7 @@
 
 import { AliasMap } from "../compress"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../../../db/shared/virtual-source-store"
 import { clip } from "./read"
 import type { ExamplePair, ToolOutcome } from "./types"
 
@@ -24,6 +25,8 @@ export interface ExamplesContext {
    *  project's former default lane. */
   lane: string
   aliases: AliasMap
+  /** AQU-2459 Phase B: R2 bucket for virtual source files. */
+  r2?: ManifestR2Bucket
 }
 
 const DEFAULT_N = 6
@@ -60,6 +63,9 @@ export async function executeExamples(
 ): Promise<ToolOutcome> {
   const n = Math.min(Math.max(Number(args.n) || DEFAULT_N, 1), MAX_N)
 
+  // Preload virtual files once if needed (used both for cellIds query text and pair matching).
+  const vFiles = ctx.r2 ? await loadProjectVirtualSourceFiles(db, ctx.r2, ctx.projectId) : []
+
   // Query text: free text, or the source values of the given cells/aliases.
   let queryText = typeof args.text === "string" ? args.text : ""
   if (!queryText && Array.isArray(args.cellIds)) {
@@ -78,7 +84,17 @@ export async function executeExamples(
         )
         .bind(ctx.projectId, ...bound)
         .all<{ value: string }>()
-      queryText = results.map((r) => r.value).join(" ")
+      const pieces = results.map((r) => r.value)
+      if (pieces.length < bound.length && vFiles.length > 0) {
+        const wanted = new Set(bound)
+        for (const vf of vFiles) {
+          for (const id of wanted) {
+            const vr = vf.byCellId.get(id)
+            if (vr) pieces.push(vr.value)
+          }
+        }
+      }
+      queryText = pieces.join(" ")
     }
   }
 
@@ -117,7 +133,74 @@ export async function executeExamples(
         .bind(ctx.projectId, laneId, n)
         .all<PairHit>()
 
-  if (results.length === 0) {
+  const merged: PairHit[] = [...results]
+  if (vFiles.length > 0 && merged.length < n) {
+    const vFileIds = vFiles.map((vf) => vf.head.fileId)
+    const vByFile = new Map(vFiles.map((vf) => [vf.head.fileId, vf]))
+    const ph = vFileIds.map(() => "?").join(", ")
+    const vTargets = await db
+      .prepare(
+        `SELECT file_id, cell_id, canonical_ref, value, validated, last_edit_at
+           FROM cells
+          WHERE project_id = ? AND side = 'target' AND lane_id = ? AND value <> '' AND validated = 1
+            AND file_id IN (${ph})
+          ORDER BY last_edit_at DESC
+          LIMIT 500`,
+      )
+      .bind(ctx.projectId, laneId, ...vFileIds)
+      .all<{
+        file_id: string
+        cell_id: string
+        canonical_ref: string | null
+        value: string
+        validated: number | null
+        last_edit_at: number | string
+      }>()
+    const queryWords = queryText
+      ? new Set(
+          queryText
+            .toLowerCase()
+            .split(/[^\p{L}\p{N}']+/u)
+            .map((w) => w.replace(/'/g, ""))
+            .filter((w) => w.length > 1),
+        )
+      : null
+    const seenIds = new Set(merged.map((m) => m.cell_id))
+    const scored: Array<{ hit: PairHit; score: number; ts: number }> = []
+    for (const t of vTargets.results ?? []) {
+      if (seenIds.has(t.cell_id)) continue
+      const vsrc = vByFile.get(t.file_id)?.byCellId.get(t.cell_id)
+      if (!vsrc || vsrc.hidden_at != null || vsrc.tombstoned_at != null) continue
+      let score = 0
+      if (queryWords && queryWords.size > 0) {
+        const srcWords = vsrc.value
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}']+/u)
+          .map((w) => w.replace(/'/g, ""))
+        for (const w of srcWords) if (queryWords.has(w)) score += 1
+        if (score === 0) continue
+      }
+      seenIds.add(t.cell_id)
+      scored.push({
+        score,
+        ts: Number(t.last_edit_at ?? 0),
+        hit: {
+          cell_id: t.cell_id,
+          canonical_ref: t.canonical_ref ?? vsrc.canonical_ref,
+          source_value: vsrc.value,
+          target_value: t.value,
+          validated: t.validated,
+        },
+      })
+    }
+    scored.sort((a, b) => b.score - a.score || b.ts - a.ts)
+    for (const s of scored) {
+      if (merged.length >= n) break
+      merged.push(s.hit)
+    }
+  }
+
+  if (merged.length === 0) {
     return {
       ok: true,
       text: "No approved translation pairs match — the project may be new. Draft from the brief and language pair alone.",
@@ -125,7 +208,7 @@ export async function executeExamples(
     }
   }
 
-  const pairs: ExamplePair[] = results.map((r) => ({
+  const pairs: ExamplePair[] = merged.map((r) => ({
     cellId: r.cell_id,
     ref: r.canonical_ref ?? undefined,
     source: r.source_value,

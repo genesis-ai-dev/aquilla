@@ -33,6 +33,7 @@ import {
   effectiveSourceTextFloor,
   sourceTextAuthorityLevel,
 } from "../../../../db/shared/source-text-floor"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 
 function isSourceTextEditKind(kind: string): boolean {
   return kind === "source.cell.commit" || kind === "source.cell.visibility.set"
@@ -114,6 +115,8 @@ export interface EmitStageContext {
   /** AQU-1670: optional telemetry sink for the stage-outcome event. Never
    *  awaited and never load-bearing — a throwing sink cannot fail a batch. */
   onStageOutcome?: StageOutcomeSink
+  /** AQU-2459 Phase B: R2 bucket for hydrating virtual source cells. */
+  r2?: ManifestR2Bucket
 }
 
 interface RawEmitEvent {
@@ -214,6 +217,7 @@ async function fetchCellPair(
   fileId: string,
   cellId: string,
   laneId: string | null,
+  r2?: ManifestR2Bucket,
 ): Promise<CellPair> {
   const { results } = await db
     .prepare(
@@ -223,7 +227,20 @@ async function fetchCellPair(
     )
     .bind(projectId, fileId, cellId, laneId)
     .all<CellRow>()
-  return splitPair(results ?? [])
+  const pair = splitPair(results ?? [])
+  if (!pair.source && r2) {
+    const vFile = await loadVirtualSourceFile(db, r2, projectId, fileId)
+    const vRow = vFile?.byCellId.get(cellId)
+    if (vRow && vRow.tombstoned_at == null) {
+      pair.source = {
+        side: "source",
+        event_id: vRow.event_id,
+        value: vRow.value,
+        canonical_ref: vRow.canonical_ref,
+      }
+    }
+  }
+  return pair
 }
 
 // ── Batched cell reads (AQU-1670) ───────────────────────────────────────────
@@ -256,6 +273,7 @@ async function fetchCellPairChunk(
   projectId: string,
   laneId: string | null,
   cells: readonly { fileId: string; cellId: string }[],
+  r2?: ManifestR2Bucket,
 ): Promise<Map<string, CellPair>> {
   const placeholders = cells.map(() => "(?, ?)").join(", ")
   const binds: unknown[] = [projectId, laneId]
@@ -284,9 +302,33 @@ async function fetchCellPairChunk(
   // or a cell that genuinely does not exist (the common `target.cell.create`
   // collision check) would fall back to its own query every time.
   const pairs = new Map<string, CellPair>()
+  const missingSourceFileIds = new Set<string>()
   for (const c of cells) {
     const key = pairKey(c.fileId, c.cellId)
-    pairs.set(key, splitPair(rowsByCell.get(key) ?? []))
+    const pair = splitPair(rowsByCell.get(key) ?? [])
+    pairs.set(key, pair)
+    if (!pair.source) missingSourceFileIds.add(c.fileId)
+  }
+
+  if (r2 && missingSourceFileIds.size > 0) {
+    const loaded = await Promise.all(
+      [...missingSourceFileIds].map(async (fid) => [fid, await loadVirtualSourceFile(db, r2, projectId, fid)] as const),
+    )
+    const vFileById = new Map(loaded)
+    for (const c of cells) {
+      const key = pairKey(c.fileId, c.cellId)
+      const pair = pairs.get(key)
+      if (!pair || pair.source) continue
+      const vRow = vFileById.get(c.fileId)?.byCellId.get(c.cellId)
+      if (vRow && vRow.tombstoned_at == null) {
+        pair.source = {
+          side: "source",
+          event_id: vRow.event_id,
+          value: vRow.value,
+          canonical_ref: vRow.canonical_ref,
+        }
+      }
+    }
   }
   return pairs
 }
@@ -299,6 +341,7 @@ async function prefetchCellPairs(
   projectId: string,
   laneId: string | null,
   cells: readonly { fileId: string; cellId: string }[],
+  r2?: ManifestR2Bucket,
 ): Promise<{ pairs: Map<string, CellPair>; failed: boolean }> {
   const pairs = new Map<string, CellPair>()
   if (cells.length === 0) return { pairs, failed: false }
@@ -309,7 +352,7 @@ async function prefetchCellPairs(
     let ok = false
     for (let attempt = 0; attempt < PREFETCH_ATTEMPTS; attempt++) {
       try {
-        for (const [key, pair] of await fetchCellPairChunk(db, projectId, laneId, chunk)) {
+        for (const [key, pair] of await fetchCellPairChunk(db, projectId, laneId, chunk, r2)) {
           pairs.set(key, pair)
         }
         ok = true
@@ -348,6 +391,7 @@ class CellPairReader {
     private readonly projectId: string,
     private readonly laneId: string | null,
     private readonly pairs: Map<string, CellPair>,
+    private readonly r2?: ManifestR2Bucket,
   ) {
     this.prefetched = pairs.size
   }
@@ -357,7 +401,7 @@ class CellPairReader {
     const hit = this.pairs.get(key)
     if (hit) return hit
     this.fallbackQueries++
-    const pair = await fetchCellPair(this.db, this.projectId, fileId, cellId, this.laneId)
+    const pair = await fetchCellPair(this.db, this.projectId, fileId, cellId, this.laneId, this.r2)
     this.pairs.set(key, pair)
     return pair
   }
@@ -823,8 +867,9 @@ export async function stageEvents(
     ctx.projectId,
     lane.laneId,
     collectBatchCells(rawEvents, ctx),
+    ctx.r2,
   )
-  const pairs = new CellPairReader(db, ctx.projectId, lane.laneId, prefetch.pairs)
+  const pairs = new CellPairReader(db, ctx.projectId, lane.laneId, prefetch.pairs, ctx.r2)
 
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent

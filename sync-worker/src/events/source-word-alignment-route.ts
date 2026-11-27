@@ -27,10 +27,13 @@
 
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 
 export interface SourceWordAlignmentEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-word-alignment$/
@@ -129,7 +132,7 @@ export async function handleSourceWordAlignmentRequest(
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
   if (request.method === "GET") {
     if (auth.claims.role < ROLE.VIEWER) return new Response("not a member", { status: 403 })
-    return readAlignment(env.AQUILLA_PG, projectId, fileId)
+    return readAlignment(env.AQUILLA_PG, projectId, fileId, env.SNAPSHOTS)
   }
   if (auth.claims.role < ROLE.MAINTAINER) return new Response("aligning the source needs the Maintainer role", { status: 403 })
   let body: unknown
@@ -140,13 +143,29 @@ export async function handleSourceWordAlignmentRequest(
   }
   const parsed = parseWriteBody(body)
   if (typeof parsed === "string") return new Response(parsed, { status: 400 })
-  return writeAlignment(env.AQUILLA_PG, projectId, fileId, parsed)
+  return writeAlignment(env.AQUILLA_PG, projectId, fileId, parsed, env.SNAPSHOTS)
 }
 
 /** The source rows' current content hashes, for the cells named. */
-async function currentHashes(db: AquillaDb, projectId: string, fileId: string, cellIds: string[]): Promise<Map<string, string | null>> {
+async function currentHashes(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  cellIds: string[],
+  r2?: ManifestR2Bucket,
+): Promise<{ hashes: Map<string, string | null>; liveVirtualIds: Set<string> | null }> {
   const out = new Map<string, string | null>()
-  if (cellIds.length === 0) return out
+  if (r2) {
+    const vf = await loadVirtualSourceFile(db, r2, projectId, fileId)
+    if (vf) {
+      for (const id of cellIds) {
+        const row = vf.byCellId.get(id)
+        if (row) out.set(id, row.content_hash)
+      }
+      return { hashes: out, liveVirtualIds: new Set(vf.byCellId.keys()) }
+    }
+  }
+  if (cellIds.length === 0) return { hashes: out, liveVirtualIds: null }
   const res = await db
     .prepare(
       `SELECT cell_id, content_hash FROM cells
@@ -156,29 +175,64 @@ async function currentHashes(db: AquillaDb, projectId: string, fileId: string, c
     .bind(projectId, fileId, ...cellIds)
     .all<{ cell_id: string; content_hash: string | null }>()
   for (const row of res.results ?? []) out.set(row.cell_id, row.content_hash)
-  return out
+  return { hashes: out, liveVirtualIds: null }
 }
 
-async function writeAlignment(db: AquillaDb, projectId: string, fileId: string, body: WriteBody): Promise<Response> {
-  const hashes = await currentHashes(db, projectId, fileId, body.cells.map((cell) => cell.cellId))
+async function writeAlignment(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  body: WriteBody,
+  r2?: ManifestR2Bucket,
+): Promise<Response> {
+  const { hashes, liveVirtualIds } = await currentHashes(
+    db,
+    projectId,
+    fileId,
+    body.cells.map((cell) => cell.cellId),
+    r2,
+  )
   const accepted = body.cells.filter((cell) => hashes.get(cell.cellId) === cell.sourceHash)
   const stale = body.cells.filter((cell) => hashes.get(cell.cellId) !== cell.sourceHash).map((cell) => cell.cellId)
 
   const stmts: AquillaStatement[] = []
   if (body.replace === "file") {
-    // A new run for the file: rows of cells that no longer exist go now.
-    stmts.push(
-      db
-        .prepare(
-          `DELETE FROM source_word_alignment
-            WHERE project_id = ? AND file_id = ?
-              AND cell_id NOT IN (
-                SELECT cell_id FROM cells
-                 WHERE project_id = ? AND file_id = ? AND side = 'source'
-              )`,
+    if (liveVirtualIds) {
+      // Prune rows for cells no longer live in the virtual manifest.
+      const existingAligned = await db
+        .prepare(`SELECT DISTINCT cell_id FROM source_word_alignment WHERE project_id = ? AND file_id = ?`)
+        .bind(projectId, fileId)
+        .all<{ cell_id: string }>()
+      const deadIds = (existingAligned.results ?? [])
+        .map((r) => r.cell_id)
+        .filter((id) => !liveVirtualIds.has(id))
+      for (let i = 0; i < deadIds.length; i += 500) {
+        const chunk = deadIds.slice(i, i + 500)
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM source_word_alignment
+                WHERE project_id = ? AND file_id = ?
+                  AND cell_id IN (${chunk.map(() => "?").join(", ")})`,
+            )
+            .bind(projectId, fileId, ...chunk),
         )
-        .bind(projectId, fileId, projectId, fileId),
-    )
+      }
+    } else {
+      // A new run for the file: rows of cells that no longer exist go now.
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM source_word_alignment
+              WHERE project_id = ? AND file_id = ?
+                AND cell_id NOT IN (
+                  SELECT cell_id FROM cells
+                   WHERE project_id = ? AND file_id = ? AND side = 'source'
+                )`,
+          )
+          .bind(projectId, fileId, projectId, fileId),
+      )
+    }
   }
   // Only accepted cells lose their old rows. A refused (stale) cell keeps
   // whatever it had: those rows may match the text this browser had not seen.
@@ -238,23 +292,49 @@ interface ReadRow {
   current_hash: string | null
 }
 
-async function readAlignment(db: AquillaDb, projectId: string, fileId: string): Promise<Response> {
-  // The inner join drops rows of cells that no longer exist.
-  const res = await db
-    .prepare(
-      `SELECT a.cell_id, a.src_word_id, a.tgt_token_idx, a.conf, a.method, a.source_hash, a.trained_pairs,
-              c.content_hash AS current_hash
-         FROM source_word_alignment a
-         JOIN cells c
-           ON c.project_id = a.project_id AND c.file_id = a.file_id AND c.cell_id = a.cell_id
-          AND c.side = 'source'
-        WHERE a.project_id = ? AND a.file_id = ?
-        ORDER BY a.cell_id, a.tgt_token_idx, a.src_word_id`,
-    )
-    .bind(projectId, fileId)
-    .all<ReadRow>()
+async function readAlignment(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  r2?: ManifestR2Bucket,
+): Promise<Response> {
+  const vf = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+  let rows: ReadRow[]
+  if (vf) {
+    const res = await db
+      .prepare(
+        `SELECT a.cell_id, a.src_word_id, a.tgt_token_idx, a.conf, a.method, a.source_hash, a.trained_pairs
+           FROM source_word_alignment a
+          WHERE a.project_id = ? AND a.file_id = ?
+          ORDER BY a.cell_id, a.tgt_token_idx, a.src_word_id`,
+      )
+      .bind(projectId, fileId)
+      .all<Omit<ReadRow, "current_hash">>()
+    rows = []
+    for (const r of res.results ?? []) {
+      const vrow = vf.byCellId.get(r.cell_id)
+      if (!vrow) continue
+      rows.push({ ...r, current_hash: vrow.content_hash })
+    }
+  } else {
+    // The inner join drops rows of cells that no longer exist.
+    const res = await db
+      .prepare(
+        `SELECT a.cell_id, a.src_word_id, a.tgt_token_idx, a.conf, a.method, a.source_hash, a.trained_pairs,
+                c.content_hash AS current_hash
+           FROM source_word_alignment a
+           JOIN cells c
+             ON c.project_id = a.project_id AND c.file_id = a.file_id AND c.cell_id = a.cell_id
+            AND c.side = 'source'
+          WHERE a.project_id = ? AND a.file_id = ?
+          ORDER BY a.cell_id, a.tgt_token_idx, a.src_word_id`,
+      )
+      .bind(projectId, fileId)
+      .all<ReadRow>()
+    rows = res.results ?? []
+  }
   const cells = new Map<string, AlignedCellOut>()
-  for (const row of res.results ?? []) {
+  for (const row of rows) {
     let cell = cells.get(row.cell_id)
     if (!cell) {
       cell = {

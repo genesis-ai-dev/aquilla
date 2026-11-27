@@ -52,6 +52,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
@@ -755,6 +756,7 @@ async function loadParagraphStarts(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  r2?: ManifestR2Bucket,
 ): Promise<string[]> {
   try {
     const { results } = await db
@@ -766,7 +768,16 @@ async function loadParagraphStarts(
       )
       .bind(projectId, fileId)
       .all<{ cell_id: string }>()
-    return (results ?? []).map((r) => r.cell_id)
+    if ((results ?? []).length > 0) return results.map((r) => r.cell_id)
+    if (r2) {
+      const vFile = await loadVirtualSourceFile(db, r2, projectId, fileId)
+      if (vFile) {
+        return vFile.rows
+          .filter((r) => r.tombstoned_at == null && r.metadata?.paragraphStart === true)
+          .map((r) => r.cell_id)
+      }
+    }
+    return []
   } catch (err) {
     console.error("[contextual] failed to read paragraph starts (falling back):", err)
     return []
@@ -800,8 +811,9 @@ async function deriveAutoSeeds(
   projectId: string,
   fileId: string,
   pairs: CellPair[],
+  r2?: ManifestR2Bucket,
 ): Promise<SpanSeed[]> {
-  const paragraphStartCellIds = await loadParagraphStarts(db, projectId, fileId)
+  const paragraphStartCellIds = await loadParagraphStarts(db, projectId, fileId, r2)
   return deriveSpanSeeds(
     fileId,
     pairs,
@@ -815,12 +827,13 @@ export async function resolveSpanSeeds(
   fileId: string,
   pairs: CellPair[],
   preview?: SegmentationPreviewQuery,
+  r2?: ManifestR2Bucket,
 ): Promise<SpanSeed[]> {
   if (preview?.strategy === "fixed") {
     return deriveSpanSeeds(fileId, pairs, { fixedSize: preview.fixedSize })
   }
   if (preview?.strategy === "auto") {
-    return deriveAutoSeeds(db, projectId, fileId, pairs)
+    return deriveAutoSeeds(db, projectId, fileId, pairs, r2)
   }
 
   let stored: Awaited<ReturnType<typeof getFileSegmentation>> = null
@@ -841,7 +854,7 @@ export async function resolveSpanSeeds(
     return deriveSpanSeeds(fileId, pairs, { fixedSize: stored.fixedSize })
   }
 
-  return deriveAutoSeeds(db, projectId, fileId, pairs)
+  return deriveAutoSeeds(db, projectId, fileId, pairs, r2)
 }
 
 // ── Steering ────────────────────────────────────────────────────────────────
@@ -920,6 +933,8 @@ export interface TickDeps {
   triage?: TriageCall
   /** AQU-1690: Bible data switches and the pack loader. Omitted → no Bible data. */
   bible?: BibleTickDeps
+  /** AQU-2459 Phase B: R2 bucket for hydrating virtual source cells. */
+  r2?: ManifestR2Bucket
 }
 
 export interface TickResult {
@@ -1387,7 +1402,7 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId, r2: deps.r2 }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
@@ -1401,7 +1416,7 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // the user was last looking (run.anchorCellId, set at start). Read once
     // here, not per wave — the cursor is derived once and then pinned.
     const seeds = orderSeedsFromAnchor(
-      await resolveSpanSeeds(db, run.projectId, run.fileId, pairs),
+      await resolveSpanSeeds(db, run.projectId, run.fileId, pairs, undefined, deps.r2),
       run.anchorCellId,
       pairs,
     )

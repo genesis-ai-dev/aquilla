@@ -1459,7 +1459,7 @@ export async function handleImportReconcileRequest(
       fileId: body.fileId,
       updatedAt: serverTs,
     })
-    if (vStmts.length > 0) await runBatch(db, vStmts)
+    if (vStmts && vStmts.length > 0) await runBatch(db, vStmts)
   }
 
   if (env.ProjectSync) {

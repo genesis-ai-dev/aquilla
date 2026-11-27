@@ -14,6 +14,7 @@
  */
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 import {
   bulkKeyOf,
   commitOrigin,
@@ -69,7 +70,12 @@ export interface MineResult {
   more: boolean
 }
 
-export async function minePass(db: AquillaDb, projectId: string, now = Date.now()): Promise<MineResult> {
+export async function minePass(
+  db: AquillaDb,
+  projectId: string,
+  now = Date.now(),
+  r2?: ManifestR2Bucket,
+): Promise<MineResult> {
   const state = await db
     .prepare("SELECT mined_through FROM smart_edit_state WHERE project_id = ?")
     .bind(projectId)
@@ -104,7 +110,7 @@ export async function minePass(db: AquillaDb, projectId: string, now = Date.now(
   let observations = 0
   for (let i = 0; i < cells.length; i += CELLS_PER_CHAIN_QUERY) {
     const slice = cells.slice(i, i + CELLS_PER_CHAIN_QUERY)
-    observations += await mineCells(db, projectId, slice, from, upper, now)
+    observations += await mineCells(db, projectId, slice, from, upper, now, r2)
   }
 
   await db
@@ -128,9 +134,14 @@ export const MINE_INTERVAL_MS = 60_000
  *  in over a few claims rather than in one request's lifetime. */
 const PASSES_PER_CLAIM = 5
 
-async function minePasses(db: AquillaDb, projectId: string, passes: number): Promise<void> {
+async function minePasses(
+  db: AquillaDb,
+  projectId: string,
+  passes: number,
+  r2?: ManifestR2Bucket,
+): Promise<void> {
   for (let i = 0; i < passes; i++) {
-    const r = await minePass(db, projectId)
+    const r = await minePass(db, projectId, Date.now(), r2)
     if (!r.more) return
   }
 }
@@ -153,6 +164,7 @@ export async function mineIfDue(
   db: AquillaDb,
   projectId: string,
   background: (work: (db: AquillaDb) => Promise<void>) => void,
+  r2?: ManifestR2Bucket,
 ): Promise<void> {
   const state = await db
     .prepare("SELECT EXTRACT(EPOCH FROM clock_timestamp() - updated_at) AS age_s FROM smart_edit_state WHERE project_id = ?")
@@ -165,8 +177,8 @@ export async function mineIfDue(
       .bind(projectId)
       .first<{ project_id: string }>()
     if (!won) return
-    const first = await minePass(db, projectId)
-    if (first.more) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM - 1))
+    const first = await minePass(db, projectId, Date.now(), r2)
+    if (first.more) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM - 1, r2))
     return
   }
 
@@ -179,7 +191,7 @@ export async function mineIfDue(
     )
     .bind(projectId)
     .first<{ project_id: string }>()
-  if (won) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM))
+  if (won) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM, r2))
 }
 
 async function mineCells(
@@ -189,6 +201,7 @@ async function mineCells(
   from: number,
   upper: number,
   now: number,
+  r2?: ManifestR2Bucket,
 ): Promise<number> {
   const tuple = cells.map(() => "(?, ?)").join(", ")
   const pairsArgs = cells.flatMap((c) => [c.file_id, c.cell_id])
@@ -221,6 +234,28 @@ async function mineCells(
     .bind(projectId, ...pairsArgs)
     .all<{ file_id: string; cell_id: string; value: string }>()
   const sourceOf = new Map(sources.map((s) => [`${s.file_id}\u0000${s.cell_id}`, s.value]))
+  if (r2 && sourceOf.size < cells.length) {
+    const missingFileIds = [
+      ...new Set(
+        cells
+          .filter((c) => !sourceOf.has(`${c.file_id}\u0000${c.cell_id}`))
+          .map((c) => c.file_id),
+      ),
+    ]
+    if (missingFileIds.length > 0) {
+      const vFiles = await Promise.all(
+        missingFileIds.map((fid) => loadVirtualSourceFile(db, r2, projectId, fid)),
+      )
+      for (const vFile of vFiles) {
+        if (!vFile) continue
+        for (const row of vFile.rows) {
+          if (row.tombstoned_at == null && !sourceOf.has(`${row.file_id}\u0000${row.cell_id}`)) {
+            sourceOf.set(`${row.file_id}\u0000${row.cell_id}`, row.value)
+          }
+        }
+      }
+    }
+  }
 
   const groups = new Map<string, { fileId: string; cellId: string; lane: string; events: ChainEvent[] }>()
   for (const r of chain) {

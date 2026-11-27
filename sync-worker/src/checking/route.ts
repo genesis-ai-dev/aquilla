@@ -9,6 +9,7 @@ import { handleEventsWriteRequest, type EventsRouteEnv } from "../events/route"
 import { resolveCommentFloors } from "../events/comment-floors"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../../../auth-worker/src/utils/password"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
+import { loadProjectVirtualSourceFiles, loadVirtualSourceFile } from "../../../db/shared/virtual-source-store"
 import { createCheckingSchema, joinCheckingSchema, feedbackSchema, inCheckingScope, type CheckingUnit } from "./policy"
 
 export type CheckingEnv = EventsRouteEnv & AudioEnv
@@ -99,9 +100,21 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
         JOIN files f ON f.id = c.file_id AND f.project_id = c.project_id
         JOIN jsonb_to_recordset(?::text::jsonb) AS u("fileId" text, "cellId" text)
           ON u."fileId" = c.file_id AND u."cellId" = c.cell_id
-        WHERE c.project_id = ? AND f.deleted_at IS NULL
-        GROUP BY c.file_id, c.cell_id`).bind(JSON.stringify(data.units), pid).all()
-      if (existing.results?.length !== data.units.length) return jsonError("Some selected passages are no longer available.")
+        WHERE c.project_id = ? AND f.deleted_at IS NULL AND c.tombstoned_at IS NULL
+        GROUP BY c.file_id, c.cell_id`).bind(JSON.stringify(data.units), pid).all<{ file_id: string; cell_id: string }>()
+      const foundKeys = new Set((existing.results ?? []).map(r => JSON.stringify([r.file_id, r.cell_id])))
+      if (foundKeys.size !== data.units.length && env.SNAPSHOTS) {
+        const missingFileIds = [...new Set(
+          data.units.filter(u => !foundKeys.has(JSON.stringify([u.fileId, u.cellId]))).map(u => u.fileId),
+        )]
+        const vFiles = await loadProjectVirtualSourceFiles(db, env.SNAPSHOTS, pid, { fileIds: missingFileIds })
+        const byFile = new Map(vFiles.map(vf => [vf.head.fileId, vf]))
+        for (const u of data.units) {
+          const vf = byFile.get(u.fileId)
+          if (vf?.byCellId.has(u.cellId)) foundKeys.add(JSON.stringify([u.fileId, u.cellId]))
+        }
+      }
+      if (foundKeys.size !== data.units.length) return jsonError("Some selected passages are no longer available.")
       const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "")
       const pinHash = data.pin ? await hashPasswordWerkzeugScrypt(data.pin) : null
       const expiresAt = Date.now() + 30 * 86400_000
@@ -153,8 +166,49 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
         FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS u(unit, ordinality)
         JOIN cells c ON c.project_id = ? AND c.file_id = u.unit->>'fileId' AND c.cell_id = u.unit->>'cellId'
         JOIN files f ON f.project_id = c.project_id AND f.id = c.file_id AND f.deleted_at IS NULL
-        WHERE ${wireLegacyTagSql("c")} = '' ORDER BY u.ordinality, c.side DESC`)
-        .bind(JSON.stringify(units), link.project_id).all()
+        WHERE ${wireLegacyTagSql("c")} = '' AND c.tombstoned_at IS NULL ORDER BY u.ordinality, c.side DESC`)
+        .bind(JSON.stringify(units), link.project_id).all<{
+          ordinality: number | string; fileId: string; cellId: string; fileName: string
+          label: string | null; text: string; side: string; type: string | null; paragraphStart: boolean
+        }>()
+      const outRows = [...(rows.results ?? [])]
+      if (env.SNAPSHOTS && units.length > 0) {
+        const unitFileIds = [...new Set(units.map(u => u.fileId))]
+        const vFiles = await loadProjectVirtualSourceFiles(db, env.SNAPSHOTS, link.project_id, { fileIds: unitFileIds })
+        if (vFiles.length > 0) {
+          const vByFile = new Map(vFiles.map(vf => [vf.head.fileId, vf]))
+          const fileNameRows = await db.prepare(
+            `SELECT id, name FROM files WHERE project_id = ? AND deleted_at IS NULL AND id IN (${vFiles.map(() => "?").join(", ")})`,
+          ).bind(link.project_id, ...vFiles.map(vf => vf.head.fileId)).all<{ id: string; name: string }>()
+          const nameByFile = new Map((fileNameRows.results ?? []).map(f => [f.id, f.name]))
+          const hasSource = new Set(outRows.filter(r => r.side === "source").map(r => `${r.fileId}\0${r.cellId}`))
+          // Patch paragraphStart on target rows of virtual files too.
+          for (const row of outRows) {
+            const vf = vByFile.get(row.fileId)
+            const vsrc = vf?.byCellId.get(row.cellId)
+            if (vsrc && vsrc.metadata?.paragraphStart === true) row.paragraphStart = true
+          }
+          for (let idx = 0; idx < units.length; idx++) {
+            const u = units[idx]
+            const vf = vByFile.get(u.fileId)
+            if (!vf || hasSource.has(`${u.fileId}\0${u.cellId}`)) continue
+            const vsrc = vf.byCellId.get(u.cellId)
+            if (!vsrc) continue
+            outRows.push({
+              ordinality: idx + 1,
+              fileId: u.fileId,
+              cellId: u.cellId,
+              fileName: nameByFile.get(u.fileId) ?? u.fileId,
+              label: vsrc.canonical_ref,
+              text: vsrc.value,
+              side: "source",
+              type: vsrc.type,
+              paragraphStart: vsrc.metadata?.paragraphStart === true,
+            })
+          }
+          outRows.sort((a, b) => Number(a.ordinality) - Number(b.ordinality) || b.side.localeCompare(a.side))
+        }
+      }
       const audio = await db.prepare(`SELECT a.file_id AS "fileId", a.cell_id AS "cellId", a.audio_id AS "audioId",
         a.url, a.trim_start_ms AS "trimStartMs", a.trim_end_ms AS "trimEndMs"
         FROM cell_audio a JOIN jsonb_to_recordset(?::text::jsonb) AS u("fileId" text, "cellId" text)
@@ -162,7 +216,7 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
         JOIN files f ON f.id = a.file_id AND f.project_id = a.project_id AND f.deleted_at IS NULL
         WHERE a.project_id = ? AND a.deleted = 0 AND a.selected = 1 AND a.slot = 'recording'`)
         .bind(JSON.stringify(units), link.project_id).all()
-      return Response.json({ rows: rows.results ?? [], audio: audio.results ?? [] })
+      return Response.json({ rows: outRows, audio: audio.results ?? [] })
     }
     if (route[2] === "audio" && request.method === "GET") {
       const fileId = url.searchParams.get("fileId") ?? ""
@@ -191,9 +245,14 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
           (event.cellId != null && event.cellId !== scope.cellId) || !inCheckingScope(units, scope.fileId, scope.cellId)) return dead()
       const liveCell = await db.prepare(`SELECT c.cell_id FROM cells c
         JOIN files f ON f.id = c.file_id AND f.project_id = c.project_id
-        WHERE c.project_id = ? AND c.file_id = ? AND c.cell_id = ? AND f.deleted_at IS NULL LIMIT 1`)
+        WHERE c.project_id = ? AND c.file_id = ? AND c.cell_id = ? AND f.deleted_at IS NULL AND c.tombstoned_at IS NULL LIMIT 1`)
         .bind(link.project_id, scope.fileId, scope.cellId).first()
-      if (!liveCell) return jsonError("This passage is no longer available.", 410)
+      let isLive = Boolean(liveCell)
+      if (!isLive && env.SNAPSHOTS) {
+        const vf = await loadVirtualSourceFile(db, env.SNAPSHOTS, link.project_id, scope.fileId)
+        if (vf?.byCellId.has(scope.cellId)) isLive = true
+      }
+      if (!isLive) return jsonError("This passage is no longer available.", 410)
       // Preserve the client event ID for idempotent outbox retries. Stamp
       // identity and scope on the server; never trust the submitted author.
       event.author = username

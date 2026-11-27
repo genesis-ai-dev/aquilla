@@ -1430,6 +1430,10 @@ CREATE TABLE assignment_cells (
     assignment_id TEXT NOT NULL,
     file_id       TEXT NOT NULL,
     cell_id       TEXT NOT NULL,
+    -- AQU-2459 Phase B: grouping columns carried for virtual source files.
+    canonical_ref TEXT,
+    start_ms      INTEGER,
+    type          TEXT,
     PRIMARY KEY (assignment_id, file_id, cell_id)
 );
 
@@ -3110,26 +3114,42 @@ CREATE INDEX IF NOT EXISTS ai_interventions_cell_idx
 -- plan inspector's two reads to about 2x with no sequential scan, where an
 -- id-only view cost 5x and one.
 CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
-  -- An explicit line selection ('cells' scope, AQU-1628), and any assignment
-  -- 0147's backfill could not reach: the frozen snapshot. Intersected with live
-  -- source cells HERE rather than in each reader, which is where AQU-1068 put
-  -- it — so a cell removed from the file still drops out, and no reader has to
-  -- remember to do it.
-  SELECT a.project_id, ac.assignment_id, c.file_id, c.cell_id,
-         c.canonical_ref, c.start_ms, c.type
+  -- An explicit line selection ('cells' scope, AQU-1628), any assignment
+  -- 0147's backfill could not reach, or any assignment on a virtual source file
+  -- (`files.source_virtual = TRUE`, AQU-2459 Phase B).
+  SELECT a.project_id, ac.assignment_id, ac.file_id, ac.cell_id,
+         COALESCE(c.canonical_ref, ac.canonical_ref) AS canonical_ref,
+         COALESCE(c.start_ms, ac.start_ms)           AS start_ms,
+         COALESCE(c.type, ac.type)                   AS type
     FROM assignment_cells ac
     JOIN assignments a ON a.assignment_id = ac.assignment_id
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                AND c.cell_id = ac.cell_id AND c.side = 'source'
-   WHERE NOT EXISTS (
-     SELECT 1 FROM assignment_scopes s WHERE s.assignment_id = ac.assignment_id
+    JOIN files f ON f.project_id = a.project_id AND f.id = ac.file_id AND f.deleted_at IS NULL
+    LEFT JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                     AND c.cell_id = ac.cell_id AND c.side = 'source'
+                     AND c.tombstoned_at IS NULL
+   WHERE (
+     (f.source_virtual = TRUE AND NOT EXISTS (
+       SELECT 1 FROM cells dt
+        WHERE dt.project_id = a.project_id AND dt.file_id = ac.file_id
+          AND dt.cell_id = ac.cell_id AND dt.side = 'source'
+          AND dt.tombstoned_at IS NOT NULL
+     ))
+     OR (
+       f.source_virtual = FALSE
+       AND c.cell_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM assignment_scopes s WHERE s.assignment_id = ac.assignment_id
+       )
+     )
    )
   UNION ALL
-  -- A range scope ('books' / 'chapters'), resolved live on every read.
+  -- A range scope ('books' / 'chapters') on non-virtual files, resolved live on every read.
   SELECT a.project_id, s.assignment_id, c.file_id, c.cell_id,
          c.canonical_ref, c.start_ms, c.type
     FROM assignment_scopes s
     JOIN assignments a ON a.assignment_id = s.assignment_id
+    JOIN files f ON f.project_id = a.project_id AND f.id = s.file_id
+                AND f.deleted_at IS NULL AND f.source_virtual = FALSE
     JOIN cells c ON c.project_id = a.project_id AND c.file_id = s.file_id
                 AND c.side = 'source'
     -- AQU-1493: where a line with no reference is counted on the plan, as the

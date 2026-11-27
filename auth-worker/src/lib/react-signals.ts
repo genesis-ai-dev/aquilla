@@ -10,6 +10,7 @@
  */
 
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import { REACT_SAMPLE_CELLS, REACT_SAMPLE_CHARS, type EditSample } from "./react-route"
 
 /** Expert input the watcher reacts to: a human committing a translation, or a
@@ -77,6 +78,7 @@ export async function readExpertEvents(
   projectId: string,
   cursor: number,
   windowEnd: number,
+  r2?: ManifestR2Bucket,
 ): Promise<ExpertEventRow[]> {
   const kindPlaceholders = HUMAN_EXPERT_EVENT_KINDS.map(() => "?").join(",")
   const { results } = await db
@@ -106,6 +108,25 @@ export async function readExpertEvents(
     )
     .bind(projectId, ...HUMAN_EXPERT_EVENT_KINDS, cursor, windowEnd, REACT_MAX_EVENTS_PER_SWEEP)
     .all<ExpertEventRow>()
+  if (r2) {
+    const missingFileIds = [
+      ...new Set(results.filter((r) => r.canonical_ref == null && r.cell_id != null).map((r) => r.file_id)),
+    ]
+    if (missingFileIds.length > 0) {
+      const vFiles = new Map(
+        await Promise.all(
+          missingFileIds.map(async (fid) => [fid, await loadVirtualSourceFile(db, r2, projectId, fid)] as const),
+        ),
+      )
+      for (const r of results) {
+        if (r.canonical_ref != null || !r.cell_id) continue
+        const vRow = vFiles.get(r.file_id)?.byCellId.get(r.cell_id)
+        if (vRow && vRow.tombstoned_at == null && vRow.canonical_ref) {
+          r.canonical_ref = vRow.canonical_ref
+        }
+      }
+    }
+  }
   return results
 }
 
@@ -230,12 +251,15 @@ export async function readEditSamples(
   db: AquillaDb,
   projectId: string,
   eventIds: string[],
+  r2?: ManifestR2Bucket,
 ): Promise<EditSample[]> {
   if (eventIds.length === 0) return []
   const placeholders = eventIds.map(() => "?").join(",")
   const { results } = await db
     .prepare(
       `SELECT e.id,
+              e.file_id,
+              e.cell_id,
               COALESCE(e.payload::jsonb ->> 'value', '') AS after,
               COALESCE(p.payload::jsonb ->> 'value', '') AS before,
               COALESCE(src.value, '') AS source,
@@ -248,7 +272,39 @@ export async function readEditSamples(
         WHERE e.project_id = ? AND e.id IN (${placeholders})`,
     )
     .bind(projectId, ...eventIds)
-    .all<{ id: string; after: string; before: string; source: string; canonical_ref: string | null }>()
+    .all<{
+      id: string
+      file_id: string | null
+      cell_id: string | null
+      after: string
+      before: string
+      source: string
+      canonical_ref: string | null
+    }>()
+  if (r2) {
+    const missingFileIds = [
+      ...new Set(
+        results
+          .filter((r) => r.file_id && r.cell_id && !r.source && r.canonical_ref == null)
+          .map((r) => r.file_id as string),
+      ),
+    ]
+    if (missingFileIds.length > 0) {
+      const vFiles = new Map(
+        await Promise.all(
+          missingFileIds.map(async (fid) => [fid, await loadVirtualSourceFile(db, r2, projectId, fid)] as const),
+        ),
+      )
+      for (const r of results) {
+        if (!r.file_id || !r.cell_id || (r.source && r.canonical_ref != null)) continue
+        const vRow = vFiles.get(r.file_id)?.byCellId.get(r.cell_id)
+        if (vRow && vRow.tombstoned_at == null) {
+          if (!r.source) r.source = vRow.value
+          if (r.canonical_ref == null) r.canonical_ref = vRow.canonical_ref
+        }
+      }
+    }
+  }
   const byId = new Map(results.map((r) => [r.id, r]))
   const cut = (t: string) => (t.length > REACT_SAMPLE_CHARS ? `${t.slice(0, REACT_SAMPLE_CHARS - 1)}…` : t)
   return eventIds.flatMap((id) => {

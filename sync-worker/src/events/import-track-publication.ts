@@ -5,6 +5,7 @@ import { ROLE } from './role-policy'
 import { DEFAULT_TRACK_IDS, resolveAllowTrackEditing } from './track-editing-authority'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 
 interface PublicationArgs {
   projectId: string
@@ -14,6 +15,8 @@ interface PublicationArgs {
   clientTs: number
   publishEventId: string
   publication: ImportedTrackPublication
+  /** AQU-2459 Phase B: R2 bucket for virtual staged caption files. */
+  r2?: ManifestR2Bucket
 }
 
 type Result = { ok: true } | { ok: false; status: number; reason: string }
@@ -73,6 +76,13 @@ export async function publishImportedTrack(
     return refuse(403, 'timeline track editing is not enabled for this project')
   }
   if (!db.transaction) return refuse(503, 'atomic text track publication is unavailable')
+  const virtualChild = args.r2
+    ? await loadVirtualSourceFile(db, args.r2, args.projectId, p.contentFileId)
+    : null
+  const virtualOverwriteTarget =
+    args.r2 && p.overwrite
+      ? await loadVirtualSourceFile(db, args.r2, args.projectId, p.overwrite.contentFileId ?? args.fileId)
+      : null
   const seqBase = await allocateSeqRange(db, args.projectId, 2)
   const result = await db.transaction<Result>(async tx => {
     const parent = await tx.prepare(
@@ -118,12 +128,18 @@ export async function publishImportedTrack(
       if (currentId !== p.overwrite.contentFileId) {
         return refuse(409, 'track content changed after preview')
       }
-      const count = await tx.prepare(
-        `SELECT COUNT(*) AS count FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = ?`,
-      ).bind(args.projectId, currentId ?? args.fileId, 'source')
-        .first<{ count: number | string }>()
-      if (Number(count?.count) !== p.overwrite.segmentCount) {
+      const actualCount = virtualOverwriteTarget
+        ? virtualOverwriteTarget.rows.length
+        : Number(
+            (
+              await tx.prepare(
+                `SELECT COUNT(*) AS count FROM cells
+                  WHERE project_id = ? AND file_id = ? AND side = ?`,
+              ).bind(args.projectId, currentId ?? args.fileId, 'source')
+                .first<{ count: number | string }>()
+            )?.count,
+          )
+      if (actualCount !== p.overwrite.segmentCount) {
         return refuse(409, 'segment count changed after preview')
       }
     }
@@ -135,11 +151,15 @@ export async function publishImportedTrack(
       || child.anchor_file_id !== args.fileId || child.deleted_at === null) {
       return refuse(409, 'caption content is not a staged file for this timeline')
     }
-    const cue = await tx.prepare(
-      `SELECT cell_id FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' LIMIT 1`,
-    ).bind(args.projectId, p.contentFileId).first<{ cell_id: string }>()
-    if (!cue) return refuse(409, 'caption content is empty')
+    const hasCue = virtualChild
+      ? virtualChild.rows.length > 0
+      : Boolean(
+          await tx.prepare(
+            `SELECT cell_id FROM cells
+              WHERE project_id = ? AND file_id = ? AND side = 'source' LIMIT 1`,
+          ).bind(args.projectId, p.contentFileId).first<{ cell_id: string }>(),
+        )
+    if (!hasCue) return refuse(409, 'caption content is empty')
     const now = Date.now()
     const events: PersistedEvent[] = [{
       id: p.eventId, schemaVersion: 1, projectId: args.projectId,

@@ -55,7 +55,7 @@ import type { EventPayloads } from './types'
 import { mergeFileMeta, type ReconcileFileMeta } from './import-reconcile-route'
 import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
 import { cacheVirtualManifest, loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
-import { buildVirtualFileProgressStmts } from './virtual-progress'
+import { buildVirtualFileProgressStmts, resolveVirtualPlanKeys } from './virtual-progress'
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/revisions$/
 const SHA256_RE = /^[0-9a-f]{64}$/
@@ -625,6 +625,76 @@ async function writeRevision(
     const longDb = withLongOperationTimeout(db, 'import-finalize')
     if (longDb.batchPipelined) await longDb.batchPipelined(stmts)
     else await longDb.batch(stmts)
+
+    // AQU-2459 Phase B: if an existing virtual file has active range-scoped
+    // assignments, refresh their `assignment_cells` rows from the new manifest
+    // so added/removed/renamed units stay in sync with `assignment_member_cells`.
+    if (args.sourceVirtual && args.manifest.revisionN > 1) {
+      const activeScopes = await db
+        .prepare(
+          `SELECT s.assignment_id, s.chapter
+             FROM assignment_scopes s
+             JOIN assignments a ON a.assignment_id = s.assignment_id
+            WHERE a.project_id = ? AND s.file_id = ?
+              AND a.unassigned_at IS NULL AND a.completed_at IS NULL`,
+        )
+        .bind(args.projectId, args.fileId)
+        .all<{ assignment_id: string; chapter: string }>()
+        .catch(() => ({ results: [] as Array<{ assignment_id: string; chapter: string }> }))
+      if ((activeScopes.results ?? []).length > 0) {
+        const vf = await loadVirtualSourceFile(db, env.SNAPSHOTS, args.projectId, args.fileId)
+        if (vf) {
+          const { keys } = resolveVirtualPlanKeys(vf.rows)
+          const byAssignment = new Map<string, Set<string>>()
+          for (const row of activeScopes.results ?? []) {
+            let chapters = byAssignment.get(row.assignment_id)
+            if (!chapters) {
+              chapters = new Set<string>()
+              byAssignment.set(row.assignment_id, chapters)
+            }
+            chapters.add(row.chapter)
+          }
+          const refreshStmts: AquillaStatement[] = []
+          for (const [assignmentId, chapters] of byAssignment) {
+            const matched = chapters.has('')
+              ? vf.rows
+              : vf.rows.filter((r) => chapters.has(keys.get(r.cell_id)?.sectionKey ?? ''))
+            refreshStmts.push(
+              db
+                .prepare(`DELETE FROM assignment_cells WHERE assignment_id = ? AND file_id = ?`)
+                .bind(assignmentId, args.fileId),
+            )
+            for (let i = 0; i < matched.length; i += 500) {
+              const chunk = matched.slice(i, i + 500)
+              const vals = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')
+              const b: unknown[] = []
+              for (const r of chunk) {
+                b.push(assignmentId, args.fileId, r.cell_id, r.canonical_ref, r.start_ms, r.type)
+              }
+              refreshStmts.push(
+                db
+                  .prepare(
+                    `INSERT INTO assignment_cells (assignment_id, file_id, cell_id, canonical_ref, start_ms, type)
+                     VALUES ${vals} ON CONFLICT DO NOTHING`,
+                  )
+                  .bind(...b),
+              )
+            }
+            refreshStmts.push(
+              db
+                .prepare(
+                  `UPDATE assignments SET cells_total =
+                     (SELECT COUNT(*) FROM assignment_cells WHERE assignment_id = ?)
+                   WHERE assignment_id = ?`,
+                )
+                .bind(assignmentId, assignmentId),
+            )
+          }
+          if (refreshStmts.length > 0) await db.batch(refreshStmts)
+        }
+      }
+    }
+
     return { ok: true }
   } catch (err) {
     await env.SNAPSHOTS.delete(manifestKey).catch(() => undefined)

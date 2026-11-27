@@ -116,14 +116,14 @@ export async function buildUsfmExportPlan(
       if (r.canonical_ref) removedSet.add(r.canonical_ref)
     }
     try {
-      const removed = await removedCellsForFile(db, projectId, fileId)
+      const removed = await removedCellsForFile(db, projectId, fileId, r2)
       for (const r of removed) {
         if (r.canonicalRef) removedSet.add(r.canonicalRef)
       }
     } catch {
       /* fail soft */
     }
-    if (removedSet.size > 0) edits.removedRefs = removedSet
+    if (removedSet.size > 0) edits.remove = removedSet
 
     const addedByRef = new Map<string, string[]>()
     for (const r of virtualFile.rows) {
@@ -147,7 +147,7 @@ export async function buildUsfmExportPlan(
         hops++
       }
     }
-    if (addedByRef.size > 0) edits.addedAfter = addedByRef
+    if (addedByRef.size > 0) edits.appendAfter = addedByRef
     return { overrides, edits }
   }
 
@@ -220,7 +220,7 @@ export async function buildUsfmExportPlan(
   //    translation is dropped rather than emitted — the one ordering this relies
   //    on, and the reason nothing has to prune `overrides` above.
   const removedRefs = new Set<string>()
-  for (const removed of await removedCellsForFile(db, projectId, fileId)) {
+  for (const removed of await removedCellsForFile(db, projectId, fileId, r2)) {
     if (removed.canonicalRef) removedRefs.add(removed.canonicalRef)
   }
   for (const hidden of hiddenCells) {

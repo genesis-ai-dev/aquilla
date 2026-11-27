@@ -44,6 +44,7 @@
 // to another project gets `scope_denied` 403.
 
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import { applyRenderingLaneScope, renderingLaneScope } from "../events/rendering-lane-scope"
 import { handleHealthRollupRequest } from "../events/health-rollup-route"
 import { handleProgressReadRequest, type FileProgressResponse } from "../events/progress-read-route"
@@ -337,6 +338,7 @@ async function loadScanCells(
   projectId: string,
   fileIds: readonly string[],
   lane: string,
+  r2?: ManifestR2Bucket,
 ): Promise<CheckableCell[]> {
   if (fileIds.length === 0) return []
   const placeholders = fileIds.map(() => "?").join(", ")
@@ -358,7 +360,7 @@ async function loadScanCells(
     .bind(...targetLaneDualReadBinds(projectId, lane), projectId, ...fileIds, MAX_SCAN_CELLS)
     .all<ScanCellRow>()
 
-  return (res.results ?? []).map((row) => ({
+  const out: CheckableCell[] = (res.results ?? []).map((row) => ({
     id: row.cell_id,
     cellLabel: row.canonical_ref ?? undefined,
     original: row.value,
@@ -366,6 +368,40 @@ async function loadScanCells(
     medium: row.medium,
     transcription: row.transcription ?? undefined,
   }))
+  if (r2 && out.length < MAX_SCAN_CELLS) {
+    const vFiles = await loadProjectVirtualSourceFiles(db, r2, projectId, { fileIds })
+    if (vFiles.length > 0) {
+      const vIds = vFiles.map((vf) => vf.head.fileId)
+      const tRes = await db
+        .prepare(
+          `SELECT file_id, cell_id, COALESCE(value, '') AS value
+             FROM cells
+            WHERE project_id = ? AND side = 'target'
+              AND ${targetLaneDualReadSql("cells")}
+              AND file_id IN (${vIds.map(() => "?").join(", ")})`,
+        )
+        .bind(projectId, ...targetLaneDualReadBinds(projectId, lane), ...vIds)
+        .all<{ file_id: string; cell_id: string; value: string }>()
+      const tByKey = new Map((tRes.results ?? []).map((t) => [`${t.file_id}\0${t.cell_id}`, t.value]))
+      const seenIds = new Set(out.map((c) => c.id))
+      for (const vf of vFiles) {
+        for (const s of vf.rows) {
+          if (out.length >= MAX_SCAN_CELLS) break
+          if (seenIds.has(s.cell_id)) continue
+          seenIds.add(s.cell_id)
+          out.push({
+            id: s.cell_id,
+            cellLabel: s.canonical_ref ?? undefined,
+            original: s.value,
+            translated: tByKey.get(`${vf.head.fileId}\0${s.cell_id}`) ?? "",
+            medium: s.medium,
+            transcription: s.transcription ?? undefined,
+          })
+        }
+      }
+    }
+  }
+  return out
 }
 
 /**
@@ -467,6 +503,7 @@ async function handleTermConsistency(
     projectId,
     scope.files.map((f) => f.fileId),
     lane,
+    env.SNAPSHOTS,
   )
 
   const renderingScope = await renderingLaneScope(db, projectId, lane)

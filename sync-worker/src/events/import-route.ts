@@ -675,6 +675,7 @@ export async function handleBulkImportRequest(
       const result = await promoteCaptionsToRows(db, {
         projectId: body.projectId, fileId: body.fileId, author,
         role: auth.claims.role, clientTs, promotion: body.captionPromotion,
+        r2: env.SNAPSHOTS,
       })
       if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
       if (env.ProjectSync) {
@@ -705,6 +706,7 @@ export async function handleBulkImportRequest(
         projectId: body.projectId, fileId: body.fileId, author,
         role: auth.claims.role, clientTs, publishEventId: body.publishEventId,
         publication: body.trackPublication,
+        r2: env.SNAPSHOTS,
       })
       if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
       if (env.ProjectSync) {

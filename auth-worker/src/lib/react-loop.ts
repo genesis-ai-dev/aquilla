@@ -284,7 +284,7 @@ export async function reactCheckProject(
 
   let rows: ExpertEventRow[]
   try {
-    rows = await readExpertEvents(db, projectId, cursor, windowEnd)
+    rows = await readExpertEvents(db, projectId, cursor, windowEnd, env.SNAPSHOTS)
   } catch (err) {
     console.warn(`[react] event read failed for ${projectId}:`, err)
     skipped.push({ fileId: null, reason: "event log unreadable" })
@@ -352,7 +352,7 @@ export async function reactCheckProject(
       // that would have reacted anyway.
       let samples: Awaited<ReturnType<typeof readEditSamples>> = []
       try {
-        samples = await readEditSamples(db, projectId, signal.commitEventIds)
+        samples = await readEditSamples(db, projectId, signal.commitEventIds, env.SNAPSHOTS)
       } catch (err) {
         console.warn(`[react] edit samples unreadable for ${projectId}/${signal.fileId}:`, err)
       }

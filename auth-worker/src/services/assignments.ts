@@ -37,6 +37,7 @@
 // that table is now the audit record of what the scope resolved to at
 // creation.
 
+import { loadVirtualSourceFile } from "../../../db/shared/virtual-source-store"
 import type { Env } from "../types"
 import {
   planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
@@ -1269,20 +1270,35 @@ export async function getFileChapters(
   projectId: string,
   fileId: string,
 ): Promise<string[]> {
-  const rows = await env.AQUILLA_PG.prepare(
-    `SELECT DISTINCT substr(canonical_ref, 1, strpos(canonical_ref, ':') - 1) AS chapter
-       FROM cells
-      WHERE project_id = ? AND file_id = ? AND side = 'source'
-        AND canonical_ref IS NOT NULL AND strpos(canonical_ref, ':') > 0`,
-  )
-    .bind(projectId, fileId)
-    .all<{ chapter: string }>()
-
-  const chapters = withoutBookFrontMatter(
-    (rows.results ?? [])
+  let rawChapters: string[] = []
+  if (env.SNAPSHOTS) {
+    const vf = await loadVirtualSourceFile(env.AQUILLA_PG, env.SNAPSHOTS, projectId, fileId)
+    if (vf) {
+      const seen = new Set<string>()
+      for (const row of vf.rows) {
+        const ref = row.canonical_ref
+        if (!ref) continue
+        const colon = ref.indexOf(":")
+        if (colon > 0) seen.add(ref.slice(0, colon))
+      }
+      rawChapters = [...seen]
+    }
+  }
+  if (rawChapters.length === 0) {
+    const rows = await env.AQUILLA_PG.prepare(
+      `SELECT DISTINCT substr(canonical_ref, 1, strpos(canonical_ref, ':') - 1) AS chapter
+         FROM cells
+        WHERE project_id = ? AND file_id = ? AND side = 'source'
+          AND canonical_ref IS NOT NULL AND strpos(canonical_ref, ':') > 0`,
+    )
+      .bind(projectId, fileId)
+      .all<{ chapter: string }>()
+    rawChapters = (rows.results ?? [])
       .map((r) => r.chapter)
-      .filter((c): c is string => typeof c === "string" && c.length > 0),
-  )
+      .filter((c): c is string => typeof c === "string" && c.length > 0)
+  }
+
+  const chapters = withoutBookFrontMatter(rawChapters)
   chapters.sort((a, b) => {
     const ka = chapterSortKey(a)
     const kb = chapterSortKey(b)

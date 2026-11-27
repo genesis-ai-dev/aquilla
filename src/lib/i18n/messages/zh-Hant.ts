@@ -5515,6 +5515,7 @@ export const zh_Hant: Catalog = {
   "knowledgeBase.uploadSuccess": "已上傳 {name}。",
   "knowledgeBase.uploadTruncated": "已上傳 {name}，但內容過長：只讀取了前 200 萬個字元。",
   "knowledgeBase.uploadError": "無法上傳 {name}。請再試一次。",
+  "knowledgeBase.docxTooLarge": "此 Word 檔案超過 {limit}，無法新增。請將它分割，或另存一個較小的複本。",
   "knowledgeBase.acceptedFormats": "Markdown、TXT、DOCX 或 PDF · 上限 {limit}（DOCX 上限 {docxLimit}）",
   "knowledgeBase.emptyTitle": "還沒有任何知識文件",
   "knowledgeBase.emptyDescription": "上傳參考資料，讓這個專案及其代理程式都能使用。",

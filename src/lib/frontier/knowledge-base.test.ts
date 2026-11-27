@@ -12,6 +12,7 @@ import {
 import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
 import { readPdfText } from "@/lib/import/pdf-import"
 import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 vi.mock("@/lib/import/pdf-import", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/import/pdf-import")>()
@@ -112,6 +113,42 @@ describe("Knowledge Base API client", () => {
     const file = new File(["# notes"], "notes.md")
     const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
     expect((thrown as KnowledgeBaseApiError).serverMessage).toBe("Reload the page, then add this PDF again.")
+  })
+
+  // A DOCX over the server's limit used to go up and come back with the
+  // server's raw "file exceeds the 2000000-byte extraction limit".
+  it("refuses a Word file over the DOCX limit before uploading, in one plain sentence", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const big = new File([new Uint8Array(MAX_DOCX_BYTES + 1)], "Guide.DOCX")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", big).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseReadError)
+    expect((thrown as Error).message).toBe(
+      "This Word file is larger than 2 MB, so it can't be added. Split it or save a smaller copy.",
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("uploads a Word file of exactly the DOCX limit", async () => {
+    const doc = { id: "doc-5", name: "edge.docx", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    const edge = new File([new Uint8Array(MAX_DOCX_BYTES)], "edge.docx")
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", edge))
+      .resolves.toEqual({ doc, textTruncated: false })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("turns the server's refusal of a Word file over the limit into the same sentence", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      response({ error: { code: "docx_too_large", message: "file exceeds the 2097152-byte extraction limit" } }, 400),
+    ))
+    const file = new File(["bytes"], "guide.docx")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseApiError)
+    expect((thrown as KnowledgeBaseApiError).serverMessage).toBe(
+      "This Word file is larger than 2 MB, so it can't be added. Split it or save a smaller copy.",
+    )
   })
 
   it("passes on that only the first part of the text was kept (AQU-2594)", async () => {

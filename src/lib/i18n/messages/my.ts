@@ -5497,6 +5497,7 @@ export const my: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} ကို အပ်လုဒ်တင်ပြီးပါပြီ။",
   "knowledgeBase.uploadTruncated": "{name} ကို အပ်လုဒ်တင်ပြီးပါပြီ၊ သို့သော် အလွန်ရှည်သဖြင့် ပထမ စာလုံး 2 သန်းကိုသာ ဖတ်ထားပါသည်။",
   "knowledgeBase.uploadError": "{name} ကို အပ်လုဒ်တင်၍မရပါ။ ပြန်ကြိုးစားပါ။",
+  "knowledgeBase.docxTooLarge": "ဤ Word ဖိုင်သည် {limit} ထက် ကြီးသောကြောင့် ထည့်၍မရပါ။ ၎င်းကို ခွဲပါ သို့မဟုတ် ပိုသေးသော မိတ္တူတစ်ခု သိမ်းပါ။",
   "knowledgeBase.acceptedFormats": "Markdown၊ TXT၊ DOCX သို့မဟုတ် PDF · {limit} အထိ (DOCX {docxLimit} အထိ)",
   "knowledgeBase.emptyTitle": "အသိပညာစာရွက်စာတမ်း မရှိသေးပါ",
   "knowledgeBase.emptyDescription": "ဤပရောဂျက်နှင့် ၎င်း၏အေးဂျင့်များ အသုံးပြုနိုင်ရန် ကိုးကားအကြောင်းအရာကို အပ်လုဒ်တင်ပါ။",

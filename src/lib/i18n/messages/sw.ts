@@ -6832,6 +6832,7 @@ export const sw: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} imepakiwa.",
   "knowledgeBase.uploadTruncated": "{name} imepakiwa, lakini ni ndefu sana: herufi milioni 2 za kwanza pekee ndizo zilizosomwa.",
   "knowledgeBase.uploadError": "Imeshindwa kupakia {name}. Jaribu tena.",
+  "knowledgeBase.docxTooLarge": "Faili hii ya Word ni kubwa kuliko {limit}, kwa hiyo haiwezi kuongezwa. Igawanye au hifadhi nakala ndogo zaidi.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, au PDF · hadi {limit} (DOCX hadi {docxLimit})",
   "knowledgeBase.emptyTitle": "Bado hakuna hati za maarifa",
   "knowledgeBase.emptyDescription": "Pakia nyenzo za rejeleo ili zipatikane kwa mradi huu na mawakala yake.",

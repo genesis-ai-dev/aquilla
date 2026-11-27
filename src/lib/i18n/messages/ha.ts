@@ -6837,6 +6837,7 @@ export const ha: Catalog = {
   "knowledgeBase.uploadSuccess": "An loda {name}.",
   "knowledgeBase.uploadTruncated": "An loda {name}, amma yana da tsawo sosai: haruffa miliyan 2 na farko kawai aka karanta.",
   "knowledgeBase.uploadError": "An kasa loda {name}. Ku sake gwadawa.",
+  "knowledgeBase.docxTooLarge": "Wannan fayil na Word ya fi {limit} girma, don haka ba za a iya ƙara shi ba. Raba shi ko ajiye ƙaramin kwafi.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, ko PDF · har {limit} (DOCX har {docxLimit})",
   "knowledgeBase.emptyTitle": "Babu takardun ilimi tukuna",
   "knowledgeBase.emptyDescription": "Ku loda kayan nuni don su kasance ga wannan aiki da wakilansa.",

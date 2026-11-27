@@ -5547,6 +5547,7 @@ export const fr: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} téléversé.",
   "knowledgeBase.uploadTruncated": "{name} téléversé, mais il est très long : seuls ses 2 premiers millions de caractères ont été lus.",
   "knowledgeBase.uploadError": "Impossible de téléverser {name}. Réessayez.",
+  "knowledgeBase.docxTooLarge": "Ce fichier Word dépasse {limit} : il ne peut pas être ajouté. Divisez-le ou enregistrez-en une copie plus légère.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX ou PDF · jusqu'à {limit} (DOCX jusqu'à {docxLimit})",
   "knowledgeBase.emptyTitle": "Aucun document de connaissance pour le moment",
   "knowledgeBase.emptyDescription": "Téléversez du matériel de référence pour le rendre disponible à ce projet et à ses agents.",

@@ -5506,6 +5506,7 @@ export const ar: Catalog = {
   "knowledgeBase.uploadSuccess": "تم رفع {name}.",
   "knowledgeBase.uploadTruncated": "تم رفع {name}، لكنه طويل جدًا: لم يُقرأ منه إلا أول 2 مليون حرف.",
   "knowledgeBase.uploadError": "تعذّر رفع {name}. حاول مرة أخرى.",
+  "knowledgeBase.docxTooLarge": "ملف Word هذا أكبر من {limit}، لذا لا يمكن إضافته. قسّمه أو احفظ نسخة أصغر.",
   "knowledgeBase.acceptedFormats": "Markdown أو TXT أو DOCX أو PDF · حتى {limit} (DOCX حتى {docxLimit})",
   "knowledgeBase.emptyTitle": "لا توجد مستندات معرفة بعد",
   "knowledgeBase.emptyDescription": "ارفع مواد مرجعية لإتاحتها لهذا المشروع ووكلائه.",

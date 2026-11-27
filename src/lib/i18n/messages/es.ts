@@ -6553,6 +6553,7 @@ export const es: Catalog = {
   "knowledgeBase.uploadSuccess": "Se subió {name}.",
   "knowledgeBase.uploadTruncated": "Se subió {name}, pero es muy largo: solo se leyeron sus primeros 2 millones de caracteres.",
   "knowledgeBase.uploadError": "No se pudo subir {name}. Inténtalo de nuevo.",
+  "knowledgeBase.docxTooLarge": "Este archivo de Word supera los {limit}, así que no se puede añadir. Divídelo o guarda una copia más pequeña.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX o PDF · hasta {limit} (DOCX hasta {docxLimit})",
   "knowledgeBase.emptyTitle": "Aún no hay documentos en la base de conocimientos",
   "knowledgeBase.emptyDescription": "Sube material de referencia para que esté disponible para este proyecto y sus agentes.",

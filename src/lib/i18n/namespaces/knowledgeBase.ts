@@ -18,6 +18,8 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.uploadTruncated":
       "Uploaded {name}, but it is very long: only its first 2 million characters were read.",
     "knowledgeBase.uploadError": "Could not upload {name}. Try again.",
+    "knowledgeBase.docxTooLarge":
+      "This Word file is larger than {limit}, so it can't be added. Split it or save a smaller copy.",
     // AQU-1763: "up to 25 MB" was the only limit shown, but it is just the
     // upload cap (MAX_KB_ORIGINAL_BYTES). A DOCX is additionally capped at
     // MAX_DOCX_BYTES by the server's extractor. AQU-2551: a PDF is read in
@@ -125,6 +127,11 @@ export const knowledgeBase = defineNamespace({
       "knowledgeBase.uploadError": {
         description: "Toast shown after a knowledge document upload fails.",
         placeholders: { name: "Document filename that failed to upload." },
+      },
+      "knowledgeBase.docxTooLarge": {
+        description:
+          "Shown under the upload-failed toast when a Word (.docx) file is over the size the server can read; the app checks this before uploading. \"Word file\" means a Microsoft Word document. The fix is to split the document or save a smaller copy.",
+        placeholders: { limit: "The DOCX size limit with its unit, e.g. \"2 MB\"." },
       },
       "knowledgeBase.deleteTitle": {
         description: "Destructive confirmation-dialog title.",

@@ -48,6 +48,9 @@ type ErrorCode =
   | "job_failed"
   // AQU-2551: a PDF arrived without the text the app reads from it.
   | "pdf_text_required"
+  // A DOCX over MAX_DOCX_BYTES. The app checks the size before uploading and
+  // words this code itself; the message is for other callers.
+  | "docx_too_large"
 
 function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode) {
   return { body: { error: { code, message } }, status } as const
@@ -119,7 +122,7 @@ function extractText(fileName: string, bytes: Uint8Array, pdfText: string | null
     if (bytes.byteLength > MAX_DOCX_BYTES) {
       return {
         ok: false,
-        code: "validation_failed",
+        code: "docx_too_large",
         message: `file exceeds the ${MAX_DOCX_BYTES}-byte extraction limit`,
         status: 400,
       }

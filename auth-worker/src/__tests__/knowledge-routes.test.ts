@@ -494,6 +494,9 @@ describe("knowledge routes — validation", () => {
     const big = new Uint8Array(2 * 1024 * 1024 + 1)
     const res = await uploadDoc(PROJECT, jwt, big, "big.docx", new FakeBucket())
     expect(res.status).toBe(400)
+    // Its own code, so the app words it instead of showing this message.
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("docx_too_large")
   })
 
   it(".docx of exactly 2 MB is not refused for its size", async () => {

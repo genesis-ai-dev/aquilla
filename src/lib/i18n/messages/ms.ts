@@ -5473,6 +5473,7 @@ export const ms: Catalog = {
   "knowledgeBase.uploadSuccess": "{name} telah dimuat naik.",
   "knowledgeBase.uploadTruncated": "{name} telah dimuat naik, tetapi ia sangat panjang: hanya 2 juta aksara pertamanya dibaca.",
   "knowledgeBase.uploadError": "Tidak dapat memuat naik {name}. Cuba lagi.",
+  "knowledgeBase.docxTooLarge": "Fail Word ini lebih besar daripada {limit}, jadi ia tidak boleh ditambah. Pecahkannya atau simpan salinan yang lebih kecil.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, atau PDF · sehingga {limit} (DOCX sehingga {docxLimit})",
   "knowledgeBase.emptyTitle": "Belum ada dokumen pengetahuan",
   "knowledgeBase.emptyDescription": "Muat naik bahan rujukan supaya projek ini dan ejennya boleh menggunakannya.",

@@ -55,6 +55,9 @@ const PASS_THROUGH_HEADERS = [
   "vary",
 ] as const
 
+/** The policy every proxied response carries: see where it is set. */
+export const RESOURCE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+
 /** Request headers forwarded upstream — enough for conditional + ranged GETs
  *  (so caching keeps working) without leaking the caller's cookies/auth. */
 const FORWARD_HEADERS = [
@@ -158,6 +161,15 @@ export async function proxyResourceRequest(
   // The SPA (aquilla.app) fetches this subdomain cross-origin. These content
   // hosts are already public + keyless, so a wildcard mirrors their own CORS.
   headers.set("access-control-allow-origin", "*")
+  // Anyone with a Door43 or GitHub account chooses what these hosts serve,
+  // and here it is served from a subdomain of ours. The upstreams defuse a
+  // file opened as a page (a scripted SVG, an HTML file) with their own
+  // sandbox policy and nosniff, which the pass-through list above drops. Set
+  // ours instead: a proxied file opened in a tab renders with no script and
+  // no origin. A fetch() or an <img> of it, which is all the app does, is
+  // unaffected.
+  headers.set("content-security-policy", RESOURCE_CSP)
+  headers.set("x-content-type-options", "nosniff")
 
   return new Response(upstreamRes.body, {
     status: upstreamRes.status,

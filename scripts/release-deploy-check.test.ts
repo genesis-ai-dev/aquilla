@@ -48,18 +48,16 @@ describe("jevDecision", () => {
 })
 
 describe("decide", () => {
-  it("deploys only on release-verify success plus a non-FAIL Jev result", () => {
-    expect(decide({ verify: "success", jev: "pass" })).toEqual({ deploy: true, reason: "release-verify success, Jev pass" })
+  // Jev is advisory since 2026-11-27: 87 release HEADs, no PASS, no FAIL.
+  it("deploys on release-verify success, whatever Jev said or did not say", () => {
+    expect(decide({ verify: "success", jev: "pass" })).toEqual({ deploy: true, reason: "release-verify success (Jev, advisory: pass)" })
     expect(decide({ verify: "success", jev: "inconclusive" }).deploy).toBe(true)
     expect(decide({ verify: "success", jev: "unavailable" }).deploy).toBe(true)
+    expect(decide({ verify: "success", jev: "fail" })).toEqual({ deploy: true, reason: "release-verify success (Jev, advisory: fail)" })
+    expect(decide({ verify: "success", jev: null })).toEqual({ deploy: true, reason: "release-verify success (Jev, advisory: not reported)" })
   })
 
-  it("waits while Jev has not reported, rather than deploying past it", () => {
-    expect(decide({ verify: "success", jev: null })).toEqual({ deploy: false, reason: "Jev has not reported on this HEAD yet" })
-  })
-
-  it("holds on a Jev FAIL and on anything but a verify success", () => {
-    expect(decide({ verify: "success", jev: "fail" }).deploy).toBe(false)
+  it("holds on anything but a verify success", () => {
     expect(decide({ verify: "failure", jev: "pass" })).toEqual({ deploy: false, reason: "release-verify is failure" })
     expect(decide({ verify: "in_progress", jev: "pass" }).deploy).toBe(false)
     expect(decide({ verify: undefined, jev: "pass" })).toEqual({ deploy: false, reason: "release-verify is missing" })

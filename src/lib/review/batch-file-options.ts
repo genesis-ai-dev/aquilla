@@ -11,8 +11,8 @@
  * - Reviewer is the consultant who signs work off without rewriting it, and
  *   project lead and above are the team leads who do the second pass. They
  *   may include untouched AI drafts. A cell someone has already validated is
- *   ordinary second-pass work even when `aiDrafted` is still set, so it does
- *   not need that option.
+ *   ordinary second-pass work even when `aiDrafted` is still set: it stays out
+ *   of the AI box and is offered on its own checkbox, on by default.
  *
  * Contributor sits between reviewer and project lead, so this is not a role
  * floor. A missing role fails open, the same way `canPerform` does on a
@@ -24,6 +24,7 @@
 import { ROLE } from "@/lib/frontier/roles"
 import { isVisibleCell } from "@/lib/cells/hidden"
 import { effectiveSourceText } from "@/lib/cell-text"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { SegmentMedium } from "@/lib/sync/cells-read-types"
 
 export function isUntouchedAiDraft(cell: {
@@ -41,6 +42,8 @@ export function canIncludeUntouchedAiDrafts(roleLevel: number | null | undefined
 
 export interface DraftChoiceCell {
   translated: string
+  /** Canonical ref, so a chapter choice can narrow the file. */
+  group?: string | null
   hidden?: boolean
   aiDrafted?: boolean
   activeValidators?: readonly string[] | null
@@ -69,10 +72,21 @@ export interface DraftRunChoices {
   /** "next" keeps the project's completion package size. "all" does not. */
   scope: "next" | "all"
   batchSize: number
+  /**
+   * A chapter label ("GEN 1") narrows the file. Absent or `WHOLE_BOOK` keeps
+   * every cell. The file modal sets it; older callers omit it.
+   */
+  chapter?: string
 }
 
 export interface ValidateRunChoices {
+  /** Cells that do not yet have enough signatures. On by default. */
   includeReadyCells: boolean
+  /**
+   * Cells that already have enough signatures from other people. On by
+   * default. Unticking it is the first-signature run.
+   */
+  includeSignedByOthers: boolean
   includeUntouchedAiDrafts: boolean
   /**
    * AQU-2507: cells a check or rule has flagged. Off by default — a reviewer
@@ -80,6 +94,42 @@ export interface ValidateRunChoices {
    * telemetry so "we accepted the flagged lines too" is on the record.
    */
   includeFlaggedCells: boolean
+  /** See `DraftRunChoices.chapter`. */
+  chapter?: string
+}
+
+/**
+ * The two sign-off checkboxes. One required signature is the ordinary project:
+ * the first box is cells nobody has signed, the second is cells a teammate
+ * already signed. A project that requires more keeps a short cell on the first
+ * box, so the words change with the count and stay true.
+ */
+export function signatureCheckboxCopy(required: number): {
+  label: MessageKey
+  fileHelp: MessageKey
+  booksHelp: MessageKey
+  signedLabel: MessageKey
+  signedFileHelp: MessageKey
+  signedBooksHelp: MessageKey
+} {
+  if (required > 1) {
+    return {
+      label: "editor.batchFile.includeStillShort",
+      fileHelp: "editor.batchFile.includeStillShortHelp",
+      booksHelp: "editor.batchBooks.stillShortHelp",
+      signedLabel: "editor.batchFile.includeEnough",
+      signedFileHelp: "editor.batchFile.includeEnoughHelp",
+      signedBooksHelp: "editor.batchBooks.enoughHelp",
+    }
+  }
+  return {
+    label: "editor.batchFile.includeUnsigned",
+    fileHelp: "editor.batchFile.includeUnsignedHelp",
+    booksHelp: "editor.batchBooks.unsignedHelp",
+    signedLabel: "editor.batchFile.includeSignedByOthers",
+    signedFileHelp: "editor.batchFile.includeSignedByOthersHelp",
+    signedBooksHelp: "editor.batchBooks.signedByOthersHelp",
+  }
 }
 
 function alreadyReviewed(cell: DraftChoiceCell): boolean {

@@ -65,26 +65,39 @@ vi.mock("@/hooks/useProjectMembers", () => ({
 }))
 
 // The row's popovers and dialogs have their own suites; the column is the unit
-// here. The two stand-ins keep only the hand-off the table wires between them:
-// an open Staff popover can ask for Give access on its lane, and Give access
-// can report a grant.
+// here. The stand-ins keep only the hand-offs the table wires between them:
+// an open Staff popover can ask for Give access on its lane, or for a lane
+// grant's removal (AQU-2324), and each dialog can report what it wrote.
 vi.mock("@/components/StaffLanePopover", () => ({
-  StaffLanePopover: ({ open, laneId, onGiveAccess }: {
+  StaffLanePopover: ({ open, laneId, onGiveAccess, onRemoveGrant }: {
     open?: boolean
     laneId?: string | null
     onGiveAccess?: (request: { userId: string; place: { type: "lane"; id: string }; nonce: number }) => void
+    onRemoveGrant?: (request: { orgId: number; person: { userId: string; displayName: string }; grants: { type: "lane"; id: string }[] }) => void
   }) =>
     open ? (
-      <button
-        type="button"
-        data-testid={`staff-add-${laneId}`}
-        onClick={() => onGiveAccess?.({ userId: "11", place: { type: "lane", id: laneId ?? "" }, nonce: 1 })}
-      />
+      <>
+        <button
+          type="button"
+          data-testid={`staff-add-${laneId}`}
+          onClick={() => onGiveAccess?.({ userId: "11", place: { type: "lane", id: laneId ?? "" }, nonce: 1 })}
+        />
+        <button
+          type="button"
+          data-testid={`staff-remove-${laneId}`}
+          onClick={() => onRemoveGrant?.({ orgId: 1, person: { userId: "11", displayName: "bo" }, grants: [{ type: "lane", id: laneId ?? "" }] })}
+        />
+      </>
     ) : null,
 }))
 vi.mock("@/components/org/access/GiveAccessLauncher", () => ({
   GiveAccessLauncher: ({ request, onGranted }: { request: { place?: { id: string } } | null; onGranted?: () => void }) =>
     request ? <button type="button" data-testid={`give-${request.place?.id}`} onClick={() => onGranted?.()} /> : null,
+}))
+vi.mock("@/components/org/access/RemoveAccessDialog", () => ({
+  RemoveAccessDialog: ({ grants, onRemoved }: { grants: { id: string }[]; onRemoved?: () => void }) => (
+    <button type="button" data-testid={`removed-${grants[0]?.id}`} onClick={() => onRemoved?.()} />
+  ),
 }))
 vi.mock("@/components/AssignModal", () => ({ AssignModal: () => null }))
 
@@ -185,6 +198,23 @@ describe("OverviewLaneTable People column", () => {
     fireEvent.click(screen.getByTestId("give-ln-sv"))
 
     await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10", "11"]))
+    expect(peopleIn("French")).toEqual(["12"])
+  })
+
+  // AQU-2324: the table holds the grant's removal dialog (the popover is
+  // remounted as it closes), so the table is what re-reads after it.
+  it("drops the person from the lane's row once their lane grant is removed, without a reload", async () => {
+    laneGrants.byUser = { 11: [{ laneId: "ln-sv", name: "Swedish", level: 400 }] }
+    renderTable()
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10", "11"]))
+
+    // Staff… on the Swedish row → bo's Remove → the grant's dry run → Remove.
+    fireEvent.click(screen.getByTestId("overview-lane-people-Swedish"))
+    fireEvent.click(screen.getByTestId("staff-remove-ln-sv"))
+    laneGrants.byUser = {}
+    fireEvent.click(screen.getByTestId("removed-ln-sv"))
+
+    await waitFor(() => expect(peopleIn("Swedish")).toEqual(["10"]))
     expect(peopleIn("French")).toEqual(["12"])
   })
 })

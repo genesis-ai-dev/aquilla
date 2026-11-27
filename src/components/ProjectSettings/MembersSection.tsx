@@ -29,6 +29,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { RevokeAllDialog } from "@/components/ProjectSettings/RevokeAllDialog"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
 import { RoleDialog } from "@/components/access/RoleDialog"
+import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectScopePath } from "@/hooks/useProjectScopePath"
 import { ScopeBreadcrumb, ScopeGrantChip } from "@/components/access/ScopeBreadcrumb"
@@ -87,6 +88,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
     [members, callerUsername],
   )
   const canManageMembers = canManageProjectMembers(callerLevel)
+  // The org this project sits in, read off the scope breadcrumb's root.
+  const orgCrumb = scopePath[0]?.type === "org" ? Number(scopePath[0].id) : null
+  const projectOrgId = orgCrumb != null && Number.isSafeInteger(orgCrumb) && orgCrumb > 0 ? orgCrumb : null
 
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all")
   const [addOpen, setAddOpen] = useState(false)
@@ -188,10 +192,25 @@ export function MembersSection({ projectId }: { projectId: string }) {
     <>
       <div id="section-members" data-testid="settings-members-section" className="space-y-4">
         {/* AQU-1352 §3.9 rule 1: the scope's breadcrumb is the page title. */}
-        {scopePath.length > 0 && (
-          <h2 className="font-heading text-base font-semibold" data-testid="settings-members-scope">
-            <ScopeBreadcrumb path={scopePath} />
-          </h2>
+        {(scopePath.length > 0 || canManageMembers) && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {scopePath.length > 0 && (
+              <h2 className="font-heading text-base font-semibold" data-testid="settings-members-scope">
+                <ScopeBreadcrumb path={scopePath} />
+              </h2>
+            )}
+            {/* AQU-2324: this project on the Places lens. Add, the invite link,
+                bulk add and a Project lead's Remove stay below — the access
+                page has no equivalent for them yet, and a guest cannot open it
+                at all (the link hides itself for them). */}
+            {canManageMembers && (
+              <ManageAccessLink
+                orgId={projectOrgId}
+                open={{ place: { type: "project", id: projectId } }}
+                className="ml-auto"
+              />
+            )}
+          </div>
         )}
         {/* AQU-2260: below the Project lead floor nothing here can be
             changed; one line says so, instead of a hover on Add a member. */}

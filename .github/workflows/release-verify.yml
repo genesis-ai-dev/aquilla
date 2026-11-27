@@ -1,11 +1,18 @@
 name: Release verify
 
-# The full suite on a release branch, every push. A release branch is a set
-# of cherry-picks (scripts/release-cut.mjs), and a pick that applies cleanly
-# can still depend on a held PR it was built on; this is what catches that
-# before the hourly deploy (release-deploy.yml) reads this check's result
-# for the branch's HEAD. PRs into dev run only the suites their diff touches
-# (ci.yml); the release line runs everything, once, here.
+# Build and type-check on a release branch, every push. A release branch is
+# a set of cherry-picks (scripts/release-cut.mjs), and a pick that applies
+# cleanly can still depend on a held PR it was built on. That shows as a
+# compile error, and this catches it before the deploy (release-deploy.yml)
+# reads this check's result for the branch's HEAD.
+#
+# Until 2026-11-27 this ran the full suite again: lint, every unit shard,
+# and every worker suite. Each of those PRs had already run its suites in
+# ci.yml. In 82 runs from 2026-10-31 the full suite failed twice, once on a
+# runner setup fault, and it took a median 47 minutes (13 after the suites
+# were sharded) from every release. What a cherry-pick slice can break that
+# its PRs did not is the build, so the build is what stays: `pnpm run build`
+# is `tsc -b` plus the Vite build, and each worker has its own type-check.
 
 on:
   push:
@@ -20,65 +27,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck:
+  # Each worker's own `tsc`. auth-worker imports sync-worker source and the
+  # reverse, so both installs are needed for either check.
+  worker-typecheck:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # `tsc -b` under the 6 GiB heap the `typecheck` script sets: the app project
-      # no longer fits Node's default ~4 GiB ceiling with any room to spare.
-      - run: pnpm run typecheck --noEmit
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm run i18n:check
-      - run: pnpm run scan:secrets
-
-  unit:
-    name: unit (shard ${{ matrix.shard }}/3)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run --shard=${{ matrix.shard }}/3
-      - if: matrix.shard == 1
-        run: pnpm test:worker
-
-  # The worker suites run against in-process Postgres (PGlite), one database
-  # per file, so `--shard` splits them cleanly. They were one job run back to
-  # back: 23 minutes of auth-worker, then 47 of sync-worker, on every release
-  # (2026-11-18), which alone put a verified HEAD past the next deploy check.
-  # Shard 1 of each also carries that worker's typecheck.
-  auth-worker:
-    name: auth-worker (shard ${{ matrix.shard }}/3)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -95,50 +47,10 @@ jobs:
         working-directory: auth-worker
       - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
-      - if: matrix.shard == 1
-        run: pnpm run type-check
+      - run: pnpm run type-check
         working-directory: auth-worker
-      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/3
-        working-directory: auth-worker
-
-  sync-worker:
-    name: sync-worker (shard ${{ matrix.shard }}/5)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            auth-worker/pnpm-lock.yaml
-            sync-worker/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm install --frozen-lockfile
-        working-directory: auth-worker
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm run type-check
         working-directory: sync-worker
-      - if: matrix.shard == 1
-        run: pnpm run type-check
-        working-directory: sync-worker
-      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/5
-        working-directory: sync-worker
-
-  agent-worker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-      - run: npm ci && npm run type-check && npm test
-        working-directory: agent-worker
 
   build:
     runs-on: ubuntu-latest
@@ -160,7 +72,7 @@ jobs:
   # The one check name release-deploy.yml reads for the branch HEAD. A
   # skipped or cancelled job fails it.
   release-verify:
-    needs: [typecheck, lint, unit, auth-worker, sync-worker, agent-worker, build]
+    needs: [build, worker-typecheck]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:

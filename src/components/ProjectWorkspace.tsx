@@ -103,6 +103,7 @@ import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
 import { createHealthCardNamer, healthCardRows } from "@/lib/health/health-card-rows"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -289,7 +290,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { sessionKey } from "@/lib/frontier/session-store"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
-import { endTranscribeRunToast, lineWordsToast, transcribeRunProgressTitle } from "@/lib/audio/transcribe-report"
+import { endTranscribeRunToast, lineWordsToast } from "@/lib/audio/transcribe-report"
 import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
 import { findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
@@ -463,7 +464,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, CheckSquare, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw, Info } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { SplitIntoLinesDialog, type SplitMode } from "@/components/timeline/SplitIntoLinesDialog"
 import { NotSplitNoticeClip } from "@/components/timeline/NotSplitNotice"
@@ -722,6 +723,15 @@ import {
   type ValidateRunChoices,
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
+import { BatchBooksDialog, type BatchBooksChoices, type BatchBooksDialogHandle, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
+import { listBatchBooks } from "@/lib/review/batch-books"
+import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
+import { listChapterLabels } from "@/lib/export/chapter-scope"
+import { loadBookCells } from "@/lib/review/load-book-cells"
+import { holdBatchForSync } from "@/lib/review/hold-batch-for-sync"
+import { showBatchSyncTimeoutToast } from "@/lib/review/batch-sync-timeout-toast"
+import { openFlagsInBook } from "@/lib/review/open-flags-in-book"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
@@ -1079,7 +1089,7 @@ export function ProjectWorkspace() {
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
-  const { list: formatLocaleList, time: formatLocaleTime } = useFormat()
+  const { list: formatLocaleList } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   // Leaving the tab pauses playback — a hidden tab can't keep the timeline in time.
@@ -3995,29 +4005,6 @@ export function ProjectWorkspace() {
    * transcribed on its own any more (Sam, Nov 3 and 5). The runner is defined
    * further down, with Split into lines…, and reached through this ref.
    */
-  /**
-   * AQU-2375: a transcription run's progress toast, kept on screen until the
-   * run's last word. Created lazily, on its first progress, and it says
-   * when the hosted limit has paused the run.
-   */
-  const makeTranscribeProgressToast = useCallback(() => {
-    let toastId: string | null = null
-    let title = ""
-    let waitingUntil: number | null = null
-    const show = () => {
-      const description = waitingUntil !== null
-        ? t("audio.bulkProgress.waitingForLimit", { time: formatLocaleTime(waitingUntil) })
-        : undefined
-      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
-      else toast.update(toastId, { type: "loading", title, description })
-    }
-    return {
-      progress(next: string) { title = next; show() },
-      waiting(until: number | null) { waitingUntil = until; if (toastId !== null) show() },
-      get id() { return toastId },
-    }
-  }, [t, formatLocaleTime])
-
   /** AQU-2375: retries the rows of a run that failed; set below, once the
    *  runner it calls exists. */
   const retryTranscribeRowsRef = useRef<(cells: CellData[], kind: TranscribeRunKind, fileId: string, fileName: string) => void>(() => {})
@@ -4031,17 +4018,16 @@ export function ProjectWorkspace() {
    */
   const showTranscribeRunEnd = useCallback((
     report: TranscribeRunReport,
-    opts: { kind: TranscribeRunKind; fileId: string; fileName: string; toastId: string | null; quiet?: boolean },
+    opts: { kind: TranscribeRunKind; fileId: string; fileName: string; quiet?: boolean },
   ) => {
-    // With nothing to say (a quiet run that went well), its progress toast,
-    // which a run carried on after a reload has, is closed.
+    // The live count is the batch's own toast, so the last word is a new one.
     endTranscribeRunToast(
       report,
       {
         kind: opts.kind,
         ...(opts.kind === "import" ? { fileName: opts.fileName } : {}),
         ...(opts.quiet ? { quiet: true } : {}),
-        progressToastId: opts.toastId,
+        progressToastId: null,
       },
       toast,
       (cells) => retryTranscribeRowsRef.current(cells, opts.kind, opts.fileId, opts.fileName),
@@ -4049,10 +4035,13 @@ export function ProjectWorkspace() {
   }, [])
 
   /**
-   * AQU-2375: run a transcription batch with its progress toast and an
-   * honest last word, kept so a page reload doesn't end it. Shared by
-   * Transcribe all, the selected sections, a Retry of the rows that failed,
-   * and a run a reload stopped (`carryOn`).
+   * AQU-2375: run a transcription batch with an honest last word, kept so a
+   * page reload doesn't end it. Shared by Transcribe all, the selected
+   * sections, a Retry of the rows that failed, and a run a reload stopped
+   * (`carryOn`). AQU-2673: while it runs, the batch's own toast
+   * (AudioBulkProgressBanner, fed by the batch-progress store, which a run
+   * carried on after a reload fills too) is the live count, the "waiting for
+   * the limit" line and the cancel control; there is no second spinner toast.
    */
   const runTranscriptionReported = useCallback(async (o: {
     cells: CellData[]
@@ -4069,8 +4058,6 @@ export function ProjectWorkspace() {
       o.carryOn?.handle.end()
       return
     }
-    const progress = makeTranscribeProgressToast()
-    let first = true
     const touched = new Set(o.cells.map((c) => c.fileId))
     let report: TranscribeRunReport
     try {
@@ -4090,27 +4077,12 @@ export function ProjectWorkspace() {
         ...(o.carryOn
           ? { carryOn: o.carryOn }
           : { keep: { fileId: o.fileId, fileName: o.fileName, kind: o.kind } }),
-        ...(!o.quiet || o.carryOn ? {
-          onProgress: (done: number, total: number) => {
-            progress.progress(transcribeRunProgressTitle({
-              kind: o.kind,
-              ...(o.kind === "import" || o.carryOn ? { fileName: o.fileName } : {}),
-              done,
-              total,
-              carriedOn: Boolean(o.carryOn),
-              first,
-            }))
-            first = false
-          },
-        } : {}),
-        onWaiting: (until) => progress.waiting(until),
       })
     } catch (e) {
       console.warn("[transcribe] batch failed:", e)
       const reason = e instanceof Error ? e.message : String(e)
       const failedTitle = t("audio.transcribeRun.failedAll", { reason })
-      if (progress.id !== null) toast.update(progress.id, { type: "error", title: failedTitle, description: undefined })
-      else toast.add({ type: "error", title: failedTitle })
+      toast.add({ type: "error", title: failedTitle })
       return
     } finally {
       // AQU-783: the batch enqueues one cell.audio.attach per row but never
@@ -4124,10 +4096,10 @@ export function ProjectWorkspace() {
     }
     // AQU-2375 (review, Nov 9): the page is going; the next one carries it on.
     if (report.interrupted) return
-    showTranscribeRunEnd(report, { kind: o.kind, fileId: o.fileId, fileName: o.fileName, toastId: progress.id, quiet: o.quiet })
+    showTranscribeRunEnd(report, { kind: o.kind, fileId: o.fileId, fileName: o.fileName, quiet: o.quiet })
   }, [
     project, frontierSession, activeSourceLanguage, activeLaneTargetLanguage, activeLane,
-    getTokenForProjectFile, refreshOutboxPending, revalidateCells, makeTranscribeProgressToast, showTranscribeRunEnd, t,
+    getTokenForProjectFile, refreshOutboxPending, revalidateCells, showTranscribeRunEnd, t,
   ])
   retryTranscribeRowsRef.current = (cells, kind, fileId, fileName) => {
     // The rows that failed, again, row by row: a Retry is the person asking
@@ -13820,8 +13792,11 @@ export function ProjectWorkspace() {
    */
   const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => {
     const flagged = flaggedCellIds()
+    const inFile = project?.id && activeFileId
+      ? cellSummaries.filter((c) => c.fileId === activeFileId)
+      : []
     return summarizeBatchValidate(
-      project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+      applyChapterScope(inFile, choices?.chapter),
       // AQU-1571: the project's text rules, pinned by a unit test of the builder.
       // AQU-983: the file modal passes which groups this run includes. A call
       // with no choices keeps the selection-toolbar defaults (include both).
@@ -14028,10 +14003,16 @@ export function ProjectWorkspace() {
   // untouched AI drafts in a file-wide validation.
   const batchValidateChoicesRef = useRef<ValidateRunChoices>({
     includeReadyCells: true,
+    includeSignedByOthers: true,
     includeUntouchedAiDrafts: false,
     // AQU-2507: a check flag is overruled only on purpose.
     includeFlaggedCells: false,
+    chapter: WHOLE_BOOK,
   })
+  /** AQU-2673: a header run across books hands the loop a summary it already
+   *  built from files the cell store does not hold. Null on the open-file path. */
+  const batchValidateOverrideRef = useRef<BatchValidateSummary | null>(null)
+  const batchBooksHistoryRef = useRef<{ fileId: string | null; fileName: string | null } | null>(null)
   const draftChoicesRef = useRef<DraftRunChoices>({
     includeEmpty: true,
     refreshAiDrafts: false,
@@ -14046,7 +14027,10 @@ export function ProjectWorkspace() {
     // hidden cell never enters the list (`classifyBatchDraft`).
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -14056,7 +14040,10 @@ export function ProjectWorkspace() {
     },
     runCompleteAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -14095,7 +14082,10 @@ export function ProjectWorkspace() {
       // chunk this loop writes and flushes at a time — the event pipeline keeps
       // the protection it was given in AQU-586 — and the loop runs over every
       // chunk, reporting progress, before the one closing message.
-      const summary = batchValidateSummary(batchValidateChoicesRef.current)
+      const summary = batchValidateOverrideRef.current ?? batchValidateSummary(batchValidateChoicesRef.current)
+      const history = batchBooksHistoryRef.current
+      batchValidateOverrideRef.current = null
+      batchBooksHistoryRef.current = null
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -14104,16 +14094,14 @@ export function ProjectWorkspace() {
       const chunks = chunksOf(summary.validatable, batchValidateChunk)
       const total = summary.validatable.length
       void (async () => {
-        // A run of more than one chunk takes long enough to need saying so.
-        // `timeout: 0` keeps it up until this run replaces it with its own
-        // closing message; a single-chunk run keeps the old silence-then-toast.
-        const progressToastId = chunks.length > 1
-          ? toast.add({
+        // A run of more than one chunk takes long enough to need saying so,
+        // and a single chunk still says it is working. `timeout: 0` keeps the
+        // toast up until this run replaces it with its own closing message.
+        const progressToastId = toast.add({
             type: "loading",
             title: t("editor.batchValidate.progress", { done: 0, total }),
             timeout: 0,
           })
-          : null
         const closeProgress = () => { if (progressToastId != null) toast.close(progressToastId) }
         try {
           // AQU-1486: ask what the run's repetitions get BEFORE anything is
@@ -14130,8 +14118,8 @@ export function ProjectWorkspace() {
             {
               labelKey: "editor.history.stepValidateMany",
               labelParams: { count: total },
-              fileId: activeFileId,
-              fileName: activeFileNameRef.current,
+              fileId: history?.fileId ?? activeFileId,
+              fileName: history?.fileName ?? activeFileNameRef.current,
             },
             async () => {
               let done = 0
@@ -14249,46 +14237,71 @@ export function ProjectWorkspace() {
       if (targets.length === 0) return
       const projectId = project.id
       void (async () => {
-        // AQU-1767 phase 2: the whole run is ONE history step.
-        await withGroup(
-          {
-            labelKey: "editor.history.stepValidateAudioMany",
-            labelParams: { count: targets.length },
-            fileId: activeFileId,
-            fileName: activeFileNameRef.current,
-          },
-          async () => {
-            for (const target of targets) {
-              await emitCellAudioValidate({
-                projectId,
-                fileId: target.fileId,
-                cellId: target.cellId,
-                audioId: target.audioId,
-                ...(activeLane ? { targetLang: activeLane } : {}),
-                author: currentUsername,
-                surface: "batch", // AQU-1572
-              })
-              recordStep({
-                kind: "vote.audio",
-                data: { cellId: target.cellId, audioId: target.audioId, voted: true },
-                labelKey: "editor.history.stepValidateAudio",
-                fileId: activeFileId,
-              })
-            }
-          },
-          { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
-        )
-        await refreshOutboxPending()
-        // EVERY file the run touched, not just the open one. On a file with an
-        // audio-cue sibling the takes live on the heard lines, so poking only
-        // `activeFileId` left the file that actually changed stale — the same
-        // shape runTranscribeAll already guards against. The flush lives in
-        // the shared commit so every audio-validation path orders it the same
-        // way (AQU-490, 2026-09-22).
-        await commitAudioValidation(
-          targets.map((target) => target.fileId),
-          { getTokenForFile: getTokenForProjectFile },
-        )
+        const total = targets.length
+        const progressToastId = toast.add({
+          type: "loading",
+          title: t("editor.batchValidate.audioProgress", { done: 0, total }),
+          timeout: 0,
+        })
+        try {
+          // AQU-1767 phase 2: the whole run is ONE history step.
+          await withGroup(
+            {
+              labelKey: "editor.history.stepValidateAudioMany",
+              labelParams: { count: targets.length },
+              fileId: activeFileId,
+              fileName: activeFileNameRef.current,
+            },
+            async () => {
+              let done = 0
+              for (const target of targets) {
+                await emitCellAudioValidate({
+                  projectId,
+                  fileId: target.fileId,
+                  cellId: target.cellId,
+                  audioId: target.audioId,
+                  ...(activeLane ? { targetLang: activeLane } : {}),
+                  author: currentUsername,
+                  surface: "batch", // AQU-1572
+                })
+                recordStep({
+                  kind: "vote.audio",
+                  data: { cellId: target.cellId, audioId: target.audioId, voted: true },
+                  labelKey: "editor.history.stepValidateAudio",
+                  fileId: activeFileId,
+                })
+                done += 1
+                toast.update(progressToastId, {
+                  type: "loading",
+                  title: t("editor.batchValidate.audioProgress", { done, total }),
+                })
+              }
+            },
+            { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
+          )
+          await refreshOutboxPending()
+          // EVERY file the run touched, not just the open one. On a file with an
+          // audio-cue sibling the takes live on the heard lines, so poking only
+          // `activeFileId` left the file that actually changed stale — the same
+          // shape runTranscribeAll already guards against. The flush lives in
+          // the shared commit so every audio-validation path orders it the same
+          // way (AQU-490, 2026-09-22).
+          await commitAudioValidation(
+            targets.map((target) => target.fileId),
+            { getTokenForFile: getTokenForProjectFile },
+          )
+          toast.update(progressToastId, {
+            type: "success",
+            title: t("editor.batchValidate.audioDone", { count: total }),
+            timeout: 5000,
+          })
+        } catch {
+          toast.update(progressToastId, {
+            type: "error",
+            title: t("editor.batchValidate.failedTitle"),
+            timeout: 8000,
+          })
+        }
       })()
     },
     runTranscribeAll: () => {
@@ -14305,10 +14318,10 @@ export function ProjectWorkspace() {
       // number offered and the work done cannot disagree.
       const cells =
         audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      // Same lazy toast as the post-import run: created on the first progress
-      // call, so a run with nothing to transcribe never leaves a spinner
-      // hanging. AQU-2375: kept so a reload doesn't end it, and its last word
-      // counts the rows that failed, with a Retry for them.
+      // AQU-2375: kept so a reload doesn't end it, and its last word counts
+      // the rows that failed, with a Retry for them. AQU-2673: the batch's
+      // own toast (AudioBulkProgressBanner) is the live count and the cancel
+      // control; this run adds only its closing line.
       void runTranscriptionReported({
         cells,
         kind: "all",
@@ -14398,7 +14411,329 @@ export function ProjectWorkspace() {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
     return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
   }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
-  const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
+  const [batchFileModal, setBatchFileModal] = useState<(BatchFileModalRequest & { chapterKey: string | null }) | null>(null)
+  // The chapter the table is showing, including the text view. A scroll writes
+  // the ref and does not re-render the workspace. The file id rides along so
+  // a chapter from the previous file cannot open the next book's dialog.
+  // The timeline's own pick stays on chosenScopeKey.
+  const viewChapterKeyRef = useRef<{ fileId: string | null; key: string | null }>({ fileId: null, key: null })
+  const booksDialogRef = useRef<BatchBooksDialogHandle>(null)
+  const openBatchFileModal = useCallback((request: BatchFileModalRequest) => {
+    const seen = viewChapterKeyRef.current
+    setBatchFileModal({
+      ...request,
+      chapterKey: seen.fileId === activeFileId ? seen.key : null,
+    })
+  }, [activeFileId])
+  const openFileChapters = useMemo(
+    () => listChapterLabels(activeFileId ? cellSummaries.filter((cell) => cell.fileId === activeFileId) : []),
+    [cellSummaries, activeFileId],
+  )
+  const batchBooks = useMemo(() => listBatchBooks(project?.files ?? []), [project?.files])
+  const runAcrossBooks = useCallback((request: BatchBooksRequest, choices: BatchBooksChoices) => {
+    if (!project) return
+    const names = new Map(batchBooks.map((book) => [book.id, book.name]))
+    void (async () => {
+      let readingId: ReturnType<typeof toast.add> | null = null
+      try {
+        // An unvalidate still in the outbox still looks like this person's
+        // signature, so the run would skip the cell. Wait, then read.
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            readingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            readingId,
+          )
+          return
+        }
+        const firstName = names.get(choices.fileIds[0] ?? "") ?? ""
+        if (readingId) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+          })
+        } else {
+          readingId = toast.add({
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+            timeout: 0,
+          })
+        }
+        const byFile = new Map<string, Awaited<ReturnType<typeof loadBookCells>>>()
+        // Unresolved checks are collected per book after the dialog has closed,
+        // while this loading toast is still up. The open book already has its
+        // flags. With the box on, no book is checked.
+        const leaveFlaggedOut = request === "validate" && !choices.includeFlaggedCells
+        const flagged = leaveFlaggedOut ? new Set<string>() : null
+        for (const fileId of choices.fileIds) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: names.get(fileId) ?? "" }),
+          })
+          let cells
+          // After a wait the open book's store can still show the signature
+          // that just synced away, until the next render. Read the server.
+          if (fileId === activeFileId && outcome !== "synced") {
+            cells = getActiveCells().filter((cell) => cell.fileId === fileId)
+            if (flagged) {
+              for (const id of flaggedCellIds()) flagged.add(id)
+            }
+          } else {
+            const mint = await getTokenForProjectFile(project.id, fileId)
+            if (!mint.token) throw new Error(names.get(fileId) ?? fileId)
+            cells = await loadBookCells({
+              projectId: project.id,
+              fileId,
+              jwt: mint.token,
+              lane: activeLane,
+              username: currentUsername,
+              requiredValidations: validationCount,
+            })
+            if (flagged) {
+              const found = await openFlagsInBook({
+                cells,
+                username: currentUsername,
+                myScopes,
+                activeLane,
+                allowSelfValidation: project.allowSelfValidation,
+                includeReadyCells: choices.includeReadyCells,
+                includeSignedByOthers: choices.includeSignedByOthers,
+                validationCount,
+                includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+                projectRules: rules,
+                rulesForCell: libraryLint.rulesForCell,
+                libraryMayLint: libraryLint.signature !== "",
+              })
+              for (const id of found) flagged.add(id)
+            }
+          }
+          byFile.set(fileId, cells)
+        }
+        if (readingId) toast.close(readingId)
+        if (request === "draft") {
+          for (const cells of byFile.values()) {
+            const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+              includeEmpty: choices.includeEmpty,
+              refreshAiDrafts: choices.refreshAiDrafts,
+              scope: "all",
+              batchSize: completionBatchSizeFor(project),
+              chapter: WHOLE_BOOK,
+            })
+            if (chosen.length > 0) await completeBatch(chosen)
+          }
+          return
+        }
+        const summary = summarizeBatchValidate(
+          [...byFile.values()].flat().map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId: choices.fileIds[0] ?? activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            ...(flagged
+              ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) }
+              : {}),
+            includeReadyCells: choices.includeReadyCells,
+            includeSignedByOthers: choices.includeSignedByOthers,
+            includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+            includeFlaggedCells: choices.includeFlaggedCells,
+          },
+        )
+        batchValidateChoicesRef.current = {
+          includeReadyCells: choices.includeReadyCells,
+          includeSignedByOthers: choices.includeSignedByOthers,
+          includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+          includeFlaggedCells: choices.includeFlaggedCells,
+          chapter: WHOLE_BOOK,
+        }
+        batchValidateOverrideRef.current = summary
+        const firstId = choices.fileIds[0] ?? null
+        batchBooksHistoryRef.current = choices.fileIds.length > 1
+          ? { fileId: firstId, fileName: t("editor.batchBooks.historyName", { count: choices.fileIds.length }) }
+          : { fileId: firstId, fileName: names.get(firstId ?? "") ?? null }
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        if (readingId) toast.close(readingId)
+        const name = err instanceof Error ? err.message : ""
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name: name || (names.get(choices.fileIds[0] ?? "") ?? "") }),
+        })
+      }
+    })()
+  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, rules, libraryLint, actionCtx, actionArgs, outboxFlushNow, t])
+  /**
+   * Batch validate text and Draft AI text. Same wait as the book runs: the
+   * confirm button has been pressed, and a pending edit must land before the
+   * cells are classified.
+   */
+  const runFileBatchAfterSync = useCallback((
+    request: "validate" | "draft",
+    choices: ValidateRunChoices | DraftRunChoices,
+  ) => {
+    if (!project || !activeFileId) return
+    const fileName = project.files.find((file) => file.id === activeFileId)?.name ?? ""
+    void (async () => {
+      let waitingId: ReturnType<typeof toast.add> | null = null
+      try {
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            waitingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            waitingId,
+          )
+          return
+        }
+        if (waitingId) toast.close(waitingId)
+        waitingId = null
+        if (outcome === "idle") {
+          if (request === "validate") {
+            batchValidateChoicesRef.current = choices as ValidateRunChoices
+            workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+          } else {
+            const draft = choices as DraftRunChoices
+            draftChoicesRef.current = draft
+            const id = draft.scope === "next" ? "run-completions" : "complete-all"
+            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
+          }
+          return
+        }
+        const mint = await getTokenForProjectFile(project.id, activeFileId)
+        if (!mint.token) throw new Error(fileName)
+        const cells = await loadBookCells({
+          projectId: project.id,
+          fileId: activeFileId,
+          jwt: mint.token,
+          lane: activeLane,
+          username: currentUsername,
+          requiredValidations: validationCount,
+        })
+        if (request === "draft") {
+          const draft = choices as DraftRunChoices
+          const chosen = selectBatchDraft(
+            classifyBatchDraft(applyChapterScope(cells, draft.chapter)),
+            {
+              includeEmpty: draft.includeEmpty,
+              refreshAiDrafts: draft.refreshAiDrafts,
+              scope: draft.scope,
+              batchSize: completionBatchSizeFor(project),
+            },
+          )
+          if (chosen.length > 0) await completeBatch(chosen)
+          return
+        }
+        const validate = choices as ValidateRunChoices
+        const scoped = applyChapterScope(cells, validate.chapter)
+        const flagged = validate.includeFlaggedCells
+          ? null
+          : await openFlagsInBook({
+            cells: scoped,
+            username: currentUsername,
+            myScopes,
+            activeLane,
+            allowSelfValidation: project.allowSelfValidation,
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            validationCount,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            projectRules: rules,
+            rulesForCell: libraryLint.rulesForCell,
+            libraryMayLint: libraryLint.signature !== "",
+          })
+        batchValidateChoicesRef.current = validate
+        batchValidateOverrideRef.current = summarizeBatchValidate(
+          scoped.map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            ...(flagged ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) } : {}),
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            includeFlaggedCells: validate.includeFlaggedCells,
+          },
+        )
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        if (waitingId) toast.close(waitingId)
+        const name = err instanceof Error && err.message ? err.message : fileName
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name }),
+        })
+      }
+    })()
+  }, [project, activeFileId, outboxFlushNow, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, rules, libraryLint, actionCtx, actionArgs, t])
+  const booksMenuItems = useMemo((): OverflowMenuItem[] => {
+    if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
+    const level = project.syncRole?.level ?? null
+    const items: OverflowMenuItem[] = [
+      { id: "books-section", type: "label", label: t("editor.batchBooks.section") },
+    ]
+    if (canPerform("cell.validate", level)) {
+      items.push({
+        id: "validate-books",
+        label: t("editor.batchBooks.menuValidate"),
+        icon: CheckSquare,
+        onClick: () => booksDialogRef.current?.open("validate"),
+      })
+    }
+    if (canPerform("target.cell.commit", level)) {
+      items.push({
+        id: "draft-books",
+        label: t("editor.batchBooks.menuDraft"),
+        icon: Sparkles,
+        onClick: () => booksDialogRef.current?.open("draft"),
+      })
+    }
+    return items.length > 1 ? items : []
+  }, [project, batchBooks.length, activeLaneDelivers, t])
   /**
    * AQU-2507: the open-check-flag predicate the batch modal renders its
    * "Also validate N cells with open check flags" box from — the SAME question
@@ -14410,16 +14745,32 @@ export function ProjectWorkspace() {
     const flagged = flaggedCellIds()
     return (cellId: string) => flagged.has(cellId)
   }, [batchFileModal, flaggedCellIds])
+  // The verse list under "unresolved checks" names the first open check on
+  // each cell. Built only while the dialog is open.
+  const batchModalFlagIssue = useMemo(() => {
+    if (!batchFileModal) return undefined
+    const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
+    const issues = new Map<string, string>()
+    for (const cell of readAtVersion(cellStoreVersion, getActiveCells)) {
+      if (activeFileId && cell.fileId !== activeFileId) continue
+      const found = infractions.get(cell.id)
+      if (!found || found.length === 0) continue
+      const active = partitionInfractions(found, cell.waivers).active
+      const line = summarizeCellIssues(active.slice(0, 1), ruleById, t)[0]
+      if (line) issues.set(cell.id, formatCellIssueLine(line))
+    }
+    return (cellId: string) => issues.get(cellId)
+  }, [batchFileModal, rules, cellStoreVersion, getActiveCells, activeFileId, infractions, t])
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
     // AQU-983: drafting and text validation open the file modal. The plain
     // confirm dialog stays for the actions that only need a yes.
     if (action.opensFileModal === "validate") {
-      setBatchFileModal({ kind: "validate" })
+      openBatchFileModal({ kind: "validate" })
       return
     }
     if (action.opensFileModal === "draft-next" || action.opensFileModal === "draft-all") {
-      setBatchFileModal({
+      openBatchFileModal({
         kind: "draft",
         scope: action.opensFileModal === "draft-next" ? "next" : "all",
       })
@@ -14430,7 +14781,7 @@ export function ProjectWorkspace() {
     } else {
       action.run(actionCtx, actionArgs)
     }
-  }, [actionCtx, actionArgs])
+  }, [actionCtx, actionArgs, openBatchFileModal])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -14863,12 +15214,11 @@ export function ProjectWorkspace() {
         if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
         return false
       }
-      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
       // AQU-2212: a pick reads in the voice picked, before the cast settings
       // catch up; otherwise the line's own cast voice. Named while it runs.
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
-      const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
+      const work = whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
         // AQU-2511: the lane's own voices and cast — the same view `voiceName`
         // above is read from, so the take comes back in the voice just named.
         project: audioProject ?? project,
@@ -14884,12 +15234,20 @@ export function ProjectWorkspace() {
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
         ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
-      if (!opts?.quiet) {
-        toast.add(ok
-          ? { type: "success", title: t("editor.timeline.regenerateDone") }
-          : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      }
-      return ok
+      // Make speech reports its own progress. A single line keeps one toast:
+      // "Generating…" becomes the result, including when generation fails.
+      if (opts?.quiet) return work
+      return toast.promise(
+        work.then((ok) => {
+          if (!ok) throw new Error("regenerate-failed")
+          return true
+        }),
+        {
+          loading: { title: t("editor.timeline.regenerateStarted") },
+          success: { title: t("editor.timeline.regenerateDone") },
+          error: { title: t("editor.timeline.regenerateFailed") },
+        },
+      ).then(() => true, () => false)
     },
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
@@ -15343,23 +15701,28 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(inspectedTake.cellId)
     const story = owner ? takeStory(owner.cell, inspectedTake.audioId, tts.laneSettings) : null
     if (!story) return
-    toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
-    void runMakeSpeech(
-      [inspectedTake.cellId],
-      { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
-      makeSpeechActions,
-      () => {},
-    ).then((result) => {
-      const ok = result.get(inspectedTake.cellId)?.kind === "done"
-      toast.add(ok
-        ? { type: "success", title: t("editor.timeline.regenerateDone") }
-        : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      if (!ok) return
+    const cellId = inspectedTake.cellId
+    void toast.promise(
+      runMakeSpeech(
+        [cellId],
+        { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
+        makeSpeechActions,
+        () => {},
+      ).then((result) => {
+        if (result.get(cellId)?.kind !== "done") throw new Error("regenerate-failed")
+        return result
+      }),
+      {
+        loading: { title: t("editor.timeline.regenerateStarted") },
+        success: { title: t("editor.timeline.regenerateDone") },
+        error: { title: t("editor.timeline.regenerateFailed") },
+      },
+    ).then(() => {
       // Follow the line to the take that plays now, so the panel shows the new one.
-      const next = resolveTakeCellRef.current(inspectedTake.cellId)
+      const next = resolveTakeCellRef.current(cellId)
       const audioId = next ? lineTake(next.cell).audioId : undefined
-      if (audioId) setInspectedTake((cur) => (cur?.cellId === inspectedTake.cellId ? { ...cur, audioId } : cur))
-    })
+      if (audioId) setInspectedTake((cur) => (cur?.cellId === cellId ? { ...cur, audioId } : cur))
+    }, () => {})
   }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
 
   /**
@@ -16781,8 +17144,12 @@ export function ProjectWorkspace() {
   // milestone the timeline draws. A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
-    setChosenScopeKey(key)
-  }, [])
+    viewChapterKeyRef.current = { fileId: activeFileId ?? null, key }
+    // A book timeline, or a timed file split into milestones, follows the
+    // page. Otherwise the report only feeds the batch dialog and must not
+    // re-render this shell.
+    if (sequenceTimeline || splitByMilestone) setChosenScopeKey(key)
+  }, [sequenceTimeline, splitByMilestone, activeFileId])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line. With the split off, that run
   // stays on the whole book's clock. With the split on, the run is the
@@ -19552,6 +19919,13 @@ export function ProjectWorkspace() {
 
     items.push({ id: "sep-file-actions", type: "separator" })
     items.push({ id: "file-section", type: "label", label: t("nav.fileMenu.section.file") })
+    // The same File details item the sidebar file menu opens.
+    items.push({
+      id: "file-details",
+      label: t("fileDetails.menuItem"),
+      icon: Info,
+      onClick: () => setDetailsFileId(activeFileId),
+    })
     if (suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)) {
       items.push({
         id: "redetect-suggestions",
@@ -20549,6 +20923,7 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
+            extraMenuItems={booksMenuItems}
             onImport={project ? handleHeaderImport : undefined}
             importDisabledReason={importDenialReason}
             onSettings={project ? openProjectSettings : undefined}
@@ -21681,11 +22056,11 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
-            // The table names the milestone on screen. A book always reports it.
-            // A timed file reports it while Split into milestones is on, so
-            // the timeline follows that page and does not re-render the shell
-            // on every scroll while the split is off.
-            onActiveChapterChange={sequenceTimeline || splitByMilestone ? handleTableChapterChange : undefined}
+            // The table names the milestone on screen, including the text view,
+            // so a batch on this book opens on the chapter in view. Chosen
+            // scope moves only for a book timeline or a split timed file, so a
+            // scroll does not re-render this shell otherwise.
+            onActiveChapterChange={handleTableChapterChange}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               </ChapterNavTrailingContext.Provider>
@@ -22670,6 +23045,11 @@ export function ProjectWorkspace() {
           request={batchFileModal}
           batchSize={completionBatchSizeFor(project)}
           chunkSize={batchValidateChunk}
+          bookName={activeFile
+            ? (activeFile.bookCode ? (getBookName(activeFile.bookCode) ?? activeFile.name) : activeFile.name)
+            : undefined}
+          chapters={openFileChapters}
+          initialChapter={initialChapterScope(openFileChapters, batchFileModal.chapterKey)}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           validateCandidates={activeFileId
             ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
@@ -22686,21 +23066,28 @@ export function ProjectWorkspace() {
             // same predicate the run then applies.
             hasOpenFlags: batchModalOpenFlags,
           }}
+          flagIssue={batchModalFlagIssue}
           draftCells={batchFileModal.kind === "draft" && activeFileId
             ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
             : []}
           onConfirmValidate={(choices) => {
-            batchValidateChoicesRef.current = choices
-            workspaceActions.find((action) => action.id === "batch-validate")
-              ?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("validate", choices)
           }}
           onConfirmDraft={(choices) => {
-            draftChoicesRef.current = choices
-            const id = choices.scope === "next" ? "run-completions" : "complete-all"
-            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("draft", choices)
           }}
+        />
+      )}
+      {project && (
+        <BatchBooksDialog
+          ref={booksDialogRef}
+          books={batchBooks}
+          initialFileId={activeFileId}
+          validationCount={validationCount}
+          canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
+          onConfirm={runAcrossBooks}
         />
       )}
       {pendingActionConfirm?.requiresConfirmation && (

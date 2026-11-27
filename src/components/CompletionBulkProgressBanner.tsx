@@ -1,6 +1,5 @@
-// AQU-235: Banner that surfaces batch AI completion progress.
-// Subscribes to the completion batch progress store; renders nothing when idle.
-// Mirrors AudioBulkProgressBanner — same visual pattern, different data source.
+// AQU-235: Batch AI completion progress, shown as a bottom-right toast.
+// Subscribes to the completion batch progress store; the toast is absent when idle.
 //
 // AQU-361: when a run finishes with one or more sub-batches skipped (after
 // retry) the store keeps `progress` around with `finished: true` instead of
@@ -13,9 +12,11 @@
 // bar that just sits there; and EVERY way a run can end — done, stopped,
 // failed, interrupted by a reload — leaves a terminal state with the remainder
 // one click from being drafted. The same component renders inline in the
-// editor and floating everywhere else (CompletionBatchStatusHost).
+// editor and, when the editor is closed, from the app-wide host
+// (CompletionBatchStatusHost). Both publish the same toast.
 
 import { useEffect, useState } from "react"
+import { useProgressToast } from "@/components/batch/progress-toast"
 import { Link, useInRouterContext } from "react-router-dom"
 import { X, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -189,16 +190,50 @@ export function CompletionBulkProgressBanner({
   /** `inline` in the editor; `floating` when hosted app-wide. */
   variant?: "inline" | "floating"
 }) {
-  // `useT` before the idle early-return: hooks cannot sit after a conditional.
-  const t = useT()
   const progress = useCompletionBatchProgress()
   useEffect(() => {
     if (variant !== "inline") return
     return registerInlineBatchCompletionBanner()
   }, [variant])
   useAutoDismissShortDoneRun(progress)
-  if (!progress) return null
+  const body = progress ? <CompletionStatus progress={progress} /> : null
+  useProgressToast({
+    id: progress ? completionToastId(progress) : "completion-batch",
+    active: progress != null,
+    type: progress ? completionToastType(progress) : "loading",
+    body,
+    onClose: closeCompletionToast,
+  })
+  return null
+}
 
+function completionToastId(progress: CompletionBatchProgress): string {
+  const phase = progress.unavailable
+    ? "unavailable"
+    : progress.finished
+      ? (progress.outcome ?? "finished")
+      : "running"
+  return `completion-batch:${progress.runId}:${phase}`
+}
+
+function completionToastType(progress: CompletionBatchProgress): string {
+  if (progress.unavailable) return "error"
+  if (!progress.finished) return progress.stalled ? "warning" : "loading"
+  if (progress.outcome === "done") return "success"
+  if (progress.outcome === "failed") return "error"
+  return "warning"
+}
+
+/** The toast's own close. A live run stops. A finished one is dismissed. */
+function closeCompletionToast() {
+  const current = getCompletionBatchProgress()
+  if (!current) return
+  if (current.finished || current.unavailable) dismissBatchCompletionSummary()
+  else cancelBatchCompletion()
+}
+
+function CompletionStatus({ progress }: { progress: CompletionBatchProgress }) {
+  const t = useT()
   const { total, done, cancelled, failed, finished, outcome, scope, stalled, unavailable } = progress
   const fileName = scope.fileName
 
@@ -211,7 +246,7 @@ export function CompletionBulkProgressBanner({
         role="alert"
         data-testid="completion-batch-status"
         data-outcome="unavailable"
-        className="flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-sm"
+        className="flex items-center gap-2 text-sm"
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>{t("editor.ai.serviceUnavailable")}</span>
@@ -229,7 +264,7 @@ export function CompletionBulkProgressBanner({
           role="status"
           data-testid="completion-batch-status"
           data-outcome="done"
-          className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-background px-3 py-2 text-sm shadow-sm"
+          className="flex items-center gap-2 text-sm"
         >
           <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
           <span>
@@ -262,9 +297,7 @@ export function CompletionBulkProgressBanner({
         role={loud ? "alert" : "status"}
         data-testid="completion-batch-status"
         data-outcome={outcome ?? "failed"}
-        className={`rounded-md border bg-background px-3 py-2 text-sm shadow-sm ${
-          loud ? "border-destructive/40" : "border-amber-500/40"
-        }`}
+        className={`text-sm ${loud ? "text-destructive" : ""}`}
       >
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${loud ? "text-destructive" : "text-amber-600"}`} />
@@ -291,9 +324,7 @@ export function CompletionBulkProgressBanner({
       role="status"
       data-testid="completion-batch-status"
       data-outcome={stalled ? "stalled" : "running"}
-      className={`rounded-md border bg-background px-3 py-2 text-sm ${
-        stalled ? "border-amber-500/60" : ""
-      } ${variant === "floating" ? "shadow-sm" : ""}`}
+      className={`text-sm ${stalled ? "text-amber-700 dark:text-amber-400" : ""}`}
     >
       <div className="flex items-center gap-2">
         <span className="max-w-[40%] truncate font-medium">
@@ -355,9 +386,9 @@ export function CompletionBulkProgressBanner({
 /**
  * AQU-2654: the batch outlives the gesture that started it and the page it
  * was started on — the loop keeps drafting after the user leaves the editor.
- * Mounted once at the app root, this shows the same banner wherever the
- * editor's inline one is not on screen, and restores an interrupted run's
- * terminal state after a reload.
+ * Mounted once at the app root. While the editor is open its own mount owns
+ * the toast; everywhere else this host does, and it restores an interrupted
+ * run's terminal state after a reload.
  */
 export function CompletionBatchStatusHost() {
   const inlineMounted = useInlineBatchCompletionBannerMounted()
@@ -365,9 +396,5 @@ export function CompletionBatchStatusHost() {
     void restoreInterruptedBatchCompletion()
   }, [])
   if (inlineMounted) return null
-  return (
-    <div className="fixed bottom-4 left-1/2 z-50 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 empty:hidden">
-      <CompletionBulkProgressBanner variant="floating" />
-    </div>
-  )
+  return <CompletionBulkProgressBanner variant="floating" />
 }

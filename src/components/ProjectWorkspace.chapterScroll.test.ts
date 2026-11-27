@@ -24,7 +24,12 @@ describe("scrolling a book's table into another chapter (AQU-1758)", () => {
   it("the table's chapter report only names the chapter on screen", () => {
     const start = source.indexOf("const handleTableChapterChange = useCallback(")
     expect(start).toBeGreaterThan(-1)
-    const body = source.slice(start, source.indexOf("\n  }, [])", start))
+    // Stop at this callback. The next one, handleChapterPicked, is the pick
+    // that may end playback; a scroll must not.
+    const end = source.indexOf("\n  }, [", start)
+    expect(end).toBeGreaterThan(start)
+    const body = source.slice(start, end)
+    expect(body).toContain("viewChapterKeyRef.current = { fileId: activeFileId ?? null, key }")
     expect(body).toContain("setChosenScopeKey(key)")
     expect(body).not.toMatch(/stopQueue|startQueue|applyChapterPick/)
   })

@@ -15,6 +15,7 @@ vi.mock("@/lib/audio/transcribe", () => ({
 import { cancelBatchTranscribe, runBatchJobs, runTranscribeAll } from "@/lib/audio/batch-audio"
 import { cancelBatchChangeVoice } from "@/lib/audio/change-voice-batch"
 import { AudioBulkProgressBanner } from "./AudioBulkProgressBanner"
+import { Toaster } from "@/components/ui/toast"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -28,7 +29,12 @@ describe("AudioBulkProgressBanner — Change voice (AQU-1109)", () => {
     const user = userEvent.setup()
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })
-    renderWithTooltips(<AudioBulkProgressBanner />)
+    renderWithTooltips(
+      <>
+        <Toaster />
+        <AudioBulkProgressBanner />
+      </>,
+    )
 
     let run!: Promise<void>
     act(() => {
@@ -64,7 +70,12 @@ describe("AudioBulkProgressBanner — transcription limit (AQU-1681)", () => {
     })
     const cell = { id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav" } } } as unknown as CellData
     const run = runTranscribeAll({ cells: [cell], projectId: "p1", session: { jwt: "j", username: "u" } as FrontierSession })
-    render(<AudioBulkProgressBanner />)
+    render(
+      <>
+        <Toaster />
+        <AudioBulkProgressBanner />
+      </>,
+    )
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
     // 899 s, plus the second the batch adds, from 19:30:00 is 19:45:00.
     expect(screen.getByTestId("bulk-progress-waiting").textContent).toMatch(/^Transcription limit reached, continuing at 7:45/)

@@ -5185,7 +5185,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10355,7 +10357,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -15510,7 +15514,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -20693,7 +20699,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -27150,7 +27158,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -33609,7 +33619,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -40138,7 +40150,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -46716,7 +46730,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53207,7 +53223,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -61645,7 +61663,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -70087,7 +70107,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -87427,7 +87449,9 @@
     "editor.batchBooks.loadFailed": "52ca028d2453b09b",
     "editor.batchBooks.historyName": "84aef56bda4ea663",
     "editor.batchValidate.audioProgress": "04d03e05ba7e91e1",
-    "editor.batchValidate.audioDone": "153aff8b33625328"
+    "editor.batchValidate.audioDone": "153aff8b33625328",
+    "error.airtable.analyze": "d92a4ae3670bcac0",
+    "error.airtable.addFields": "6256c700d3c93289"
   },
   "ha": {
     "common.save": "1509f561f2416598",

@@ -31,10 +31,16 @@ describe("the merge rule the bots follow", () => {
     expect(agents).not.toContain("merged the ticket into `main`")
   })
 
-  it("holds a release HEAD only on a smart-Jev FAIL", () => {
+  // Smart Jev is advisory since 2026-11-27 (docs/RELEASE-RISK-GATES.md §7;
+  // `decide` in scripts/release-deploy-check.mjs deploys whatever it said).
+  // Until then both docs said a FAIL holds the HEAD, and this test pinned
+  // "does not deploy". The two old sentences must not come back.
+  it("says no smart-Jev verdict holds a release HEAD", () => {
     for (const text of [regimen, deploy]) {
       expect(text).toContain("Only a result for the branch's current HEAD counts")
-      expect(text).toContain("does not deploy")
+      expect(text).toContain("No Jev verdict holds the deploy")
+      expect(text).not.toContain("means that HEAD does not deploy")
+      expect(text).not.toContain("That HEAD does not deploy")
       expect(text).toContain("`INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold")
       expect(text).toContain("does not affect the cut or the deploy")
     }

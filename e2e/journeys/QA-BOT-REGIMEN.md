@@ -24,7 +24,7 @@ is not a stage on this line.
 | --- | --- | --- |
 | PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. The one other walk that merges is a **BLOCKED** the PR's own pending migration explains; its proof comes after merge, on dev ([PR-BOT.md](PR-BOT.md), *Re-walk on dev after merge*). |
 | `dev` → release branch | **Release cut** workflow, after each deploy's tag push or a button press | `node scripts/release-plan.mjs` says `cut: true`. |
-| Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
+| Release HEAD → deploy | A person, after smart Jev | Smart Jev is advisory since 2026-11-27: no verdict holds that HEAD, a `FAIL` included (`docs/RELEASE-RISK-GATES.md` §7). |
 | Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
 ## 1. Pull request: verify once
@@ -128,7 +128,7 @@ The plan's rules:
 - **Smart Jev runs the current release HEAD, after any pile-on, before a
   person deploys.** The HEAD Jev tests is not always the sha the plan cut.
   When the slice is held, a person checks that pull request and ready pull
-  requests are added onto the branch. Jev runs after that pile-on. Only a result for the branch's current HEAD counts. A `FAIL` means that HEAD does not deploy: push a new commit, and Jev runs again. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. The Hetzner service starts from a push
+  requests are added onto the branch. Jev runs after that pile-on. Only a result for the branch's current HEAD counts. No Jev verdict holds the deploy (advisory since 2026-11-27, `docs/RELEASE-RISK-GATES.md` §7). A `FAIL` is a report to read; a new commit starts Jev again. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold either. The Hetzner service starts from a push
   to `refs/heads/release/YYYY/MM/DD-NN`. See
   [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 - **Adversarial Jev does not affect the cut or the deploy.** Once a day, at
@@ -163,8 +163,10 @@ human.
 
 ## 3. Smart Jev, then a person deploys
 
-Every slice waits for smart Jev on the branch's **current HEAD**, then for a
-person to run the deploy command. `hold` changes what happens before that run.
+Every slice gets a smart-Jev run on the branch's **current HEAD**. Since
+2026-11-27 the deploy does not wait for it (`docs/RELEASE-RISK-GATES.md`
+§7). The slice then waits for a person to run the deploy command. `hold`
+changes what happens before that run.
 
 A held slice (`hold: true`) is cut as that pull request alone. A person checks
 it, then ready pull requests are added onto the branch. That pile-on moves
@@ -173,12 +175,15 @@ HEAD. Jev's result for the cut sha does not count. Jev runs the new HEAD.
 An ordinary slice (`hold: false`) is already the HEAD people would deploy.
 The push that cuts it starts Jev. There is no pile-on.
 
-Read the commit comment on that HEAD (`<!-- aquilla-smart-tests -->`):
+Read the commit comment on that HEAD (`<!-- aquilla-smart-tests -->`). It is
+advisory: no verdict holds the deploy.
 
 - **FAIL** — a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`.
-  That HEAD does not deploy. A new commit starts Jev again.
+  A report to read, not a hold. The comment's own FAIL line still says the
+  HEAD "does not deploy"; that wording predates 2026-11-27 and the deploy
+  does not act on it. A new commit starts Jev again.
 - **PASS**, **INCONCLUSIVE**, and **HARNESS UNAVAILABLE** do not hold the
-  deploy. A person deploys, then the tag is applied to production.
+  deploy either. A person deploys, then the tag is applied to production.
 
 A held slice, before the pile-on, is also where a person checks **only**:
 
@@ -191,7 +196,8 @@ A held slice, before the pile-on, is also where a person checks **only**:
 QA does **not** re-walk PASS rows. If QA finds itself repeating a check, that
 check belongs in a journey; file it so the bot does it next time.
 
-Do not deploy a HEAD whose smart-Jev comment is **FAIL**. Deploy from a clean
+A smart-Jev **FAIL** no longer stops a deploy (advisory since 2026-11-27).
+Deploy from a clean
 checkout of the release branch, checked out by name (not
 a detached HEAD — the branch guard and the tag script both need it), with
 `pnpm run deploy:aquilla`. It refuses to publish if prod has pending

@@ -9,9 +9,10 @@ name: CI
 # Branch protection on dev requires the jobs that always report a status on a
 # pull request: lint, unit, schema-migrations, auth-worker-tests,
 # sync-worker-tests, agent-worker-tests. `unit` aggregates the three
-# `unit-shard` matrix jobs (AQU-1991), so that name is stable. A path-filtered
-# worker job reports success when that worker did not change. A skipped
-# required check would block the pull request. The Cloudflare preview stays a
+# `unit-shard` matrix jobs (AQU-1991), so that name is stable; `auth-worker-tests`
+# and `sync-worker-tests` aggregate their own shards the same way. A
+# path-filtered worker job reports success when that worker did not change. A
+# skipped required check would block the pull request. The Cloudflare preview stays a
 # separate required check. enforce_admins is false, so an admin can still merge
 # around a red run.
 #
@@ -98,15 +99,25 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # `pnpm lint` runs ESLint with an 8 GiB heap (see the `lint` script in
-      # package.json). V8's default ~4 GiB ceiling ran out on 2026-10-20 (AQU-2084):
-      # the job died with "JavaScript heap out of memory", exit 134, on every PR.
-      # ubuntu-latest for this public repo has 16 GB, so 8 GiB leaves the runner room.
-      - run: pnpm lint
-      - run: pnpm run i18n:check
+      # The three checks that take seconds run before ESLint, which takes 6 to
+      # 11 minutes. A step that fails stops the job, so in the old order (ESLint
+      # first) a failed ESLint run hid the secret scan's answer, and an i18n
+      # failure was reported eight minutes after it was known (AQU-2792).
       - run: pnpm run scan:secrets
+      # The branch's own English: context notes, retired words, catalog keys
+      # English lacks. Not whether it is translated yet: i18n-fill.yml translates
+      # after the merge, and `pnpm i18n:coverage` is the check it runs.
+      - run: pnpm run i18n:check
       # Doc pins: every `path::symbol` claim in the docs still resolves (AQU-2387).
       - run: pnpm run check:doc-pins
+      # `pnpm lint` runs ESLint with a 12 GiB heap cap (see the `lint` script in
+      # package.json). V8's default ~4 GiB ceiling ran out on 2026-10-20 (AQU-2084):
+      # the job died with "JavaScript heap out of memory", exit 134, on every PR.
+      # The cap was 8 GiB until 2026-11-27, when ESLint failed the same way under
+      # a 6 GiB cap and peaked at 7.05 GiB under a 7 GiB one (AQU-2792). The cap
+      # is a ceiling, not an allocation; ubuntu-latest for this public repo has
+      # 16 GB.
+      - run: pnpm lint
 
   typecheck:
     if: github.event_name == 'workflow_dispatch'
@@ -233,8 +244,54 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm neon:check
 
-  auth-worker-tests:
+  # The auth-worker and sync-worker suites, each split across runners the way
+  # `unit` is. Both run every test against a real in-process Postgres (PGlite),
+  # so their time is CPU and one runner has four cores: on one runner each,
+  # sync-worker took 36-56 minutes and auth-worker 17-27. A shard runs only
+  # when its worker changed, so an unchanged worker costs no runner at all.
+  # `--shard` splits the sorted file list, so every file runs exactly once.
+  # Branch protection names `auth-worker-tests` and `sync-worker-tests`, so
+  # the jobs of those names below aggregate the shards and always report.
+  auth-worker-shard:
+    name: auth-worker-tests (shard ${{ matrix.shard }}/2)
     needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.auth == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      # auth-worker typecheck imports sync-worker source, which imports
+      # partyserver. That package is installed with sync-worker.
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      # The type-check reads the whole project; one shard carries it.
+      - if: matrix.shard == 1
+        run: pnpm run type-check
+        working-directory: auth-worker
+      # `pnpm test` is `vitest run`; the shard flag goes straight to vitest.
+      - run: pnpm vitest run --shard=${{ matrix.shard }}/2
+        working-directory: auth-worker
+
+  # Required check. Reports the shards' combined result under the name branch
+  # protection expects, or success when auth-worker did not change: a skipped
+  # required check would block the pull request.
+  auth-worker-tests:
+    needs: [changes, auth-worker-shard]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -244,38 +301,52 @@ jobs:
       - name: Report success when auth-worker did not change
         if: needs.changes.result == 'success' && needs.changes.outputs.auth != 'true'
         run: echo "auth-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
+      - name: Fail unless every shard passed
+        if: needs.changes.outputs.auth == 'true' && needs.auth-worker-shard.result != 'success'
+        run: |
+          echo "auth-worker-shard result: ${{ needs.auth-worker-shard.result }}"
+          exit 1
+      - if: needs.changes.outputs.auth == 'true'
+        run: echo "All auth-worker shards passed."
+
+  sync-worker-shard:
+    name: sync-worker-tests (shard ${{ matrix.shard }}/3)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.sync == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.changes.outputs.auth == 'true'
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: needs.changes.outputs.auth == 'true'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        if: needs.changes.outputs.auth == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
-            auth-worker/pnpm-lock.yaml
             sync-worker/pnpm-lock.yaml
-      - if: needs.changes.outputs.auth == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: needs.changes.outputs.auth == 'true'
-        run: pnpm install --frozen-lockfile
-        working-directory: auth-worker
-      # auth-worker typecheck imports sync-worker source, which imports
-      # partyserver. That package is installed with sync-worker.
-      - if: needs.changes.outputs.auth == 'true'
-        run: pnpm install --frozen-lockfile
+            auth-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
-      - if: needs.changes.outputs.auth == 'true'
+      # sync-worker typecheck and tests import auth-worker source
+      # (checking/route.ts uses auth-worker/src/utils/password), which imports
+      # bcryptjs and @noble/hashes. Those packages are installed with auth-worker.
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      # The type-check reads the whole project; one shard carries it.
+      - if: matrix.shard == 1
         run: pnpm run type-check
-        working-directory: auth-worker
-      - if: needs.changes.outputs.auth == 'true'
-        run: pnpm test
-        working-directory: auth-worker
+        working-directory: sync-worker
+      - run: pnpm vitest run --shard=${{ matrix.shard }}/3
+        working-directory: sync-worker
 
+  # Required check, as `auth-worker-tests` above.
   sync-worker-tests:
-    needs: changes
+    needs: [changes, sync-worker-shard]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -285,36 +356,13 @@ jobs:
       - name: Report success when sync-worker did not change
         if: needs.changes.result == 'success' && needs.changes.outputs.sync != 'true'
         run: echo "sync-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.changes.outputs.sync == 'true'
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: needs.changes.outputs.sync == 'true'
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        if: needs.changes.outputs.sync == 'true'
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            sync-worker/pnpm-lock.yaml
-            auth-worker/pnpm-lock.yaml
+      - name: Fail unless every shard passed
+        if: needs.changes.outputs.sync == 'true' && needs.sync-worker-shard.result != 'success'
+        run: |
+          echo "sync-worker-shard result: ${{ needs.sync-worker-shard.result }}"
+          exit 1
       - if: needs.changes.outputs.sync == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: needs.changes.outputs.sync == 'true'
-        run: pnpm install --frozen-lockfile
-        working-directory: sync-worker
-      # sync-worker typecheck and tests import auth-worker source
-      # (checking/route.ts uses auth-worker/src/utils/password), which imports
-      # bcryptjs and @noble/hashes. Those packages are installed with auth-worker.
-      - if: needs.changes.outputs.sync == 'true'
-        run: pnpm install --frozen-lockfile
-        working-directory: auth-worker
-      - if: needs.changes.outputs.sync == 'true'
-        run: pnpm run type-check
-        working-directory: sync-worker
-      - if: needs.changes.outputs.sync == 'true'
-        run: pnpm test
-        working-directory: sync-worker
+        run: echo "All sync-worker shards passed."
 
   agent-worker-tests:
     needs: changes

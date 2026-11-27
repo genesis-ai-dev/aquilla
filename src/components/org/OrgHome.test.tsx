@@ -558,10 +558,10 @@ describe("OrgOverview / OrgProjects", () => {
     // The loading template already shows the tile labels, so wait for the
     // template itself to leave rather than for a label to appear.
     await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
-    const projectsStat = projectsRollupStat()
-    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
-    expect(projectsStat).toHaveClass("flex-row-reverse")
-    expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
+    const strip = screen.getByTestId("org-overview-metrics")
+    expect(strip.querySelectorAll("dt")).toHaveLength(7)
+    expect(within(strip).getByText("Projects").nextElementSibling).toHaveTextContent("2")
+    expect(strip.querySelectorAll('[aria-hidden="true"]')).toHaveLength(3)
   })
 
   // AQU-1071: the enterprise billing band is how many active target lanes this
@@ -570,10 +570,10 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
     const label = screen.getAllByText("Active language lanes").find((el) => !el.closest("nav"))!
-    const tile = label.parentElement?.parentElement
+    const tile = label.parentElement
     if (!tile) throw new Error("lanes tile root not found")
     expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
-    expect(within(tile).getByText("Language lanes")).toBeInTheDocument()
+    expect(within(tile).queryByText("Language lanes")).not.toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

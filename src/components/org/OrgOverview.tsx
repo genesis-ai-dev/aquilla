@@ -31,7 +31,7 @@ import {
   useOrgPortfolio,
   type PortfolioProjectRow,
 } from "@/hooks/useOrgPortfolio"
-import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
+import { Page, PageHeader, Section } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
 import { DataTable } from "@/components/ui/data-table"
 import { buttonVariants } from "@/components/ui/button"
@@ -57,6 +57,31 @@ type OverviewProjectRow = {
   project: PortfolioProjectRow
   reasons: ProjectAttentionReason[]
 }
+
+function OverviewMetric({ label, value, percent = false, overdue = false }: {
+  label: string
+  value: number
+  percent?: boolean
+  overdue?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 flex-col px-3 py-3">
+      <dt className="mt-1 text-sm leading-tight text-muted-foreground [overflow-wrap:anywhere]">{label}</dt>
+      <dd className={cn("order-first text-2xl font-semibold leading-none tabular-nums", overdue && value > 0 && "text-destructive")}>
+        {value}{percent && "%"}
+      </dd>
+      {percent && (
+        <div aria-hidden="true" className="mt-auto pt-2">
+          <div className="h-1 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${value}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const METRIC_GROUP = "grid min-w-0 rounded-lg border bg-card text-card-foreground"
 
 function OverviewLoadingTemplate() {
   return (
@@ -302,38 +327,22 @@ export function OrgOverview() {
                 />
               )}
 
-              <div className={STAT_TILE_GRID}>
-                <StatTile label={t("nav.projects")} value={portfolio.projects.length} />
-                {/* AQU-1071: the org's active target-language count — the figure the
-                  * enterprise billing band is read off. Server-counted on the same rule
-                  * billing bills on, so this tile and the invoice agree. */}
-                <StatTile
-                  label={t("org.orgHome.activeLanguages")}
-                  hint={t("org.orgHome.activeLanguagesHint")}
-                  value={portfolio.activeLanguageCount}
-                />
-                <StatTile
-                  label={t("org.orgHome.avgTranslated")}
-                  value={`${progressPercentOfFraction(portfolio.avgTranslatedPct)}%`}
-                />
-                <StatTile
-                  label={t("org.orgHome.avgValidated")}
-                  value={`${progressPercentOfFraction(portfolio.avgValidatedPct)}%`}
-                />
-                <StatTile
-                  label={t("org.orgHome.avgAudio")}
-                  value={`${progressPercentOfFraction(portfolio.avgAudioPct)}%`}
-                />
-                <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
-                <StatTile
-                  label={t("org.orgHome.overdue")}
-                  value={
-                    <span className={portfolio.overdueCount > 0 ? "text-destructive" : undefined}>
-                      {portfolio.overdueCount}
-                    </span>
-                  }
-                  className={portfolio.attentionProjects.length > 0 ? "border-amber-500/40" : undefined}
-                />
+              <div className="@container" data-testid="org-overview-metrics">
+                <div className="grid gap-2 @min-[60rem]:grid-cols-[2fr_3fr_2fr]">
+                  <dl className={cn(METRIC_GROUP, "grid-cols-2")}>
+                    <OverviewMetric label={t("nav.projects")} value={portfolio.projects.length} />
+                    <OverviewMetric label={t("org.orgHome.activeLanguages")} value={portfolio.activeLanguageCount} />
+                  </dl>
+                  <dl className={cn(METRIC_GROUP, "grid-cols-3")}>
+                    <OverviewMetric percent label={t("org.orgHome.avgTranslated")} value={progressPercentOfFraction(portfolio.avgTranslatedPct)} />
+                    <OverviewMetric percent label={t("org.orgHome.avgValidated")} value={progressPercentOfFraction(portfolio.avgValidatedPct)} />
+                    <OverviewMetric percent label={t("org.orgHome.avgAudio")} value={progressPercentOfFraction(portfolio.avgAudioPct)} />
+                  </dl>
+                  <dl className={cn(METRIC_GROUP, "grid-cols-2")}>
+                    <OverviewMetric label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
+                    <OverviewMetric overdue label={t("org.orgHome.overdue")} value={portfolio.overdueCount} />
+                  </dl>
+                </div>
               </div>
 
               <Section

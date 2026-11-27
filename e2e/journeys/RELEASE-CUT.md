@@ -100,25 +100,31 @@ nothing is ready still names each one in its summary.
 
 The workflow does not start Jev and does not read its result. The push that
 creates `plan.branch`, and every later push onto that branch, is what starts
-the one Hetzner run and the `release-verify` workflow (the full suite:
-typecheck, lint, every unit and worker test, the production build).
+the one Hetzner run and the `release-verify` workflow (the production
+build and the auth-worker and sync-worker type-checks; lint and the test
+suites ran on each PR in `ci.yml`).
 `release-deploy.yml` reads both for the branch's current HEAD when
 `release-verify` finishes and every ten minutes
 (`scripts/release-deploy-check.mjs`) and deploys when `release-verify`
-succeeded, Jev reported anything but FAIL, and no `release:halt` issue is
-open; no Jev result yet means it waits for the next look. The webhook accepts `push` events for
+succeeded and no `release:halt` issue is open. Smart Jev is advisory since
+2026-11-27 (`docs/RELEASE-RISK-GATES.md` §7): the deploy does not wait for
+its result, and names the verdict in its reason when there is one. The webhook accepts `push` events for
 `refs/heads/release/YYYY/MM/DD-NN` and ignores pull requests. See
 [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 
 The HEAD Jev tests is not always the cut's HEAD: a person may pick a fix
 onto the branch. Jev and `release-verify` run again on that push.
 Only a result for the branch's current HEAD counts. A comment on an older
-commit does not decide the deploy.
+commit says nothing about a newer HEAD.
+
+No Jev verdict holds the deploy (advisory since 2026-11-27):
 
 - **FAIL** (a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`)
-  means that HEAD does not deploy. A new commit on the branch starts Jev again.
-- **PASS**. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. The hourly
-  deploy (or a person) deploys, then tags production.
+  is a report to read, not a hold. The comment's own FAIL line still says
+  the HEAD "does not deploy"; that wording predates the change and the
+  deploy does not act on it. A new commit on the branch starts Jev again.
+- **PASS**, `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold either. The
+  hourly deploy (or a person) deploys, then tags production.
 
 Adversarial Jev is not part of this cut. It attacks deployed `dev` at 09:00 UTC
 and files Linear tickets. It does not affect the cut or the deploy.
@@ -196,7 +202,7 @@ result, not walking a UI) but the ones it has are worth naming:
 A person reading this branch should not have to open every PR in it. The
 commit comment is the whole of what they need to start: which PRs are in,
 what each one's walk said, and which PRs were left out and why. Nothing
-here is a sign-off — the deploy gate is `release-verify` plus Jev on this
-HEAD (`scripts/release-deploy-check.mjs`), and a held PR's sign-off is the
+here is a sign-off — the deploy gate is `release-verify` on this HEAD
+(`scripts/release-deploy-check.mjs`; Jev is advisory), and a held PR's sign-off is the
 `release:approved` label on that PR. A held direct commit's sign-off is a
 person's pick of it onto a release branch.

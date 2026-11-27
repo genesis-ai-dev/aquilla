@@ -18997,7 +18997,7 @@ export function ProjectWorkspace() {
     [timelineLines, audioCueCells, timingMode],
   )
   const milestonePartShown = showsPartOfFile(timelineCells, timelineLines)
-  const milestoneWindowStart = useMilestoneWindowStart({
+  const milestoneWindowAt = useMilestoneWindowStart({
     fileId: activeFileId ?? null,
     partShown: milestonePartShown,
     milestoneKey: timelineMilestoneKey,
@@ -19006,6 +19006,10 @@ export function ProjectWorkspace() {
     shown: playbackCells,
     whole: wholePlaybackCells,
   })
+  const milestoneWindowStart = milestoneWindowAt?.startSec ?? null
+  // The milestone that start is for: one render after turning to another
+  // milestone following the recordings it is still the last one's.
+  const milestoneWindowFor = milestoneWindowAt?.milestoneKey ?? null
   // Following the recordings the milestone is laid out from its window's
   // start; everything handed these tracks lays it out the same way.
   const programmeOriginSec = timingMode === "audioFirst" && milestonePartShown ? (milestoneWindowStart ?? 0) : 0
@@ -19016,7 +19020,11 @@ export function ProjectWorkspace() {
     () => (programmeInWindow ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
     [fileProgrammeTracks, programmeOriginSec, programmeInWindow],
   )
-  useEffect(() => {
+  // A layout effect: it runs before any of the timeline's own effects, so the
+  // queue already lays the milestone out from its start when the timeline
+  // brings the playhead there on opening it (a plain effect ran after the
+  // timeline's seek, which then landed in the last milestone's layout).
+  useLayoutEffect(() => {
     setQueueProgrammeOrigin(programmeOriginSec)
   }, [programmeOriginSec])
   useEffect(() => () => setQueueProgrammeOrigin(0), [])
@@ -19031,9 +19039,9 @@ export function ProjectWorkspace() {
   // The timeline scrolls over the milestone's stretch only (TimelineEditor).
   const timelineMilestoneWindow = useMemo(
     () => (milestonePartShown && milestoneWindowStart != null
-      ? { key: `${activeFileId ?? ""}:${timelineMilestoneKey ?? ""}`, startSec: milestoneWindowStart }
+      ? { key: `${activeFileId ?? ""}:${milestoneWindowFor ?? ""}`, startSec: milestoneWindowStart }
       : null),
-    [milestonePartShown, milestoneWindowStart, activeFileId, timelineMilestoneKey],
+    [milestonePartShown, milestoneWindowStart, activeFileId, milestoneWindowFor],
   )
   // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
   // into its lines' pieces, laid out by the programme the timeline draws and

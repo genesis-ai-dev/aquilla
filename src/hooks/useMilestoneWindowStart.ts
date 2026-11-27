@@ -24,6 +24,12 @@ const ownSpan = (c: CellData) =>
  * take on a weak device: worked out once per milestone (`milestoneKey`), and
  * again when lines are added or removed or the tracks change, never per
  * frame; the effect reads the lines of the render that ran it.
+ *
+ * It names the milestone the start is for (`milestoneKey`): turning to another
+ * milestone following the recordings keeps the last start for one render, and
+ * under the last milestone's name, so nothing takes it for the new one's (the
+ * timeline brings the playhead to a milestone's start once, when its name
+ * first comes with its start).
  */
 export function useMilestoneWindowStart({
   fileId, partShown, milestoneKey, followsRecordings, tracks, shown, whole,
@@ -37,12 +43,12 @@ export function useMilestoneWindowStart({
   shown: readonly CellData[]
   /** The whole file's lines, the same way, in the file's order. */
   whole: readonly CellData[]
-}): number | null {
+}): { startSec: number; milestoneKey: string | null } | null {
   const sourceStart = useMemo(
     () => (partShown && !followsRecordings ? milestoneWindowStartSec(shown, whole, ownSpan) : 0),
     [partShown, followsRecordings, shown, whole],
   )
-  const [win, setWin] = useState<{ fileId: string | null; startSec: number }>({ fileId: null, startSec: 0 })
+  const [win, setWin] = useState<{ fileId: string | null; milestoneKey: string | null; startSec: number }>({ fileId: null, milestoneKey: null, startSec: 0 })
   const shownCount = shown.length
   const wholeCount = whole.length
   useEffect(() => {
@@ -54,13 +60,14 @@ export function useMilestoneWindowStart({
         return slot ? { start: slot.startSec, end: slot.startSec + slot.slotLenSec } : null
       })
     }
-    setWin((cur) => (cur.startSec === startSec && cur.fileId === fileId ? cur : { fileId, startSec }))
+    setWin((cur) => (cur.startSec === startSec && cur.fileId === fileId && cur.milestoneKey === milestoneKey ? cur : { fileId, milestoneKey, startSec }))
     // Keyed on what decides the window, not on the lines themselves (see above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partShown, milestoneKey, followsRecordings, fileId, tracks, shownCount, wholeCount])
-  if (!followsRecordings) return sourceStart
+  const sourceWin = useMemo(() => ({ startSec: sourceStart, milestoneKey }), [sourceStart, milestoneKey])
+  if (!followsRecordings) return sourceWin
   // Null until it has been worked out for this file (the first render after
-  // opening one); a milestone turned to keeps the last start for that one
-  // render rather than jumping to the whole file.
-  return win.fileId === fileId ? win.startSec : null
+  // opening one); a milestone turned to keeps the last start, and the last
+  // milestone's name, for that one render rather than jumping to the whole file.
+  return win.fileId === fileId ? { startSec: win.startSec, milestoneKey: win.milestoneKey } : null
 }

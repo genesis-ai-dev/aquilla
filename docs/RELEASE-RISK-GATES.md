@@ -269,7 +269,9 @@ today:
   they review. Same honesty rules as the replay gate: GitHub Actions runs
   only, and the matrix's own chain (both `permission-matrix/`, both
   harnesses, auth-worker's test helpers, setup file and vitest/tsconfig/
-  dependency set, `db/shared/test-lane-fill.ts`) is `infra`.
+  dependency set, `db/shared/test-lane-fill.ts`, and
+  `db/shared/test-pg-harness.ts`, the template both harness databases are
+  copied from) is `infra`.
 
   **`events/membership.ts` fails open on purpose, and the matrix pins it.**
   The write-perimeter re-check reports `ok` for a project with no row and

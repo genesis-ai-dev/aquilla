@@ -1,5 +1,6 @@
-// Test DB lifecycle. Loads the canonical Postgres schema into the per-file
-// PGlite once, then truncates every table between tests so each starts clean.
+// Test DB lifecycle. The per-file PGlite arrives with the canonical Postgres
+// schema already in it (a copy of the run's template); this readies its
+// session once, then empties the tables between tests so each starts clean.
 // (Replaces the old D1-migrations + sqlite_master topological-DELETE dance —
 // Postgres TRUNCATE ... RESTART IDENTITY CASCADE handles FK order for us.)
 import { beforeAll, afterEach } from "vitest"

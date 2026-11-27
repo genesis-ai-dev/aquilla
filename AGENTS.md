@@ -21,9 +21,11 @@ and required checks are green. `ci.yml` is that check: lint (including
 `pnpm neon:check`. The base is `dev`, the label is not `on hold`, and the
 pull request is not stacked on an open parent. GitHub Actions does not click
 merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
-merges. (One exception: `desktop-release-cut.yml` merges the version-bump pull
+merges. (Two exceptions. `desktop-release-cut.yml` merges the version-bump pull
 request it opened itself, and only when the diff is the four version files;
-`docs/DESKTOP-RELEASES.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
+`docs/DESKTOP-RELEASES.md`. `i18n-fill.yml` merges the translation pull request
+it opened itself, and only when the diff is generated locale catalogs;
+`docs/decisions/0021-translations-are-filled-after-the-merge.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
 again. `walk-status.yml` reports the walk on the PR's head as the `qa-walk`
 status (pending until a browser walk is posted at that head).
 `scripts/release-plan.mjs` reads the same comment later, and since 2026-11-27
@@ -41,11 +43,15 @@ green on the PR's head or a person adds `release:approved`.
 | Adversarial Jev | the 09:00 UTC nightly against deployed `dev`, and `workflow_dispatch`. No per-PR job since 2026-11-27 | the nightly files Linear tickets. It does not affect the cut or the deploy. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
 
-**UI text ships translated (AQU-2740).** `i18n:check` fails a branch that adds or
-rewords an English message without translating it into every locale. Before pushing, run
-`pnpm i18n:todo --new`, fill each `i18n-todo/<locale>.todo.json`, then run `pnpm
-i18n:import-todo`. Never grow `src/lib/i18n/translation-baseline.json` to get a green
-check. The full workflow is in `docs/I18N-CONTEXT-CATALOG.md`, under "Translation coverage".
+**UI text is translated after the merge (AQU-2792).** A pull request adds the English
+message and its context notes, and leaves the locale catalogs alone. `i18n:check` reads
+the branch's English (context notes, retired words) and does not fail on a string that is
+not translated yet. When the pull request reaches `dev`, `.github/workflows/i18n-fill.yml`
+translates what is new or reworded into every locale (`pnpm i18n:fill`) and lands it as a
+catalog-only pull request of its own. Do not translate in a feature branch, and never
+grow `src/lib/i18n/translation-baseline.json` by hand. `pnpm i18n:coverage` says whether
+`dev` is fully translated. The full workflow is in `docs/I18N-CONTEXT-CATALOG.md`, under
+"Translation coverage".
 
 Branch protection requires the `ci.yml` jobs that always report a status
 (`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,

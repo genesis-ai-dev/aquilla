@@ -692,6 +692,8 @@ export const ru: Catalog = {
   "editor.milestone.label.part": "Часть {number}",
   "editor.column.source": "Источник",
   "editor.column.target": "Перевод",
+  "editor.column.resizeSplit": "Изменить ширину столбцов «Источник» и «Перевод»",
+  "editor.column.splitValue": "Источник {source}%, Перевод {target}%",
   "editor.view.settings": "Настройки редактора",
   "editor.view.showLineNumbers": "Показывать номера строк",
   "editor.view.showCellLabels": "Показывать метки ячеек",

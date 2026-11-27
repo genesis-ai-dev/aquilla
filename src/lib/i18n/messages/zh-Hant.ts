@@ -687,6 +687,8 @@ export const zh_Hant: Catalog = {
   "editor.milestone.label.part": "第 {number} 部分",
   "editor.column.source": "來源",
   "editor.column.target": "目標",
+  "editor.column.resizeSplit": "調整來源欄與目標欄的寬度",
+  "editor.column.splitValue": "來源 {source}%，目標 {target}%",
   "editor.view.settings": "編輯器設定",
   "editor.view.showLineNumbers": "顯示行號",
   "editor.view.showCellLabels": "顯示單元格標籤",

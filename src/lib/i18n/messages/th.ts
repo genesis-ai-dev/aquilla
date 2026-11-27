@@ -687,6 +687,8 @@ export const th: Catalog = {
   "editor.milestone.label.part": "ภาคที่ {number}",
   "editor.column.source": "ต้นฉบับ",
   "editor.column.target": "ฉบับแปล",
+  "editor.column.resizeSplit": "ปรับขนาดคอลัมน์ต้นฉบับและฉบับแปล",
+  "editor.column.splitValue": "ต้นฉบับ {source}%, ฉบับแปล {target}%",
   "editor.view.settings": "การตั้งค่าตัวแก้ไข",
   "editor.view.showLineNumbers": "แสดงหมายเลขบรรทัด",
   "editor.view.showCellLabels": "แสดงป้ายกำกับเซลล์",

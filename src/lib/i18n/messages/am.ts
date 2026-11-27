@@ -749,6 +749,8 @@ export const am: Catalog = {
   "editor.milestone.label.part": "ቁራጭ {number}",
   "editor.column.source": "ምንጭ",
   "editor.column.target": "ዒላማ",
+  "editor.column.resizeSplit": "የምንጭ እና የዒላማ ዓምዶችን መጠን ይቀይሩ",
+  "editor.column.splitValue": "ምንጭ {source}%፣ ዒላማ {target}%",
   "editor.view.settings": "የአርታዒ ቅንብሮች",
   "editor.view.showLineNumbers": "የመስመር ቁጥሮችን አሳዩ",
   "editor.view.showCellLabels": "የሕዋስ ስያሜዎችን አሳዩ",

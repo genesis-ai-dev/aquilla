@@ -5223,7 +5223,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10431,7 +10433,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -15623,7 +15627,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -20844,7 +20850,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -27339,7 +27347,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -33836,7 +33846,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -40402,7 +40414,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47018,7 +47032,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53547,7 +53563,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -62023,7 +62041,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -70503,7 +70523,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -79380,7 +79402,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -87917,7 +87941,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -96813,7 +96839,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -105705,7 +105733,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -114632,7 +114662,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -123546,7 +123578,9 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -132452,6 +132486,8 @@
     "org.access.tree.newLanguage": "c1d5e982fe9af23e",
     "org.access.tree.expand": "d386e9414ed2f5ee",
     "org.access.tree.collapse": "19f25826b84b030c",
-    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55"
+    "settings.orgSettingsIndex.hintAccess": "3e57a3604be1fc55",
+    "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
+    "editor.column.splitValue": "e15295c60a73c189"
   }
 }

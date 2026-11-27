@@ -737,6 +737,8 @@ export const hi: Catalog = {
   "editor.milestone.label.part": "भाग {number}",
   "editor.column.source": "स्रोत",
   "editor.column.target": "लक्ष्य",
+  "editor.column.resizeSplit": "स्रोत और लक्ष्य कॉलम का आकार बदलें",
+  "editor.column.splitValue": "स्रोत {source}%, लक्ष्य {target}%",
   "editor.view.settings": "संपादक सेटिंग",
   "editor.view.showLineNumbers": "पंक्ति क्रमांक दिखाएँ",
   "editor.view.showCellLabels": "कक्ष लेबल दिखाएँ",

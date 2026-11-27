@@ -687,6 +687,8 @@ export const my: Catalog = {
   "editor.milestone.label.part": "အပိုင်း {number}",
   "editor.column.source": "မူရင်း",
   "editor.column.target": "ဘာသာပြန်",
+  "editor.column.resizeSplit": "မူရင်းနှင့် ဘာသာပြန် ကော်လံများ အရွယ်ပြောင်းရန်",
+  "editor.column.splitValue": "မူရင်း {source}%၊ ဘာသာပြန် {target}%",
   "editor.view.settings": "တည်းဖြတ်ရေး ဆက်တင်",
   "editor.view.showLineNumbers": "စာကြောင်းနံပါတ် ပြရန်",
   "editor.view.showCellLabels": "ဆဲလ်အညွှန်း ပြရန်",

@@ -749,6 +749,8 @@ export const ur: Catalog = {
   "editor.milestone.label.part": "جزو {number}",
   "editor.column.source": "ماخذ",
   "editor.column.target": "ہدف",
+  "editor.column.resizeSplit": "ماخذ اور ہدف کالم کا سائز بدلیں",
+  "editor.column.splitValue": "ماخذ {source}%، ہدف {target}%",
   "editor.view.settings": "ایڈیٹر کی ترتیبات",
   "editor.view.showLineNumbers": "سطر نمبر دکھائیں",
   "editor.view.showCellLabels": "خانوں کے لیبل دکھائیں",

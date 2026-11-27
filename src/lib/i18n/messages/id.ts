@@ -681,6 +681,8 @@ export const id: Catalog = {
   "editor.milestone.label.story": "Cerita {number}",
   "editor.milestone.label.part": "Bagian {number}",
   "editor.column.source": "Sumber",
+  "editor.column.resizeSplit": "Ubah ukuran kolom Sumber dan Target",
+  "editor.column.splitValue": "Sumber {source}%, Target {target}%",
   "editor.view.settings": "Pengaturan editor",
   "editor.view.showLineNumbers": "Tampilkan nomor baris",
   "editor.view.showCellLabels": "Tampilkan label sel",

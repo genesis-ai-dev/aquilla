@@ -731,6 +731,8 @@ export const es: Catalog = {
   "editor.milestone.label.part": "Parte {number}",
   "editor.column.source": "Origen",
   "editor.column.target": "Destino",
+  "editor.column.resizeSplit": "Cambiar el tamaño de las columnas Origen y Destino",
+  "editor.column.splitValue": "Origen {source}%, Destino {target}%",
   "editor.view.settings": "Ajustes del editor",
   "editor.view.showLineNumbers": "Mostrar números de línea",
   "editor.view.showCellLabels": "Mostrar etiquetas de celda",

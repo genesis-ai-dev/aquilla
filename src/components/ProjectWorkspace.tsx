@@ -401,7 +401,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
-import { applyPendingVolumes, applyTrackVolumes, nextPendingVolume, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
+import { applyFilmSoundDb, applyPendingVolumes, applyTrackVolumes, FILM_SOUND_TRACK_ID, nextPendingVolume, settledPendingVolumes, withFilmSoundRow, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
 import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
@@ -16347,9 +16347,28 @@ export function ProjectWorkspace() {
   useEffect(() => {
     applyTrackVolumes(timelineTracks)
   }, [timelineTracks])
+  // Sam, Nov 27: the film's own volume (its row's slider), stored on the Source
+  // audio row's id even where no such row is drawn (track-volume.ts). Read
+  // through the stand-in row so a write drawn before the read shows it holds
+  // there too. Once per change; 0 dB on a file with no film.
+  const filmReadTracks = useMemo(
+    () => (activeFile?.coreMediaUrl ? withFilmSoundRow(serverTimelineTracks, activeFile.trackOverrides) : serverTimelineTracks),
+    [serverTimelineTracks, activeFile?.coreMediaUrl, activeFile?.trackOverrides],
+  )
+  const filmVolumeDb = useMemo(() => {
+    if (!activeFile?.coreMediaUrl) return 0
+    const tracks = pendingTrackPaint?.volumes && pendingTrackPaint.fileId === activeFile.id
+      ? applyPendingVolumes(filmReadTracks, pendingTrackPaint.volumes)
+      : filmReadTracks
+    return tracks.find((tr) => tr.id === FILM_SOUND_TRACK_ID)?.volumeDb ?? 0
+  }, [filmReadTracks, pendingTrackPaint, activeFile?.coreMediaUrl, activeFile?.id])
+  useEffect(() => {
+    applyFilmSoundDb(filmVolumeDb)
+  }, [filmVolumeDb])
+  useEffect(() => () => applyFilmSoundDb(0), [])
   useEffect(() => {
     if (!pendingTrackPaint?.volumes || pendingTrackPaint.fileId !== activeFileId) return
-    const settled = settledPendingVolumes(pendingTrackPaint.volumes, serverTimelineTracks)
+    const settled = settledPendingVolumes(pendingTrackPaint.volumes, filmReadTracks)
     if (settled.length === 0) return
     setPendingTrackPaint((current) => {
       if (!current?.volumes || current.fileId !== activeFileId) return current
@@ -16357,7 +16376,7 @@ export function ProjectWorkspace() {
       for (const id of settled) next.delete(id)
       return trackPaintOf(current.fileId, current.colors, next)
     })
-  }, [serverTimelineTracks, pendingTrackPaint, activeFileId])
+  }, [filmReadTracks, pendingTrackPaint, activeFileId])
 
   // ── AQU-2664 (boards 71–73): the Even out window and its ways in ─────────
   // The cells that carry this file's takes: the cue sibling's, merged, on a
@@ -17392,8 +17411,10 @@ export function ProjectWorkspace() {
   // Finding 10 (same review): kept per FILE — the built-in rows have the same
   // ids in every file, and this workspace stays open across files.
   const trackNotesRef = useRef(new TrackWriteNotes())
-  const serverTracksRef = useRef(serverTimelineTracks)
-  serverTracksRef.current = serverTimelineTracks
+  // Through the film's stand-in row (Nov 27): the film's volume write reads
+  // its "before" and its landing there when no Source audio row is drawn.
+  const serverTracksRef = useRef(filmReadTracks)
+  serverTracksRef.current = filmReadTracks
   const readTrackSettled = useCallback((trackId: string): TrackFields | null => {
     const tr = serverTracksRef.current.find((x) => x.id === trackId)
     return tr ? trackFieldsOf(tr) : null
@@ -21704,6 +21725,7 @@ export function ProjectWorkspace() {
                     // volume level (Contributor); its other settings stay
                     // with maintainers.
                     onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
+                    filmVolumeDb={filmVolumeDb}
                     // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
                     // window, for anyone who may even takes out.
                     evenOut={timelineEvenOut}

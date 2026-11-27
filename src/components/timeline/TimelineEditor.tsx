@@ -196,6 +196,7 @@ import { useQueueStateValue, useMissingClipTakes } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { seedAudibility, setDrawnRows, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed, useQueueAudibility } from "@/lib/audio/audibility"
 import { setTrackGainDb } from "@/lib/audio/mixer"
+import { applyFilmSoundDb, FILM_SOUND_TRACK_ID } from "@/lib/audio/track-volume"
 import { EvenOutButton, MuteSoloPair, TrackFader, type EvenState } from "./TrackMixControls"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -724,6 +725,12 @@ export interface TimelineEditorProps {
    * drawn but cannot be moved.
    */
   onSetTrackVolume?(trackId: string, db: number): void
+  /**
+   * Sam, Nov 27: the film's own volume, dB (track-volume.ts `filmSoundDb`),
+   * for the slider beside the film's M | S. Saved through `onSetTrackVolume`
+   * on the Source audio row's id. Absent: 0 dB.
+   */
+  filmVolumeDb?: number
   /**
    * AQU-2664 (boards 71, 74): Even out. `states` is each track's ≈ (only the
    * tracks holding takes are in it); `open` opens the one Even out window on
@@ -1430,6 +1437,7 @@ export function TimelineEditor({
   onPromoteTrackToRows,
   onSetTrackColor,
   onSetTrackVolume,
+  filmVolumeDb = 0,
   evenOut,
   trackEditing,
 }: TimelineEditorProps) {
@@ -4628,15 +4636,34 @@ export function TimelineEditor({
    */
   function sourceMuteSolo(name: string): ReactNode {
     return (
-      <MuteSoloPair
-        testKey="source"
-        name={name}
-        muted={!trackAudible(audibility, "source")}
-        soloed={trackSoloed(audibility, "source")}
-        onMute={() => toggleAudibility(fileId, "source")}
-        onSolo={() => toggleSolo(fileId, "source")}
-        muteOnly={gutterCollapsed}
-      />
+      <>
+        <MuteSoloPair
+          testKey="source"
+          name={name}
+          muted={!trackAudible(audibility, "source")}
+          soloed={trackSoloed(audibility, "source")}
+          onMute={() => toggleAudibility(fileId, "source")}
+          onSolo={() => toggleSolo(fileId, "source")}
+          muteOnly={gutterCollapsed}
+        />
+        {/* Sam, Nov 27: the film's volume, beside its M | S like every
+            track's fader. One value for the film's sound wherever its switch
+            sits (track-volume.ts): live on the mixer's source stage and the
+            film's element while dragged, saved once on the Source audio
+            row's id. Not in the collapsed strip, as no fader is. */}
+        {gutterCollapsed ? null : (
+          <TrackFader
+            testKey="film"
+            name={name}
+            db={filmVolumeDb}
+            disabled={!onSetTrackVolume}
+            onLive={applyFilmSoundDb}
+            onCommit={(db) => {
+              if (filmVolumeDb !== db) onSetTrackVolume?.(FILM_SOUND_TRACK_ID, db)
+            }}
+          />
+        )}
+      </>
     )
   }
 

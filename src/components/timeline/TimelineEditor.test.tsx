@@ -13,6 +13,7 @@ import { selectQueueForFile, selectQueueStateForFile } from "@/lib/audio/queue-s
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { applyFilmSoundDb, getFilmSoundDb } from "@/lib/audio/track-volume"
 import { slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
@@ -1171,6 +1172,48 @@ describe("TimelineEditor", () => {
       // dev's one solo rule (track-slots): the film is heard, the takes are not.
       expect(sourceHeard(lastAudibility!)).toBe(true)
       expect(slotAudible(lastAudibility!, "recording")).toBe(false)
+    })
+
+    // Sam, Nov 27: the film's row has a volume slider beside its M | S, like
+    // every track's. It is the film's own sound: stored on the Source audio
+    // row's id, and live on the film while it is dragged.
+    describe("the film's row has a volume slider", () => {
+      const linked = (over: Partial<React.ComponentProps<typeof TimelineEditor>> = {}) => (
+        <TimelineEditor
+          fileId="filmvol" coreMediaUrl="https://cdn/linked.webm" editable
+          cells={[cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 })]}
+          tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+          timingMode="audioFirst" onRetimeSubtitle={() => {}}
+          {...over}
+        />
+      )
+      afterEach(() => applyFilmSoundDb(0))
+
+      it("sits after the film's M | S and shows the film's stored level", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 60)
+        render(linked({ filmVolumeDb: -9, onSetTrackVolume: () => {} }))
+        const filmRow = screen.getByTestId("tl-film-track-label")
+        const fader = within(filmRow).getByTestId("tl-fader-film")
+        expect(fader).toHaveAttribute("aria-valuenow", "-9")
+        const s = within(filmRow).getByTestId("tl-solo-source")
+        expect(s.compareDocumentPosition(fader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(fader).not.toHaveAttribute("aria-disabled")
+      })
+
+      it("saves on the Source audio row's id, once, and moves the film's sound", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 60)
+        const onSetTrackVolume = vi.fn()
+        render(linked({ filmVolumeDb: -9, onSetTrackVolume }))
+        fireEvent.pointerDown(screen.getByTestId("tl-fader-film"), { clientX: 10, pointerId: 1, button: 0, altKey: true })
+        expect(onSetTrackVolume).toHaveBeenCalledExactlyOnceWith("source-audio", 0)
+        expect(getFilmSoundDb()).toBe(0)
+      })
+
+      it("is drawn but never moved for someone who may not change it", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 60)
+        render(linked())
+        expect(screen.getByTestId("tl-fader-film")).toHaveAttribute("aria-disabled", "true")
+      })
     })
 
     it("saves the fader once, on Option-click, and only when it changed", () => {

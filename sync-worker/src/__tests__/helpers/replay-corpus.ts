@@ -12,6 +12,7 @@
 // are fetched into replay-corpus/cache/ (gitignored) by
 // `node scripts/replay-corpus.mjs fetch`. The synthetic corpora under
 // replay-corpus/synthetic/ are committed so the harness always runs.
+import { PGlite } from "@electric-sql/pglite"
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
@@ -147,17 +148,95 @@ export function canonicalRows(rows: Array<Record<string, unknown>>): string {
   return clean.join("\n")
 }
 
+/** Table → the columns it has in some schema.sql. */
+export type SchemaColumns = Record<string, string[]>
+
+/** The columns every projection table has in a schema.sql, read off a real
+ *  catalog and not parsed out of the text: schema.sql declares some columns
+ *  in CREATE TABLE and adds others with ALTER TABLE further down. */
+export async function schemaColumns(schemaSql: string): Promise<SchemaColumns> {
+  const pg = new PGlite()
+  try {
+    await pg.exec(schemaSql)
+    const result = await pg.query<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ANY($1) ORDER BY table_name, column_name`,
+      [[...OUTPUT_TABLES]],
+    )
+    const columns: SchemaColumns = {}
+    for (const row of result.rows) (columns[row.table_name] ??= []).push(row.column_name)
+    return columns
+  } finally {
+    await pg.close()
+  }
+}
+
+export interface ReplayOptions {
+  /** The migration gate's "old code, new schema" leg (risk-label.yml
+   *  `migration-gate`, REPLAY_BASELINE_SCHEMA): the columns the BASE commit's
+   *  schema.sql has. Only these are hashed, so a column the migration adds,
+   *  which the base commit's code cannot read or write, is left out of the
+   *  comparison with the base commit's golden. Everything that code can know
+   *  about is still compared: a value in one of its columns, a row count,
+   *  and a baseline column the new schema no longer has fails outright.
+   *  Unset (the replay gate, the deps gate, a local run): every column is
+   *  hashed, which is what golden.json was written from. */
+  baselineColumns?: SchemaColumns
+  /** SQL run after the corpus is seeded and before the rebuild: a migration
+   *  landing on a live database, with this build's code then running on it.
+   *  For the tests that pin what the baseline leg ignores and what it does
+   *  not. */
+  migration?: string
+}
+
 export interface ReplayResult {
   digest: ProjectDigest
   /** Canonical rows per table, for writing out when a digest differs. */
   tables: Record<string, string>
   rebuild: Record<string, unknown>
+  /** `table.column` for every column left out of the hash because the
+   *  baseline schema does not have it. Empty without a baseline. */
+  ignoredColumns: string[]
+}
+
+/** One table's rows for the hash. With a baseline, the baseline's columns
+ *  are selected by name, so a dropped or renamed one is an error here even
+ *  on a table with no rows, where a hash could not tell. */
+async function projectionRows(
+  pg: PGlite,
+  table: string,
+  projectId: string,
+  baselineColumns: SchemaColumns | undefined,
+): Promise<{ rows: Array<Record<string, unknown>>; ignored: string[] }> {
+  if (!baselineColumns) {
+    const result = await pg.query<Record<string, unknown>>(`SELECT * FROM ${table} WHERE project_id = $1`, [projectId])
+    return { rows: result.rows, ignored: [] }
+  }
+  const baseline = baselineColumns[table]
+  if (!baseline?.length) throw new Error(`${table}: the baseline schema has no such table, so there is nothing to compare its rows with`)
+  const live = await pg.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+    [table],
+  )
+  const present = new Set(live.rows.map((row) => row.column_name))
+  const gone = baseline.filter((column) => !present.has(column))
+  if (gone.length) {
+    throw new Error(
+      `${table}: the baseline schema has ${gone.join(", ")} and the new schema does not. ` +
+        "The base commit's code reads and writes that column; dropping or renaming it is not additive.",
+    )
+  }
+  const known = new Set(baseline)
+  const ignored = [...present].filter((column) => !known.has(column)).sort().map((column) => `${table}.${column}`)
+  const list = baseline.map((column) => `"${column}"`).join(", ")
+  const result = await pg.query<Record<string, unknown>>(`SELECT ${list} FROM ${table} WHERE project_id = $1`, [projectId])
+  return { rows: result.rows, ignored }
 }
 
 /** Seeds the corpus into a fresh database, replays it through the production
  *  rebuild endpoint (from genesis: no SNAPSHOTS binding), and digests every
  *  projection table. */
-export async function replayCorpus(projectId: string, corpus: CorpusRows): Promise<ReplayResult> {
+export async function replayCorpus(projectId: string, corpus: CorpusRows, options: ReplayOptions = {}): Promise<ReplayResult> {
   const seed: Seed = {}
   for (const table of INPUT_TABLES) {
     const rows = corpus[table]
@@ -165,6 +244,7 @@ export async function replayCorpus(projectId: string, corpus: CorpusRows): Promi
   }
   const testDb = await makeTestDb(seed)
   try {
+    if (options.migration) await testDb.pg.exec(options.migration)
     const secret = "replay-corpus"
     const response = await handleRebuildProjectionRequest(
       new Request(`https://worker/admin/projects/${encodeURIComponent(projectId)}/rebuild-projection?fullReplay=1`, {
@@ -179,13 +259,15 @@ export async function replayCorpus(projectId: string, corpus: CorpusRows): Promi
     const rebuild = (await response.json()) as Record<string, unknown>
     const digest: ProjectDigest = {}
     const tables: Record<string, string> = {}
+    const ignoredColumns: string[] = []
     for (const table of OUTPUT_TABLES) {
-      const result = await testDb.pg.query<Record<string, unknown>>(`SELECT * FROM ${table} WHERE project_id = $1`, [projectId])
-      const canonical = canonicalRows(result.rows)
+      const { rows, ignored } = await projectionRows(testDb.pg, table, projectId, options.baselineColumns)
+      const canonical = canonicalRows(rows)
       tables[table] = canonical
-      digest[table] = { rows: result.rows.length, sha256: sha256Hex(canonical) }
+      digest[table] = { rows: rows.length, sha256: sha256Hex(canonical) }
+      ignoredColumns.push(...ignored)
     }
-    return { digest, tables, rebuild }
+    return { digest, tables, rebuild, ignoredColumns }
   } finally {
     await testDb.close()
   }

@@ -88,7 +88,7 @@ export class Workspace {
     const dialog = this.page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
-    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByLabel("Film name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()
@@ -101,6 +101,7 @@ export class Workspace {
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
     await dialog.getByLabel("Use original audio or video", { exact: true }).check()
+    await expect(dialog.getByTestId("youtube-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
     await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
@@ -130,7 +131,7 @@ export class Workspace {
 
   /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
-    await this.chooseImportFiles(filePath)
+    await this.chooseImportFiles(filePath, { media: true })
     await this.waitForImportSettled()
   }
 
@@ -145,7 +146,7 @@ export class Workspace {
    * would only add a second, flakier copy of it.
    */
   async startMediaImport(filePath: string, fileName: string): Promise<void> {
-    await this.chooseImportFiles(filePath)
+    await this.chooseImportFiles(filePath, { media: true })
     await this.waitForFileInSidebar(fileName)
   }
 
@@ -154,13 +155,13 @@ export class Workspace {
     media: FilePayload,
     captions: FilePayload,
   ): Promise<void> {
-    await this.chooseImportFiles([media, captions])
+    await this.chooseImportFiles([media, captions], { media: true })
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
-    await this.chooseImportFiles(media)
+    await this.chooseImportFiles(media, { media: true })
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
@@ -388,6 +389,7 @@ export class Workspace {
    * ImportDialog's Upload Files panel, and select `filePath`. */
   private async chooseImportFiles(
     filePath: string | FilePayload | string[] | FilePayload[],
+    { media = false } = {},
   ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
@@ -403,6 +405,9 @@ export class Workspace {
     // has hydrated, which trips Playwright's strict mode.
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    if (media) {
+      await expect(this.page.getByTestId("upload-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
+    }
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 
@@ -772,6 +777,16 @@ export class Workspace {
 
   cellRow(index = 0): Locator {
     return this.root.locator("[data-cell-id]").nth(index)
+  }
+
+  /**
+   * AQU-599: the always-visible badge on a row that carries an open thread
+   * ("1 open comment — view comments"). The hover rail's comment button is
+   * named only "1 open comment", so the "— view comments" tail is what tells
+   * the two apart.
+   */
+  commentBadge(index = 0): Locator {
+    return this.cellRow(index).getByRole("button", { name: /open comments? — view comments$/i })
   }
 
   private editableTarget(index: number): Locator {
@@ -1572,7 +1587,12 @@ export class Workspace {
     return this.page.getByTestId("lane-switcher")
   }
 
-  /** Switch the active target lane. Pass `""` for the default lane. */
+  /**
+   * Switch the active target lane by its tag. Since AQU-1594 a project's first
+   * target lane is tagged with its language ("fr"; "Swahili" on a project from
+   * `seedProjectWithFile`), not `""`. Read the tag with `readActiveLane()`
+   * before switching away if the spec needs to come back to it.
+   */
   async switchLane(tag: string): Promise<void> {
     await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
     await this.laneSwitcher().click()

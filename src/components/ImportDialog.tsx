@@ -2,11 +2,12 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ExtensionMarker, ExtensionStripe } from "@/components/tools/ExtensionMarker"
 import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
+import { BuildExtensionTrigger } from "@/components/tools/BuildExtensionLink"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
 import type { ToolImporter } from "../../shared/tools/manifest"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2, Plus,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -360,7 +361,7 @@ function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCh
   }
 }
 
-interface ImportDialogProps {
+export interface ImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /**
@@ -470,6 +471,14 @@ interface ImportDialogProps {
   alignReimportedIdml?: IdmlReimportAlignHost
   /** AQU-981: "Recordings" — bulk audio upload onto lines already here. */
   recordings?: RecordingsImportHost
+  /**
+   * AQU-2682: why an audio or video upload is refused for this caller, or
+   * null. Importing one stores the file's source audio, which every language
+   * shares, and the server takes that only from someone whose access covers
+   * every language. Set, the upload screens say so and refuse media files
+   * before anything is read or uploaded; text files import as before.
+   */
+  mediaDisabledReason?: string | null
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -503,6 +512,7 @@ export function ImportDialog({
   translation,
   alignReimportedIdml,
   recordings,
+  mediaDisabledReason = null,
 }: ImportDialogProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
@@ -1419,6 +1429,7 @@ export function ImportDialog({
               setExtensionImporter(pick)
               setScreen("extension")
             }}
+            onBeforeBuildImporter={() => onOpenChange(false)}
             onSelect={(s, selectedPartnerId) => {
               analytics.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
@@ -1470,6 +1481,7 @@ export function ImportDialog({
             ctx={{ projectId, author: username, sourceLanguage,
               targetLanguage, targetLang, getToken }}
             onImported={handleChildImported}
+            mediaDisabledReason={mediaDisabledReason}
           />
           </TranscribeChoiceContext.Provider>
         )}
@@ -1523,6 +1535,7 @@ export function ImportDialog({
             alignReimportedIdml={alignReimportedIdml}
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("upload")}
+            mediaDisabledReason={mediaDisabledReason}
           />
           </TranscribeChoiceContext.Provider>
         )}
@@ -1577,6 +1590,7 @@ export function ImportDialog({
             alignReimportedIdml={alignReimportedIdml}
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("gdrive")}
+            mediaDisabledReason={mediaDisabledReason}
           />
           </TranscribeChoiceContext.Provider>
         )}
@@ -2258,14 +2272,17 @@ interface ImportLandingProps {
   translationOnlyElsewhere?: boolean
   /** AQU-1937: open an extension's import contribution. */
   onPickExtensionImporter?: (pick: { toolId: string; importer: ToolImporter; toolName: string }) => void
+  /** AQU-2772: close the dialog before navigating to the extension builder. */
+  onBeforeBuildImporter?: () => void
 }
 
-function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false, onPickExtensionImporter }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false, onPickExtensionImporter, onBeforeBuildImporter }: ImportLandingProps) {
   const t = useT()
   // AQU-1937: import contributions from Smart Extensions (only when the
   // project has them switched on: the provider lists no tools otherwise).
   const toolsCtx = useToolsMount()
   const extensionImporters = (toolsCtx?.tools ?? []).flatMap((tool) => (tool.manifest.importers ?? []).map((importer) => ({ tool, importer })))
+  const canBuildImporter = Boolean(toolsCtx && toolsCtx.extensionsEnabled === true)
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
@@ -2294,10 +2311,10 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
-      {extensionImporters.length > 0 && onPickExtensionImporter && (
+      {((extensionImporters.length > 0 && onPickExtensionImporter) || canBuildImporter) && (
         <ImportSection label={t("extensions.import.section")}>
           <ExtensionStripe className="space-y-2">
-          {extensionImporters.map(({ tool, importer }) => (
+          {onPickExtensionImporter && extensionImporters.map(({ tool, importer }) => (
             <button
               key={`${tool.id}:${importer.id}`}
               type="button"
@@ -2309,6 +2326,21 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
               <span className="text-xs text-muted-foreground">{importer.description ?? tool.name}</span>
             </button>
           ))}
+          {canBuildImporter && toolsCtx && (
+            <BuildExtensionTrigger
+              projectId={toolsCtx.projectId}
+              where="importer"
+              onBeforeNavigate={onBeforeBuildImporter}
+              testId="build-extension-importer"
+              className="flex w-full flex-col items-start gap-0.5 rounded-xl border border-dashed px-3 py-2.5 text-start text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <Plus className="size-3.5" aria-hidden />
+                {t("extensions.buildFrom.importer")}
+              </span>
+              <span className="text-xs text-muted-foreground">{t("extensions.buildFrom.importerHint")}</span>
+            </BuildExtensionTrigger>
+          )}
           </ExtensionStripe>
         </ImportSection>
       )}
@@ -2420,6 +2452,8 @@ interface UploadPanelProps {
   ) => Promise<boolean>
   /** IDML re-import that keeps translations places them into the new style runs. */
   alignReimportedIdml?: IdmlReimportAlignHost
+  /** AQU-2682: see ImportDialogProps.mediaDisabledReason. */
+  mediaDisabledReason?: string | null
 }
 
 /** AQU-1365: one parsed text upload, as the translation check sees it. */
@@ -2530,7 +2564,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget: reimportTargetProp = null }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget: reimportTargetProp = null, mediaDisabledReason = null }: UploadPanelProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
   // A recording or film can't replace a document's contents. Re-import says so
@@ -2732,10 +2766,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }
       }
 
-      setImporting(true)
-      setProgress(null)
-      setError(null)
-
       // ── Phase 1: parse ────────────────────────────────────────────────────
       // Separate text files (previewable) from media files (upload directly).
       const textFiles: File[] = []
@@ -2748,6 +2778,17 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           textFiles.push(file)
         }
       }
+      // AQU-2682: an audio or video file becomes the file's source audio,
+      // which the server refuses from this caller; say why before anything
+      // is read, staged or uploaded.
+      if (mediaFiles.length > 0 && mediaDisabledReason) {
+        setError(mediaDisabledReason)
+        return
+      }
+
+      setImporting(true)
+      setProgress(null)
+      setError(null)
 
       // Parse text files client-side for the preview.
       const preparedByFile = new Map<File, PreparedImportFile>()
@@ -2940,7 +2981,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds, undefined, undefined, recordingModes)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics, askRecordingModes]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics, askRecordingModes, mediaDisabledReason]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -3328,6 +3369,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — {t("importExport.upload.formatsSubtitles")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryParatextProject")}</span> — {t("importExport.upload.zipOrFolder")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryOtherFormats")}</span> — {t("importExport.upload.otherFormatsHint")}</p>
+            {mediaDisabledReason && <p data-testid="upload-media-disabled">{mediaDisabledReason}</p>}
           </div>
         </>
       )}

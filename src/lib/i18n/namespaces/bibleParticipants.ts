@@ -30,7 +30,7 @@ export const bibleParticipants = defineNamespace({
       "Where the source uses one form of a name (Cephas, not Simon) and the project has a name for each form, the translation uses the name for that form.",
     "bibleParticipants.p5.name": "No names the source lacks",
     "bibleParticipants.p5.description":
-      "The translation names nobody that the source of the verse does not mention, by name, as a pronoun or as the subject of a verb. The subject of the verse before or after also counts.",
+      "Every person named in the translation is mentioned in the source verse — by name, as a pronoun, or as the subject of a verb. The subject of the verse before or after also counts.",
     "bibleParticipants.p6.name": "Implied subject named correctly",
     "bibleParticipants.p6.description":
       "Where the source names nobody and only implies who acts (“he says”), a name that the translation adds is the name of that person.",
@@ -64,8 +64,8 @@ export const bibleParticipants = defineNamespace({
     "bibleParticipants.needs.clusivitySame": "Not used: in Language profile, “we” is the same with or without the listener",
     "bibleParticipants.needs.groupNumberForms": "Needs: dual, trial or paucal forms in Language profile",
     "bibleParticipants.needs.groupNumberNone": "Not used: Language profile has no dual, trial or paucal",
-    "bibleParticipants.needs.divineNames": "Needs: renderings of κύριος in Language profile (Divine names) or as decisions",
-    "bibleParticipants.needs.deityCapitals": "Needs: the capitals rule for God in Language profile (Divine names)",
+    "bibleParticipants.needs.divineNames": "Needs: renderings of κύριος in Language profile (Names of God) or as decisions",
+    "bibleParticipants.needs.deityCapitals": "Needs: the capitals rule for God in Language profile (Names of God)",
     "bibleParticipants.needs.deityCapitalsOff": "Not used: the house style keeps pronouns for God in lowercase",
     "bibleParticipants.needs.alignment": "Needs: word alignment between the Greek and the translation, which this project does not have",
     "bibleParticipants.needs.clusivityDecisions": "Needs: a decision about “we” in a passage (clusivity.…)",
@@ -84,7 +84,7 @@ export const bibleParticipants = defineNamespace({
     "bibleParticipants.reason.nameFormMissing":
       "The source calls {name} “{form}” here. The project renders that form “{rendering}”, and the translation does not have it.",
     "bibleParticipants.reason.nameNotInSource":
-      "The translation names “{found}” ({name}), but the source does not mention them in this verse or as the subject next to it.",
+      "The translation names “{found}” ({name}), but the source does not mention them in this verse or as the subject of the verse before or after it.",
     "bibleParticipants.reason.subjectNameWrong":
       "The source does not name who acts here, and the Bible data says that it is {name}. But the translation names “{found}”.",
     "bibleParticipants.reason.youSingularMissing":
@@ -122,7 +122,7 @@ export const bibleParticipants = defineNamespace({
     "bibleParticipants.reason.deityPronounLowercase":
       "A pronoun here refers to God, Jesus or the Holy Spirit and starts with a small letter, but the house style capitalizes it.",
     "bibleParticipants.reason.quotationDiffers":
-      "The source repeats here the words it quotes in {other}, but the translation renders them differently (word overlap {similarity}).",
+      "Here the source repeats the words it quotes in {other}, but the translation renders them differently (word overlap {similarity}).",
 
     // ── Where a finding's fact comes from ──
     "bibleParticipants.evidence.mention": "{dataset}: {ref} word {word} names {name}",

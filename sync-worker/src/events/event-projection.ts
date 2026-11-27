@@ -2170,6 +2170,14 @@ case 'cell.audio.attach': {
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
+              -- AQU-2664: a re-attach that swaps the audio is a new recording,
+              -- so the old one's reading goes (the evened-out target stays
+              -- and waits for the next measure: an unmeasured take plays at
+              -- its own volume). The same url keeps it.
+              loudness_lufs      = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_lufs END,
+              true_peak_db       = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.true_peak_db END,
+              loudness_from_ms   = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_from_ms END,
+              loudness_to_ms     = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_to_ms END,
               mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
               voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
@@ -2449,6 +2457,29 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.even': {
+      // AQU-2664: the loudness this take is evened out to, and nothing else —
+      // its own stage before the take's volume and fades, which it never
+      // writes (nor the votes). Always stated; null clears it.
+      const p = event.payload as EventPayloads['cell.audio.even']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.even event ${event.id} is missing fileId or cellId`)
+      }
+      const t = p.evenTargetLufs
+      if (typeof p.audioId !== 'string' || (t !== null && (typeof t !== 'number' || !Number.isFinite(t)))) {
+        throw new Error(`cell.audio.even event ${event.id} has a malformed payload`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET even_target_lufs = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(t, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.audio.place': {
       // WHERE THIS TAKE SITS, and nothing else. (AQU-646 stage 3)
       //
@@ -2510,6 +2541,14 @@ case 'cell.audio.attach': {
       // (cut-vote-archive.ts), and a cut naming the piece an undo of it
       // removed is that cut's Redo: the piece comes back (step 0) and the
       // first piece gets back the votes it had when the cut was undone.
+      // AQU-2494 (review, Nov 9): the take's volume and fades (AQU-2327) go
+      // with the cut. Both pieces keep the volume; the fade-in stays on the
+      // piece that holds the take's start and the fade-out moves to the piece
+      // that holds its end, each no longer than its piece. Before, the copy
+      // left all three on the first piece: the second played at the recorded
+      // volume and the fade-out landed at the cut. A replay of the same cut is
+      // safe: step 1 does nothing on its conflict, and step 2 clears a
+      // fade-out already cleared and re-clamps a fade-in to the same length.
       const p = event.payload as EventPayloads['cell.audio.cut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
@@ -2562,13 +2601,19 @@ case 'cell.audio.attach': {
               project_id, file_id, cell_id, audio_id, slot, url, mime_type, voice_id,
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
-              created_by, role, target_offset_ms, recordings_offset_ms, piece_of
+              created_by, role, target_offset_ms, recordings_offset_ms, piece_of,
+              gain_db, fade_in_ms, fade_out_ms,
+              loudness_lufs, true_peak_db, loudness_from_ms, loudness_to_ms, even_target_lufs
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
                    ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
                    a.created_by, a.role, a.target_offset_ms, a.recordings_offset_ms,
-                   COALESCE(a.piece_of, a.audio_id)
+                   COALESCE(a.piece_of, a.audio_id),
+                   a.gain_db, NULL,
+                   CASE WHEN a.fade_out_ms IS NULL THEN NULL
+                        ELSE LEAST(a.fade_out_ms, COALESCE(a.trim_end_ms, a.duration_ms) - ?) END,
+                   a.loudness_lufs, a.true_peak_db, a.loudness_from_ms, a.loudness_to_ms, a.even_target_lufs
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'
@@ -2582,6 +2627,7 @@ case 'cell.audio.attach': {
             event.serverTs,
             atMs,
             p.newLabel ?? null,
+            atMs,
             event.projectId,
             event.fileId,
             event.cellId,
@@ -2609,13 +2655,17 @@ case 'cell.audio.attach': {
       stmts.push(
         db
           .prepare(
-            `UPDATE cell_audio SET trim_end_ms = ?, label = COALESCE(?, label)
+            `UPDATE cell_audio SET trim_end_ms = ?, label = COALESCE(?, label),
+                    fade_out_ms = NULL,
+                    fade_in_ms = CASE WHEN fade_in_ms IS NULL THEN NULL
+                                      ELSE LEAST(fade_in_ms, ? - COALESCE(trim_start_ms, 0)) END
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
                 AND ${cutLanded}`,
           )
           .bind(
             atMs,
             p.firstLabel ?? null,
+            atMs,
             event.projectId,
             event.fileId,
             event.cellId,
@@ -2791,14 +2841,42 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.measure event ${event.id} is missing fileId or cellId`)
       }
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
-          )
-          .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
-      )
+      // AQU-2664: a reading may come without a known length; a missing or
+      // zero duration stores nothing (fill-only, a 0 would stay for good).
+      if (typeof p.durationMs === 'number' && p.durationMs > 0) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
+      // AQU-2664: the loudness and true peak of the take's WINDOW of the
+      // recording, both or neither, with the window they measured. The same
+      // window again is a no-op (a replay, a second device); another window
+      // (the take was cut or trimmed since) replaces the old reading.
+      if (p.loudnessLufs !== undefined || p.truePeakDb !== undefined) {
+        const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+        const okMs = (v: unknown) => v == null || ok(v)
+        if (!ok(p.loudnessLufs) || !ok(p.truePeakDb) || !okMs(p.loudnessFromMs) || !okMs(p.loudnessToMs)) {
+          throw new Error(`cell.audio.measure event ${event.id} has a malformed loudness reading`)
+        }
+        const from = p.loudnessFromMs == null ? null : Math.round(p.loudnessFromMs)
+        const to = p.loudnessToMs == null ? null : Math.round(p.loudnessToMs)
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET loudness_lufs = ?, true_peak_db = ?, loudness_from_ms = ?, loudness_to_ms = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND (loudness_lufs IS NULL
+                       OR loudness_from_ms IS DISTINCT FROM ?::bigint
+                       OR loudness_to_ms IS DISTINCT FROM ?::bigint)`,
+            )
+            .bind(p.loudnessLufs, p.truePeakDb, from, to, event.projectId, event.fileId, event.cellId, p.audioId, from, to),
+        )
+      }
       return ['cell_audio']
     }
 
@@ -3975,6 +4053,15 @@ case 'cell.audio.attach': {
       const applyGuard = p.adopt === true
         ? ''
         : 'WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq'
+      // AQU-2549: the join keeps an unchanged line's event id, as a re-import
+      // keeps an `equal` unit's (file-revision-apply.ts). A target is pinned to
+      // that id, and a file imported in one step pins every line to its
+      // `file.revision`, which carries no per-line text — so a moved id read as
+      // "source changed" on every translated line. A line whose text the join
+      // changes takes the mirror's id and is flagged, as any upstream edit is.
+      const eventIdAssign = p.adopt === true
+        ? 'CASE WHEN cells.value IS NOT DISTINCT FROM excluded.value THEN cells.event_id ELSE excluded.event_id END'
+        : 'excluded.event_id'
       stmts.push(
         db
           .prepare(
@@ -3997,7 +4084,7 @@ case 'cell.audio.attach': {
               type              = COALESCE(excluded.type, cells.type),
               canonical_ref     = COALESCE(excluded.canonical_ref, cells.canonical_ref),
               anchor_cell_id    = COALESCE(excluded.anchor_cell_id, cells.anchor_cell_id),
-              event_id          = excluded.event_id,
+              event_id          = ${eventIdAssign},
               last_editor       = excluded.last_editor,
               last_edit_at      = excluded.last_edit_at,
               word_count        = excluded.word_count,

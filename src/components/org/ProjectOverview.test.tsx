@@ -223,6 +223,7 @@ vi.mock("@/components/StaffLanePopover", () => ({
 const fetchMyScopeGrant = vi.fn(async (..._a: unknown[]): Promise<unknown> => null)
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
+  fetchMemberScopeView: vi.fn(async () => ({ scopes: [], laneNames: {} })),
   putMemberScopes: vi.fn(async () => ({ scopes: [], laneNames: {} })),
   // AQU-1994: `null` is "the server did not say", which leaves every Assign
   // surface offering the project's own lanes exactly as it did before.
@@ -641,7 +642,7 @@ describe("ProjectOverview load states", () => {
 
     renderOverview()
 
-    expect(await screen.findByText(/log in to see your workspace/i)).toBeInTheDocument()
+    expect(await screen.findByText(/sign in to see your workspace/i)).toBeInTheDocument()
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
 
     const signIn = screen.getByRole("link", { name: /^log in$/i })

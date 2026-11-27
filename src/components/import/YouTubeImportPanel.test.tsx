@@ -13,7 +13,7 @@ vi.mock("@/lib/import", async importOriginal => ({
 
 import { YouTubeImportPanel } from "./YouTubeImportPanel"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
-import { createMediaFileCommit } from "@/lib/import"
+import { createMediaFileCommit, probeMediaDurationMs } from "@/lib/import"
 import { embeddedSubtitleFixture } from "@/lib/parsers/__fixtures__/embedded-subtitles"
 import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
@@ -183,7 +183,7 @@ Lost words
     const onImported = vi.fn()
     renderPanel({ onImported })
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), {
+    fireEvent.change(screen.getByLabelText("Film name"), {
       target: { value: "My video" },
     })
     expect(screen.queryByLabelText("Your caption export")).not.toBeInTheDocument()
@@ -278,6 +278,43 @@ Lost words
     expect(screen.queryByTestId("recording-import-captions-unread")).toBeNull()
   })
 
+  // AQU-2682 review: original media is stored as the file's source audio, so
+  // it meets the same "every language" answer as Upload files.
+  it("refuses original media with the reason before it is read or uploaded", async () => {
+    const REASON = "Importing audio or video needs access to every language."
+    renderPanel({ mediaDisabledReason: REASON })
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    expect(screen.getByTestId("youtube-media-disabled")).toHaveTextContent(REASON)
+    const media = new File(["audio"], "clip.mp4", { type: "video/mp4" })
+    const readBytes = vi.spyOn(media, "arrayBuffer")
+    await selectFile(media)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(REASON)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(readBytes).not.toHaveBeenCalled()
+    expect(probeMediaDurationMs).not.toHaveBeenCalled()
+    expect(createMediaFileCommit).not.toHaveBeenCalled()
+  })
+
+  it("refuses the import when the answer turns to no while the preview is open", async () => {
+    const REASON = "Importing audio or video needs access to every language."
+    const onImported = vi.fn()
+    const view = renderPanel({ onImported })
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    await selectFile(new File(["audio"], "clip.mp3", { type: "audio/mpeg" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    await screen.findByRole("dialog")
+    view.rerender(<YouTubeImportPanel ctx={{ projectId: "p1", author: "dev", getToken: vi.fn(async () => "token") }}
+      onImported={onImported} mediaDisabledReason={REASON} />)
+    // With no captions inside, the branch's whole-or-transcribed choice opens.
+    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(REASON)
+    expect(createMediaFileCommit).not.toHaveBeenCalled()
+    expect(onImported).not.toHaveBeenCalled()
+  })
+
   it("reviews and edits embedded captions in original media", async () => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({
@@ -308,7 +345,7 @@ Lost words
   it("invalidates a prepared picture when the caption source changes", async () => {
     renderPanel()
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), { target: { value: "My picture" } })
+    fireEvent.change(screen.getByLabelText("Film name"), { target: { value: "My picture" } })
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("button", { name: "Link film" })
     fireEvent.click(screen.getByLabelText("Import a caption export"))

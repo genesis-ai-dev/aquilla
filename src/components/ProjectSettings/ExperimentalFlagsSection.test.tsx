@@ -38,7 +38,7 @@ describe("ExperimentalFlagsSection — community checking (AQU-1249)", () => {
   it("keeps checking WIP off until explicitly enabled and persists the flag", async () => {
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
-    const toggle = await screen.findByRole("switch", { name: "Community checking (WIP)" })
+    const toggle = await screen.findByRole("switch", { name: "Community checking (experimental)" })
     expect(toggle).not.toBeChecked()
     expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
     fireEvent.click(toggle)
@@ -55,7 +55,7 @@ describe("ExperimentalFlagsSection — a toggle made before the seed read lands 
   // a snapshot taken before the click's write. These hold the read on a
   // deferred promise so the late landing happens every run, not one in a
   // thousand.
-  const CHECKING_SWITCH = { name: "Community checking (WIP)" } as const
+  const CHECKING_SWITCH = { name: "Community checking (experimental)" } as const
 
   function holdSeedRead() {
     let land!: (record: ProjectRecord | undefined) => void
@@ -405,7 +405,7 @@ describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () =
       expect(rowText(name)).not.toMatch(/this device/i)
     }
     for (const name of [
-      "Community checking (WIP)",
+      "Community checking (experimental)",
       "Agent modes",
       "Harmonizer",
       "Smart edits: AI wording",

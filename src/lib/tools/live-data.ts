@@ -22,6 +22,7 @@ import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
+import type { ExtensionAnnotateInput, NativeActiveCell } from "../../../shared/tools/native-editor"
 import type { ToolEditorServices } from "./editor-services"
 import { LiveEditorData } from "./live-data-editor"
 import { rev4Delegates, type ToolRev4HostData } from "./host-handlers-rev4"
@@ -100,6 +101,14 @@ export interface LiveToolDataOptions {
   locale?: () => string
   /** apiRev 7: a headless run (action / export) listening for progress, done and delivered files. */
   headless?: () => HeadlessCallbacks | undefined
+  /** apiRev 8: callbacks connecting this extension to Aquilla's real native EditorTable. */
+  nativeEditor?: () => {
+    getActiveCell: () => NativeActiveCell | null
+    reveal: (fileId: string, cellId: string, focus: boolean) => boolean
+    annotate: (input: ExtensionAnnotateInput) => number
+    clearAnnotations: (fileId: string | null, layer: string | null) => boolean
+    openOwnPanel: () => boolean
+  } | undefined
 }
 
 const CHAPTER_RE = /^(.+?)\s+(\d+)[:.]/
@@ -698,5 +707,27 @@ export class LiveToolData implements ToolHostData {
 
   requestScope(scope: ToolScope): Promise<boolean> {
     return this.opts.requestScope(scope)
+  }
+
+  // ── apiRev 8: native EditorTable integration ────────────────────────────
+  async getActiveCell(): Promise<NativeActiveCell | null> {
+    return this.opts.nativeEditor?.()?.getActiveCell() ?? null
+  }
+
+  async revealInEditor(fileId: string, cellId: string, focus: boolean): Promise<boolean> {
+    return this.opts.nativeEditor?.()?.reveal(fileId, cellId, focus) ?? false
+  }
+
+  async annotateEditor(input: ExtensionAnnotateInput): Promise<{ cells: number }> {
+    const count = this.opts.nativeEditor?.()?.annotate(input) ?? 0
+    return { cells: count }
+  }
+
+  async clearEditorAnnotations(fileId: string | null, layer: string | null): Promise<boolean> {
+    return this.opts.nativeEditor?.()?.clearAnnotations(fileId, layer) ?? false
+  }
+
+  async openOwnPanel(): Promise<boolean> {
+    return this.opts.nativeEditor?.()?.openOwnPanel() ?? false
   }
 }

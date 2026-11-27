@@ -27,6 +27,16 @@ import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft, rulesForLane } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
 import { withOrgMediaDefaults } from "../../../../db/shared/media-setting-defaults"
+import { loadLaneGrants } from "../../../../db/shared/lane-visibility"
+import {
+  DEFAULT_SOURCE_TEXT_FLOOR,
+  effectiveSourceTextFloor,
+  sourceTextAuthorityLevel,
+} from "../../../../db/shared/source-text-floor"
+
+function isSourceTextEditKind(kind: string): boolean {
+  return kind === "source.cell.commit" || kind === "source.cell.visibility.set"
+}
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
 
@@ -90,6 +100,9 @@ export interface EmitStageContext {
   runId: string
   projectId: string
   roleLevel: number
+  /** The person the agent acts for. Used to count a language-lane grant
+   *  toward the source-text floor. Absent in tests that do not stage one. */
+  userId?: number
   /** Focused file/cell for :file / :cell resolution. */
   fileId?: string
   cellId?: string
@@ -355,9 +368,45 @@ type Verdict =
   | { kind: "rejected"; reason: string }
   | { kind: "stale"; reason: string }
 
-/** AQU-1068: the project's cell-editing tier, or null for nobody. Best-effort
- *  in the same sense as the lint rules — but failing CLOSED, because the
- *  refusing answer is the safe one here. */
+/** AQU-2647: the source-text floor and this caller's clearance. Fail closed to Maintainer. */
+async function loadSourceTextGate(
+  db: AquillaDb,
+  ctx: EmitStageContext,
+): Promise<{ floor: number; authority: number }> {
+  let floor = DEFAULT_SOURCE_TEXT_FLOOR
+  try {
+    const row = await db
+      .prepare(
+        `SELECT ps.settings AS project_settings, os.settings AS org_settings
+           FROM (SELECT ?::text AS id) q
+           LEFT JOIN project_settings ps ON ps.project_id = q.id
+           LEFT JOIN projects p ON p.id = q.id
+           LEFT JOIN org_settings os ON os.org_id = p.org_id`,
+      )
+      .bind(ctx.projectId)
+      .first<{ project_settings: string | null; org_settings: string | null }>()
+    const project = row?.project_settings ? JSON.parse(row.project_settings) : null
+    const org = row?.org_settings ? JSON.parse(row.org_settings) : null
+    floor = effectiveSourceTextFloor(project?.sourceTextFloor, org?.sourceTextFloor)
+  } catch {
+    floor = DEFAULT_SOURCE_TEXT_FLOOR
+  }
+  let authority = ctx.roleLevel
+  if (ctx.userId != null && ctx.roleLevel < DEFAULT_SOURCE_TEXT_FLOOR) {
+    try {
+      const grants = await loadLaneGrants(db, ctx.projectId, ctx.userId)
+      authority = sourceTextAuthorityLevel({
+        projectRole: ctx.roleLevel,
+        laneLevels: grants.map((grant) => grant.level),
+      })
+    } catch {
+      authority = ctx.roleLevel
+    }
+  }
+  return { floor, authority }
+}
+
+/** AQU-1068: the project's cell-editing tier, or null for nobody. Fail closed. */
 async function loadCellEditingFloor(db: AquillaDb, projectId: string): Promise<number | null> {
   try {
     // AQU-1768: a project with no tier of its own follows its org's default.
@@ -392,6 +441,9 @@ async function stageOne(
   cellEditingFloor: number | null | undefined,
   /** Resolved once per batch. `laneId` keys cell reads; `targetLang` is the legacy tag. */
   lane: ResolvedLane,
+  /** AQU-2647: the source-text floor, and the caller's clearance for it.
+   *  Undefined when the batch does not edit source text. */
+  sourceText?: { floor: number; authority: number },
 ): Promise<Verdict> {
   if (typeof raw !== "object" || raw === null || typeof raw.kind !== "string") {
     return { kind: "rejected", reason: "each event needs a string `kind`" }
@@ -403,7 +455,22 @@ async function stageOne(
   if (floor === undefined) {
     return { kind: "rejected", reason: `unknown event kind "${kind}"` }
   }
-  if (ctx.roleLevel < floor) {
+  // AQU-2647: a language-lane grant counts toward editing source text. The
+  // static floor is Contributor; the project's tier is what decides.
+  if (sourceText != null && isSourceTextEditKind(kind)) {
+    if (sourceText.authority < floor) {
+      return {
+        kind: "rejected",
+        reason: `role too low: ${kind} requires ${ROLE_NAME[floor] ?? floor} (${floor}), you act as ${ROLE_NAME[sourceText.authority] ?? sourceText.authority} (${sourceText.authority})`,
+      }
+    }
+    if (sourceText.authority < sourceText.floor) {
+      return {
+        kind: "rejected",
+        reason: `role too low to edit source text (${kind})`,
+      }
+    }
+  } else if (ctx.roleLevel < floor) {
     return {
       kind: "rejected",
       reason: `role too low: ${kind} requires ${ROLE_NAME[floor] ?? floor} (${floor}), you act as ${ROLE_NAME[ctx.roleLevel] ?? ctx.roleLevel} (${ctx.roleLevel})`,
@@ -743,6 +810,10 @@ export async function stageEvents(
     (r) => typeof (r as RawEmitEvent)?.kind === "string" && isCellEditingKind((r as RawEmitEvent).kind as string),
   )
   const cellEditingFloor = anyCellEditing ? await loadCellEditingFloor(db, ctx.projectId) : undefined
+  const anySourceText = rawEvents.some(
+    (r) => typeof (r as RawEmitEvent)?.kind === "string" && isSourceTextEditKind((r as RawEmitEvent).kind as string),
+  )
+  const sourceText = anySourceText ? await loadSourceTextGate(db, ctx) : undefined
 
   // AQU-1670: ONE read for every cell the batch names, BEFORE the per-event
   // loop. This is what keeps staging flat in cell count instead of one
@@ -760,7 +831,7 @@ export async function stageEvents(
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
     let verdict: Verdict
     try {
-      verdict = await stageOne(pairs, raw, ctx, cellEditingFloor, lane)
+      verdict = await stageOne(pairs, raw, ctx, cellEditingFloor, lane, sourceText)
     } catch (err) {
       verdict = { kind: "rejected", reason: `stage error: ${err instanceof Error ? err.message : String(err)}` }
     }

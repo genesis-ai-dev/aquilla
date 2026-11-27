@@ -102,8 +102,8 @@ export const editor = defineNamespace({
     ),
     "editor.completion.failedPartial": plural(
       {
-        one: "{failed} of {total} cell failed — {done} completed.",
-        other: "{failed} of {total} cells failed — {done} completed.",
+        one: "{failed} of {total} cell failed — {done} drafted.",
+        other: "{failed} of {total} cells failed — {done} drafted.",
       },
       "total",
     ),
@@ -181,7 +181,7 @@ export const editor = defineNamespace({
     "editor.panel.resizeRule": "Resize rule panel",
     "editor.panel.resizeCheck": "Resize file check panel",
     "editor.panel.resizeTranslationNotes": "Resize translation notes panel",
-    "editor.panel.resizeParallelBibles": "Resize parallel bibles panel",
+    "editor.panel.resizeParallelBibles": "Resize parallel Bibles panel",
     "editor.panel.resizeVerseResources": "Resize verse resources panel",
     "editor.translationNotes.loadFailed": "Failed to load translation notes",
     "editor.bookHealth.scoreSuffix": " · health {score}",
@@ -222,11 +222,11 @@ export const editor = defineNamespace({
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
     "editor.waveform.seekTooltip": "Click to seek",
-    "editor.waveform.loading": "Loading waveform...",
+    "editor.waveform.loading": "Loading waveform…",
     "editor.waveform.needsLoadTooltip":
       "Click to download and decode this clip's waveform",
     "editor.waveform.load": "Load waveform",
-    "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click retry",
+    "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click to retry",
     "editor.waveform.retryTooltip": "Couldn't load this clip's waveform; click to retry",
     "editor.waveform.retry": "Retry waveform",
     "editor.waveform.trimStart": "Start of the kept audio",
@@ -256,7 +256,7 @@ export const editor = defineNamespace({
     "editor.attachments.removeFailed": "Couldn't remove this attachment.",
     "editor.attachments.previewAlt": "Attachment preview: {name}",
     "editor.attachments.openInDrawer": "Show in the attachments panel",
-    "editor.attachments.cellGroupUnlabelled": "Unlabelled cell",
+    "editor.attachments.cellGroupUnlabelled": "Unlabeled cell",
 
     // — Empty / loading / error states where the table would be ——————
     "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
@@ -386,19 +386,19 @@ export const editor = defineNamespace({
     "editor.footnotes.trayHint": "Updates as the editor scrolls",
     "editor.footnotes.closeTray": "Close footnotes tray",
     "editor.footnotes.trayEmpty": "No footnotes in the visible rows.",
-    "editor.footnotes.docxReadOnly": "read-only · DOCX round-trip not yet safe",
+    "editor.footnotes.docxReadOnly": "read-only · can't export edits to DOCX yet",
     "editor.footnotes.addTarget": "Add target footnote",
     "editor.footnotes.noTarget": "No target footnote",
     "editor.footnotes.noSource": "No source footnote",
     "editor.footnotes.emptyNote": "Empty footnote",
     "editor.footnotes.emptyTarget": "Empty target footnote",
     "editor.footnotes.targetRole": "Target footnote",
-    "editor.footnotes.editPlaceholder": "Translate footnote...",
+    "editor.footnotes.editPlaceholder": "Translate footnote…",
     "editor.footnotes.editLabel": "Edit footnote",
     "editor.footnotes.editMarker": "Edit footnote {label}",
     "editor.footnotes.clickToEdit": "Click to edit footnote",
     "editor.footnotes.translationLabel": "Footnote translation",
-    "editor.footnotes.addTranslation": "Add translation...",
+    "editor.footnotes.addTranslation": "Add translation…",
     "editor.footnotes.deleteConfirm": "I'm sure",
     "editor.footnotes.saveConflict":
       "Couldn't save — this footnote changed while you were editing. Copy your " +
@@ -416,7 +416,7 @@ export const editor = defineNamespace({
     "editor.footnote.markerLetteredDesc":
       "Use letter markers for a separate note sequence.",
     "editor.footnote.textLabel": "Footnote text",
-    "editor.footnote.textPlaceholder": "Selected text: footnote text...",
+    "editor.footnote.textPlaceholder": "Selected text: footnote text…",
     "editor.footnote.attachedTo": "Attached to {ref}.",
     "editor.footnote.textHint":
       "Include the selected word or phrase before a colon when it helps clarify " +
@@ -603,8 +603,8 @@ export const editor = defineNamespace({
     "editor.view.dirMixed": "mixed",
 
     // — Parallel-bibles reference sidebar ————————————————————————————
-    "editor.bibles.show": "Show parallel bibles",
-    "editor.bibles.hide": "Hide parallel bibles",
+    "editor.bibles.show": "Show parallel Bibles",
+    "editor.bibles.hide": "Hide parallel Bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
     "editor.bibles.noReferences": "No Bible references",
@@ -612,9 +612,9 @@ export const editor = defineNamespace({
       "The current cells have no Bible references with chapter and verse numbers. " +
       "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
-      "Scroll the editor to a verse to see it in other bible versions.",
+      "Scroll the editor to a verse to see it in other Bible versions.",
     "editor.bibles.noVersions":
-      "No versions added yet. Add a bible version to read alongside your text.",
+      "No versions added yet. Add a Bible version to read alongside your text.",
     "editor.bibles.removeVersion": "Remove {version}",
     "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
     "editor.bibles.noTextForRef": "No text for {ref} in this version.",
@@ -743,8 +743,7 @@ export const editor = defineNamespace({
     "editor.history.draftKept": "{pct} of AI draft kept",
     "editor.history.draftKeptAsIs": "AI draft kept as-is",
     "editor.history.draftKeptTooltip":
-      "How much of the AI draft above survived this revision, measured character " +
-      "by character. 100% means the draft was approved unchanged.",
+      "How much of the AI draft above survived this revision, measured character by character. 100% means the draft was validated unchanged.",
     "editor.history.aiTrace.show": "Show prompt",
     "editor.history.aiTrace.hide": "Hide prompt",
     "editor.history.aiTrace.output": "Model output",
@@ -754,8 +753,7 @@ export const editor = defineNamespace({
     "editor.history.aiTrace.loadFailed": "Couldn't load the prompt. Open it again to retry.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
-      "This edit lost the first-child-of-parent race for its slot. It was logged " +
-      "but never applied to the cell's current value.",
+      "Another edit arrived at the same time and took effect first. This edit was recorded in history, not applied as the cell's current value.",
     "editor.history.syncing": "syncing",
     "editor.history.syncFailed": "sync failed",
     "editor.history.syncFailedTooltip":
@@ -799,7 +797,7 @@ export const editor = defineNamespace({
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
     "editor.selection.translateNoPermission":
-      "You need contributor role to draft translations",
+      "You need the contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.validate": "Validate",
     "editor.selection.validateText": "Validate text",
@@ -850,7 +848,7 @@ export const editor = defineNamespace({
     "editor.selection.noValidations": "No cells have your validation",
     "editor.selection.harmonize": "Harmonize…",
     "editor.selection.harmonizeNeedLead":
-      "You need project lead role to run a harmonization sweep",
+      "You need the project lead role to run a harmonization sweep",
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
     "editor.selection.copySource": "Copy source",
@@ -868,8 +866,8 @@ export const editor = defineNamespace({
       other: "Validated {count} cells ({already} already validated)",
     }),
     "editor.selection.unvalidatedToast": plural({
-      one: "Removed validations from {count} cell",
-      other: "Removed validations from {count} cells",
+      one: "Removed your validation from {count} cell",
+      other: "Removed your validation from {count} cells",
     }),
 
     // -- AQU-1503: batch text validation, shared by the selection toolbar's
@@ -901,7 +899,7 @@ export const editor = defineNamespace({
       other: "{count} cells ready for your check",
     }),
     "editor.batchFile.readyHelp":
-      "Committed text you have not signed off, including lines someone else already checked.",
+      "Saved text you have not signed off, including lines someone else already checked.",
     "editor.batchFile.aiDrafts": plural({
       one: "{count} AI draft nobody has checked",
       other: "{count} AI drafts nobody has checked",
@@ -1003,7 +1001,7 @@ export const editor = defineNamespace({
     "editor.timeline.title": "Timeline",
     "editor.timeline.followPlayhead": "Follow playhead",
     "editor.timeline.changeVideo": "Change film",
-    "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
+    "editor.timeline.coreVideoPrompt": "Film URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
     "editor.timeline.zoomOut": "Zoom out",
     "editor.timeline.laneSubtitle": "Subtitles",
@@ -1196,8 +1194,8 @@ export const editor = defineNamespace({
     "editor.history.stepAddFolder": "Make folder",
     "editor.history.stepRenameTrack": "Rename track",
     "editor.history.stepTrackColour": plural({
-      one: "Change {count} track colour",
-      other: "Change {count} track colours",
+      one: "Change {count} track color",
+      other: "Change {count} track colors",
     }),
     "editor.history.stepMoveTrack": plural({
       one: "Move {count} track",
@@ -1216,7 +1214,7 @@ export const editor = defineNamespace({
       one: "Change {count} project setting",
       other: "Change {count} project settings",
     }),
-    "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone any more",
+    "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone anymore",
     "editor.history.blockedElsewhere": "Open “{file}” to undo “{step}”",
     "editor.history.blockedElsewhereNoName": "Open the file it was made in to undo “{step}”",
     "editor.history.undonePartly": plural({
@@ -1241,7 +1239,7 @@ export const editor = defineNamespace({
     "editor.history.undoToHere": "Undo to here",
     "editor.history.reasonChanged": "Someone changed it afterwards, so it was left as they made it.",
     "editor.history.reasonGone": "What it changed no longer exists.",
-    "editor.history.reasonUnavailable": "This step can't be undone any more.",
+    "editor.history.reasonUnavailable": "This step can't be undone anymore.",
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
     // Decision 11 (2026-10-20): one history per person and project, on every device.
     "editor.history.reasonApproved": "{name} approved it afterwards, so it was left as it is.",
@@ -1265,6 +1263,86 @@ export const editor = defineNamespace({
     "editor.history.stepStationVersion": "Save a new version",
     "editor.history.stepStationSaveOver": "Save over a take",
     "editor.history.stepTakeLevel": "Change volume or fades",
+    "editor.history.stepEvenOut": plural({
+      one: "Even out loudness · {count} take",
+      other: "Even out loudness · {count} takes",
+    }),
+    "editor.history.stepClearEvenOut": plural({
+      one: "Clear even out · {count} take",
+      other: "Clear even out · {count} takes",
+    }),
+    "editor.history.stepTrackVolume": "Change track volume",
+    // — AQU-2664: the track header's M | S, fader and ≈ (board 74) ————————
+    "editor.mix.group": "Mute and solo",
+    "editor.mix.muteLetter": "M",
+    "editor.mix.soloLetter": "S",
+    "editor.mix.mute": "Mute {name}",
+    "editor.mix.solo": "Solo {name}",
+    "editor.mix.muteTitle": "Mute",
+    "editor.mix.soloTitle": "Solo",
+    "editor.mix.fader": "Volume of {name}",
+    "editor.mix.faderTitle": "Volume · double-click to type · Option-click for 0 dB",
+    "editor.mix.faderLocked": "Your role can't change a track's volume",
+    "editor.mix.evenOff": "Even out loudness…",
+    "editor.mix.evenFull": "Evened out · click to change",
+    "editor.mix.evenPart": "Evened out, some takes not all the way · click to change",
+    // — AQU-2664: the Even out window (board 71) and its toasts (board 73) ——
+    "editor.evenOut.menuItem": "Even out loudness…",
+    "editor.evenOut.menuItemTracks": "Even out loudness ({count} tracks)…",
+    "editor.evenOut.title": "Even out loudness",
+    "editor.evenOut.description": "Sets every take to the same loudness. The recordings don’t change.",
+    "editor.evenOut.scope": "Which takes",
+    "editor.evenOut.wholeFile": "The whole file",
+    "editor.evenOut.selectedTracks": "{count} selected tracks",
+    "editor.evenOut.trackCount": plural({ one: "{count} track", other: "{count} tracks" }),
+    "editor.evenOut.takeCount": plural({ one: "{count} take", other: "{count} takes" }),
+    "editor.evenOut.targetLead": "Every take plays at",
+    "editor.evenOut.targetValue": "{lufs} LUFS",
+    "editor.evenOut.targetInfoLabel": "About this loudness",
+    "editor.evenOut.targetInfo":
+      "The usual loudness for speech on phones, podcasts and the web. Each take is measured once, and the app plays it at this loudness. A quiet take is raised at most 12 dB; one that would distort is raised as far as it cleanly goes. Evening out comes first; your own volumes (the take’s, the track’s) work on top of it and are never changed by it.",
+    "editor.evenOut.clear": "Clear {count}",
+    "editor.evenOut.run": plural({ one: "Even out {count} take", other: "Even out {count} takes" }),
+    "editor.evenOut.measuring": plural({ one: "Measuring {done} of {count} take…", other: "Measuring {done} of {count} takes…" }),
+    "editor.evenOut.skipped": plural({
+      one: "{count} take couldn’t be measured on this device and was skipped. It plays at its own volume.",
+      other: "{count} takes couldn’t be measured on this device and were skipped. They play at their own volume.",
+    }),
+    "editor.evenOut.notAllowed": "You can’t even out takes in this project.",
+    "editor.evenOut.waiting": "Another Even out is still running. This one starts when it ends.",
+    "editor.evenOut.failed": "Couldn’t even out the takes. Try again.",
+    "editor.evenOut.doneToast": plural({
+      one: "{count} take evened out to {lufs} LUFS.",
+      other: "{count} takes evened out to {lufs} LUFS.",
+    }),
+    "editor.evenOut.heldToast": plural({
+      one: "{count} couldn’t go all the way up; it’s marked.",
+      other: "{count} couldn’t go all the way up; they’re marked.",
+    }),
+    "editor.evenOut.clearedTake": "{take} on {line} is no longer evened. Your volume ({volume}) is kept.",
+    "editor.evenOut.clearedTrack": plural({
+      one: "{track}: {count} take no longer evened. Its own volume and the track’s are kept.",
+      other: "{track}: {count} takes no longer evened. Their own volumes and the track’s are kept.",
+    }),
+    "editor.evenOut.clearedTracks": plural({
+      one: "{count} take no longer evened. Its own volume and the tracks’ are kept.",
+      other: "{count} takes no longer evened. Their own volumes and the tracks’ are kept.",
+    }),
+    "editor.evenOut.clearedFile": plural({
+      one: "{count} take no longer evened. Every volume you set is kept.",
+      other: "{count} takes no longer evened. Every volume you set is kept.",
+    }),
+    "editor.evenOut.undo": "Undo",
+    // — AQU-2664: how a take shows it (board 72) ———————————————————————
+    "editor.evenOut.clipEvened": "Evened out",
+    "editor.evenOut.clipHeld": "Not raised all the way",
+    "editor.station.evened": "Evened {db}",
+    "editor.station.evenedPart": "Evened {db}, not all the way",
+    "editor.station.notEvened": "Not evened",
+    "editor.station.yourVolume": "your volume {db}",
+    "editor.station.evenAgain": "Even out again",
+    "editor.station.helpEvenTerm": "Even out",
+    "editor.station.helpEven": "Comes before your volume: the recording is evened first, then your volume and fades. Clear removes only the evening out.",
     "editor.history.stepTimingFollowsRecordings": "Switch to Follows recordings",
     "editor.history.stepTimingFollowsSource": "Switch to Follows source",
     "editor.history.stepRevertNoise": "Go back to the original recording",
@@ -1418,7 +1496,7 @@ export const editor = defineNamespace({
     "editor.timeline.linkConfirmHeardSide": "Heard",
     "editor.timeline.linkConfirmGo": "Pair them",
     "editor.timeline.unlinkConfirmGo": "Break the pairing",
-    "editor.timeline.noSpeechHere": "No speech here · {seconds}s",
+    "editor.timeline.noSpeechHere": "No speech here · {seconds} s",
     "editor.timeline.takeLoading": "Loading this clip's audio…",
     "editor.timeline.takeSaving": "Saving — kept safe on this device until it syncs",
     "editor.timeline.recordOverStretch": "Record over this stretch",
@@ -1533,7 +1611,7 @@ export const editor = defineNamespace({
     "editor.station.end": "End",
     "editor.station.typeStartTip": "Click to type the start time, to 0.01 s",
     "editor.station.typeEndTip": "Click to type the end time, to 0.01 s",
-    "editor.station.typeHelp": "Type a time to 0.01 s · Return sets it · Esc cancels",
+    "editor.station.typeHelp": "Type a time to 0.01 s · Enter sets it · Esc cancels",
     "editor.station.set": "Set",
     "editor.station.badTime": "Type a time like 0:01.25 or 1.25.",
     "editor.station.zoomIn": "Zoom in (=)",
@@ -1588,7 +1666,7 @@ export const editor = defineNamespace({
     "editor.station.libraryEmpty": "No other recordings in this file yet.",
     "editor.station.fromFile": "From a file…",
     "editor.station.recordNow": "Record now",
-    "editor.station.recordLater": "Recording straight into an insert comes next.",
+    "editor.station.recordLater": "Recording straight into an insert is coming soon.",
     "editor.station.recordFlagIn": "Recording in {n}",
     "editor.station.recordFlagReady": "Get ready",
     "editor.station.recordFlag": "Recording at {time}",
@@ -1624,8 +1702,16 @@ export const editor = defineNamespace({
     "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
     "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
     "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
+    "editor.station.insertLost": "Not saved: audio you inserted is no longer on this device, so it would be saved as silence. Select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertFailed": "Not saved: audio you inserted couldn't be loaded, so it would be saved as silence. Try again, or select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertRetry": "Try again",
+    "editor.station.insertLoading": "Not saved yet: the audio you inserted is still loading. Try Save again in a moment.",
     "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
     "editor.station.undoUnsaved": "Undo the last unsaved change",
+    "editor.station.undoWhileRecording": "Stop the recording first",
+    "editor.station.versionsWhileRecording": "Stop the recording first",
+    "editor.station.undoAfterCut": "This take was cut on the timeline since your last change here: press {mod}Z to undo the cut first.",
+    "editor.station.undoAfterMove": "This take was moved on the timeline since your last change here: press {mod}Z to take the move back first.",
     "editor.station.fileLabel": "the file “{name}”",
     "editor.station.fadeIn": "Fade in",
     "editor.station.fadeOut": "Fade out",
@@ -1907,7 +1993,7 @@ export const editor = defineNamespace({
     "editor.row.splitNoQuoteReason": "No quotation to split at \u2014 one speaker throughout.",
     "editor.row.splitFormattedReason": "This line has formatting that can\u2019t be split automatically.",
     "editor.row.splitMarkupReason": "Markup crosses a quotation mark here, so it can\u2019t be split automatically.",
-    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
+    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which you are not allowed to edit.",
     "editor.splitQuotes.title": "Split this line at its quotation marks?",
     "editor.splitQuotes.description": plural({
       one:
@@ -1971,17 +2057,17 @@ export const editor = defineNamespace({
     "editor.row.addLineAbove": "Add a line above",
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
-    "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.draftGenerating": "{cellRef}: Translating…",
     "editor.row.aligningStyles": "{cellRef}: Aligning styles…",
     "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
     "editor.assurance.validatedWithInfractions":
       "Validation is authoritative, but automatic checks still found an issue.",
     "editor.assurance.validatedClean":
-      "Human review is complete. Automatic evidence remains available as context.",
+      "Human review is complete. Automatic check results remain available as context.",
     "editor.assurance.lowerSupport":
-      "Lower local support — review terminology and context closely.",
+      "Lower health — review terminology and context closely.",
     "editor.assurance.betterSupport":
-      "Better local support — human review is still required.",
+      "Better health — human review is still required.",
 
     // AQU-646, keyed 2026-08-20: the audio-VTT import dialog, the character-
     // sheet import dialog, the character-check drawer and the pairing drawer.
@@ -2113,8 +2199,7 @@ export const editor = defineNamespace({
     // — Extract subtitles dialog (AQU-1139) ————————————————————
     "editor.timeline.subtitleSourceTitle": "Extract subtitles",
     "editor.timeline.subtitleSourceDescription":
-      "Read the subtitle text and timings out of the subtitle file that came with the clip into " +
-      "\"{fileName}\", so the clip already on it has something to translate.",
+      "Read the subtitle text and timings from a subtitle file into \"{fileName}\", so the clip already on it has something to translate.",
     "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
     "editor.timeline.subtitleSourcePickHint":
       "The .vtt, .srt or .sbv file that came with the clip.",
@@ -2344,7 +2429,7 @@ export const editor = defineNamespace({
       "This edit changed the protected IDML document structure. Undo it or " +
       "re-import the IDML.",
     "editor.idml.caretOutsideSlot":
-      "Place the caret inside an InDesign text slot before adding a line break.",
+      "Place the cursor inside an InDesign text slot before adding a line break.",
     "editor.idml.invalidMetadataError":
       "This IDML cell has invalid formatting metadata and must be repaired or re-imported.",
     "editor.idml.missingSourceHtmlError":
@@ -2500,8 +2585,8 @@ export const editor = defineNamespace({
       other: "{count} open comments",
     }),
     "editor.comments.openAria": plural({
-      one: "{count} open comment — open comments",
-      other: "{count} open comments — open comments",
+      one: "{count} open comment — view comments",
+      other: "{count} open comments — view comments",
     }),
 
     // — Table header, lane switcher and whole-file empty states ——————
@@ -2522,6 +2607,12 @@ export const editor = defineNamespace({
     // telling them to import or record would be a dead end.
     "editor.empty.mediaLayerWaiting":
       "This file's recording hasn't been added yet. A project lead can add it.",
+    // AQU-2682: the same empty file for a Project Lead the server will not
+    // take source audio from (his access does not cover every language), and
+    // the moment before the server has answered.
+    "editor.empty.mediaNeedsEveryLanguage":
+      "Adding this file's recording needs access to every language in this project. A maintainer can add it.",
+    "editor.empty.mediaAccessChecking": "Checking whether you can add this file's recording…",
 
     // — USFM note chips in the source text ————————————————————————
     "editor.note.footnote": "Footnote",
@@ -2558,9 +2649,9 @@ export const editor = defineNamespace({
     "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
     "editor.cellMenu.startLabel": "Start time",
     "editor.cellMenu.endLabel": "End time",
-    "editor.cellMenu.betweenHint": "Lines either side start {from} and {to}",
-    "editor.cellMenu.afterHint": "The line before starts {from}",
-    "editor.cellMenu.beforeHint": "The line after starts {to}",
+    "editor.cellMenu.betweenHint": "Lines on either side start at {from} and {to}",
+    "editor.cellMenu.afterHint": "The line before starts at {from}",
+    "editor.cellMenu.beforeHint": "The line after starts at {to}",
     "editor.cellMenu.badTime": "Type a time like 1:02.5",
     "editor.cellMenu.invertedTimes": "The end has to come after the start.",
     "editor.cellMenu.startsBeforePrevious":
@@ -2616,16 +2707,14 @@ export const editor = defineNamespace({
     "editor.source.editText": "Edit source text",
     "editor.source.multiLaneTitle": "Change the source every language lane shares?",
     "editor.source.multiLaneBody":
-      "All language lanes share this source. Changing it marks each language lane's translation of " +
-      "this line for review. The words stay, and so does the approval.",
+      "All language lanes share this source. Changing it marks each language lane's translation of this line for review. The words stay, and so does the validation.",
     "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
     "editor.source.placeholder": "Source text…",
     "editor.source.formattingBadge": "formatting",
     "editor.source.idmlProtected":
-      "IDML source text is protected because changing it would invalidate the " +
-      "original package locator.",
+      "IDML source text is protected because changing it would break the link to the original InDesign layout.",
     "editor.source.formattingLossTooltip":
       "Source has inline formatting that the target does not preserve. Formatting " +
       "will be lost on export.",
@@ -2634,11 +2723,11 @@ export const editor = defineNamespace({
     "editor.ai.draftBadge": "AI draft · review required",
     "editor.ai.draftBadgeAria": "AI draft — human review required",
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
-    "editor.ai.generatingTranslation": "Generating translation…",
+    "editor.ai.generatingTranslation": "Translating…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
     "editor.ai.setUpToEnable": "Set up AI to enable",
     "editor.ai.serviceUnavailable": "AI service unavailable — try again shortly",
-    "editor.ai.generating": "Generating…",
+    "editor.ai.generating": "Translating…",
     "editor.ai.translateWithAi": "Translate with AI",
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
@@ -2791,14 +2880,14 @@ export const editor = defineNamespace({
     }),
     // Decision 7 (Sam, 2026-10-22): a cut take takes no vote of its own.
     "editor.recordingTab.piecesApproved": plural({
-      one: "{approved} of {count} piece approved",
-      other: "{approved} of {count} pieces approved",
+      one: "{approved} of {count} piece validated",
+      other: "{approved} of {count} pieces validated",
     }),
     // Slice 3A (Sam, Oct 29): the same count, shorter, for a row too narrow
     // for the whole sentence — first without "pieces", then as a fraction.
     "editor.recordingTab.piecesApprovedShort": plural({
-      one: "{approved} of {count} approved",
-      other: "{approved} of {count} approved",
+      one: "{approved} of {count} validated",
+      other: "{approved} of {count} validated",
     }),
     "editor.recordingTab.piecesApprovedTiny": "{approved}/{count}",
     "editor.recordingTab.matches": "Matches the text",
@@ -2853,6 +2942,8 @@ export const editor = defineNamespace({
     "editor.navTitle.organizationSettings": "Organization settings",
     "editor.navTitle.membersMatrix": "Members matrix",
     "editor.navTitle.members": "Members",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "editor.fileOptionsAria": "File options",
     "editor.navTitle.team": "Team",
     "editor.navTitle.teams": "Teams",
     "editor.navTitle.projectOverview": "Project overview",
@@ -2917,8 +3008,8 @@ export const editor = defineNamespace({
     "editor.outbox.queuedLabel": plural({ other: "Queued {count}" }),
     "editor.outbox.syncedLabel": "Synced",
     "editor.outbox.failedTooltip": plural({
-      one: "{count} change could not be synced after repeated attempts. Click to inspect.",
-      other: "{count} changes could not be synced after repeated attempts. Click to inspect.",
+      one: "{count} change could not be synced after repeated attempts. Click to review.",
+      other: "{count} changes could not be synced after repeated attempts. Click to review.",
     }),
     "editor.outbox.backlogTooltip":
       "Could not sync changes to the server. Edits are still saved locally. Click to review.",
@@ -2944,11 +3035,11 @@ export const editor = defineNamespace({
       other: "This source text appears {count} times in this file. Validating one fills the rest.",
     }, "count"),
     "editor.repetition.applied": plural({
-      one: "Applied to {count} repeated segment",
-      other: "Applied to {count} repeated segments",
+      one: "Applied to {count} repeated row",
+      other: "Applied to {count} repeated rows",
     }, "count"),
     "editor.repetition.undo": "Undo",
-    "editor.repetition.undoFailed": "Couldn't undo the propagation.",
+    "editor.repetition.undoFailed": "Couldn't undo the changes to repeated rows.",
     // AQU-1486 — "Validate all repeated rows, or just this one?"
     "editor.repetition.choiceTitle": "Validate the repeated rows too?",
     "editor.repetition.choiceSingleBody": plural({
@@ -3090,6 +3181,10 @@ export const editor = defineNamespace({
       screenshot: "editor-table",
     },
     keys: {
+      "editor.fileOptionsAria": {
+        description:
+          "Screen-reader name of the '⋯' icon button in the open file's toolbar that opens a menu of actions for the whole file (rename, export, and so on). Not visible text.",
+      },
       // AQU-646, keyed 2026-08-20. Only the two classes that require their own
       // entry — a placeholder and an accessibility name; the rest of that batch
       // inherits the namespace description above.
@@ -3926,6 +4021,18 @@ export const editor = defineNamespace({
           name: "The file's name.",
         },
       },
+      "editor.station.insertLost": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload (a file, or a recording made there) is no longer on this device. Nothing is saved. The inserted audio shows as a silent stretch in the waveform; deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertFailed": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload could not be loaded this time (for example part of another recording, fetched over the network while offline). Nothing is saved. 'Try again' is the button beside the message; the inserted audio shows as a silent stretch in the waveform, and deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertRetry": {
+        description: "Button beside the Station's 'couldn't be loaded' message: loads the inserted audio again.",
+      },
+      "editor.station.insertLoading": {
+        description: "Message when Save is pressed in the Station before audio inserted earlier has finished loading again after a reload. Nothing is saved yet.",
+      },
       "editor.station.keptForLater": {
         description: "Message when switching away from a recording with unsaved changes.",
         placeholders: {
@@ -3934,6 +4041,20 @@ export const editor = defineNamespace({
       },
       "editor.station.undoUnsaved": {
         description: "Tooltip of the Station's Undo button while there are unsaved changes to the sound.",
+      },
+      "editor.station.undoWhileRecording": {
+        description: "Tooltip and accessible name of the Station's Undo button while 'Record now' is counting in or recording: Undo is greyed until the recording is stopped.",
+      },
+      "editor.station.versionsWhileRecording": {
+        description: "Second line of the Station's ⋯ menu items Remove noise and Change the voice while 'Record now' is counting in or recording: both are greyed until the recording is stopped, as Save is.",
+      },
+      "editor.station.undoAfterCut": {
+        description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was cut on the timeline after the Station's last change to it. A cut is not the Station's to undo, so the person undoes the cut first with the project-wide Undo shortcut; then the Station's Undo works again.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
+      },
+      "editor.station.undoAfterMove": {
+        description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was moved on the timeline after the Station's last change to it. A move is not the Station's to undo, so the person takes the move back first with the project-wide Undo shortcut; then the Station's Undo works again.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
       },
       "editor.station.fileLabel": {
         description: "How an inserted file is named in the History row and the inserted mark's tooltip.",
@@ -8609,6 +8730,58 @@ export const editor = defineNamespace({
       "editor.history.stepUploadTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio file was uploaded as a line's take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepGenerateVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a voice (text-to-speech take) was generated for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepEvenOut": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): takes were set to the same loudness ('evened out'), without changing the recordings. {count} is how many takes. Keep the same words as the 'Even out loudness' menu item.", maxLength: 48, placeholders: { count: "A number of takes." } },
+      "editor.history.stepClearEvenOut": { description: "Name of one step in the edit history: evening out was taken off takes, so they play at their own volume again. {count} is how many takes.", maxLength: 48, placeholders: { count: "A number of takes." } },
+      "editor.history.stepTrackVolume": { description: "Name of one step in the edit history: a timeline track's volume fader was moved. A short verb phrase.", maxLength: 40 },
+      "editor.mix.group": { description: "Screen-reader name of the pair of small buttons in a timeline track's header: M (mute) and S (solo, play this track alone)." },
+      "editor.mix.muteLetter": { description: "The one letter on a timeline track's mute button (M, as in audio software). Keep it to one letter.", maxLength: 1 },
+      "editor.mix.soloLetter": { description: "The one letter on a timeline track's solo button (S, as in audio software: play this track alone). Keep it to one letter.", maxLength: 1 },
+      "editor.mix.mute": { description: "Screen-reader name of a timeline track's M button, which silences the track for you.", placeholders: { name: "The track's name." } },
+      "editor.mix.solo": { description: "Screen-reader name of a timeline track's S button, which plays only this track (and any other soloed ones) for you.", placeholders: { name: "The track's name." } },
+      "editor.mix.muteTitle": { description: "Tooltip on a timeline track's M button.", maxLength: 20 },
+      "editor.mix.soloTitle": { description: "Tooltip on a timeline track's S button (play this track alone).", maxLength: 20 },
+      "editor.mix.fader": { description: "Screen-reader name of a timeline track's volume slider (and of the field that opens when you double-click it to type a value).", placeholders: { name: "The track's name." } },
+      "editor.mix.faderTitle": { description: "Tooltip on a timeline track's small volume slider: drag it, double-click to type a value, Option-click (Alt-click) to put it back to 0 dB." },
+      "editor.mix.faderLocked": { description: "Tooltip on a timeline track's volume slider for someone whose role cannot change it." },
+      "editor.mix.evenOff": { description: "Tooltip and name of the ≈ button in a timeline track's header, before the track is evened out: opens the 'Even out loudness' window." },
+      "editor.mix.evenFull": { description: "Tooltip and name of the lit ≈ button in a timeline track's header: the track's takes are evened out; a click opens the window to change it." },
+      "editor.mix.evenPart": { description: "Tooltip and name of the amber ≈ button in a timeline track's header: the track is evened out, but some takes could not be raised all the way (they would distort)." },
+      "editor.evenOut.menuItem": { description: "Menu item (file menu and track menu) that opens the 'Even out loudness' window, which sets every take to the same loudness.", maxLength: 36 },
+      "editor.evenOut.menuItemTracks": { description: "Track menu item with several tracks selected; opens the 'Even out loudness' window on them.", maxLength: 44, placeholders: { count: "How many tracks are selected (2 or more)." } },
+      "editor.evenOut.title": { description: "Title of the window that sets every take to the same loudness.", maxLength: 40 },
+      "editor.evenOut.description": { description: "The line under the 'Even out loudness' window's title." },
+      "editor.evenOut.scope": { description: "Screen-reader name of the choice of which takes to even out (the whole file, one track, or the selected tracks)." },
+      "editor.evenOut.wholeFile": { description: "Choice in the 'Even out loudness' window: every take in the file.", maxLength: 32 },
+      "editor.evenOut.selectedTracks": { description: "Choice in the 'Even out loudness' window: the tracks selected on the timeline.", maxLength: 32, placeholders: { count: "How many tracks are selected (2 or more)." } },
+      "editor.evenOut.trackCount": { description: "Part of the line under a choice in the 'Even out loudness' window: how many tracks it covers.", placeholders: { count: "A number of tracks." } },
+      "editor.evenOut.takeCount": { description: "Part of the line under a choice in the 'Even out loudness' window: how many takes it covers.", placeholders: { count: "A number of takes." } },
+      "editor.evenOut.targetLead": { description: "In the 'Even out loudness' window, before the loudness in bold ('−16 LUFS'): every take will play at this loudness." },
+      "editor.evenOut.targetValue": { description: "A loudness, shown in bold after 'Every take plays at'. LUFS is the loudness unit; keep it as LUFS.", placeholders: { lufs: "A loudness number with a minus sign, like −16." } },
+      "editor.evenOut.targetInfoLabel": { description: "Screen-reader name of the (i) beside the loudness in the 'Even out loudness' window; it opens an explanation." },
+      "editor.evenOut.targetInfo": { description: "The explanation the (i) opens in the 'Even out loudness' window: what −16 LUFS is, the 12 dB limit, and that a person's own volumes work on top of evening out." },
+      "editor.evenOut.clear": { description: "Button in the 'Even out loudness' window: takes evening out off the takes in the chosen scope that have it.", maxLength: 20, placeholders: { count: "How many takes are evened out in that scope." } },
+      "editor.evenOut.run": { description: "The main button of the 'Even out loudness' window.", maxLength: 32, placeholders: { count: "How many takes it will even out." } },
+      "editor.evenOut.measuring": { description: "Progress text while the 'Even out loudness' window measures each take's loudness.", placeholders: { done: "How many takes are measured so far.", count: "How many takes it will measure." } },
+      "editor.evenOut.skipped": { description: "Shown in the 'Even out loudness' window after a run, when some takes could not be measured on this device (too long, a slow network, too little memory).", placeholders: { count: "How many takes were skipped." } },
+      "editor.evenOut.waiting": { description: "Shown in the 'Even out loudness' window when another Even out (or a background one) is still running; this one starts after it." },
+      "editor.evenOut.notAllowed": { description: "Shown when the person's role does not allow evening out takes." },
+      "editor.evenOut.failed": { description: "Error toast when evening out takes failed." },
+      "editor.evenOut.doneToast": { description: "Toast after evening out: how many takes now play at the loudness. Followed by an Undo button.", placeholders: { count: "How many takes were evened out.", lufs: "The loudness, like −16." } },
+      "editor.evenOut.heldToast": { description: "Second sentence of the toast after evening out, when some takes could not be raised all the way (they would distort); they are marked on the timeline.", placeholders: { count: "How many takes fell short." } },
+      "editor.evenOut.clearedTake": { description: "Toast after clearing evening out from one take in the Station.", placeholders: { take: "The take's name, like 'Take 2'.", line: "The line's name or number.", volume: "The take's own volume, like −2 dB." } },
+      "editor.evenOut.clearedTrack": { description: "Toast after clearing evening out from one track's takes.", placeholders: { track: "The track's name.", count: "How many takes." } },
+      "editor.evenOut.clearedTracks": { description: "Toast after clearing evening out from the takes of several selected tracks.", placeholders: { count: "How many takes." } },
+      "editor.evenOut.clearedFile": { description: "Toast after clearing evening out from every take in the file.", placeholders: { count: "How many takes." } },
+      "editor.evenOut.undo": { description: "The Undo button on an 'Even out loudness' toast.", maxLength: 12 },
+      "editor.evenOut.clipEvened": { description: "Tooltip on the small ≈ mark on a timeline clip's name bar: the take is evened out." },
+      "editor.evenOut.clipHeld": { description: "Tooltip on the small warning mark on a timeline clip's name bar: evening out could not raise this take all the way (it would distort)." },
+      "editor.station.evened": { description: "In the Station, under the play controls: how much evening out raised or lowered this take.", placeholders: { db: "A signed number of decibels, like +10.2 dB." } },
+      "editor.station.evenedPart": { description: "In the Station: how much evening out raised this take, when it could not go all the way (it would distort).", placeholders: { db: "A signed number of decibels, like +12.0 dB." } },
+      "editor.station.notEvened": { description: "In the Station, after evening out was cleared from this take." },
+      "editor.station.yourVolume": { description: "In the Station's evening-out line: the take's own volume, which works on top of evening out. Lowercase, after a dot.", placeholders: { db: "A volume like −2 dB or 0 dB." } },
+      "editor.station.evenAgain": { description: "Link in the Station's line after clearing: evens this take out again.", maxLength: 24 },
+      "editor.station.helpEvenTerm": { description: "Term in the Station's (i) explanation: evening out (setting takes to the same loudness)." },
+      "editor.station.helpEven": { description: "The Station's (i) explanation of evening out: it comes before the take's own volume, and Clear removes only it." },
       "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
       "editor.history.stepTimingFollowsRecordings": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the file's timing was switched to 'Follows recordings' (each line lasts as long as its recording). Use the same words as the timing control's 'Follows recordings'. A short verb phrase.", maxLength: 40 },
       "editor.history.stepTimingFollowsSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the file's timing was switched to 'Follows source' (lines keep the times of the original). Use the same words as the timing control's 'Follows source'. A short verb phrase.", maxLength: 40 },
@@ -9835,6 +10008,18 @@ export const editor = defineNamespace({
           "file's recording themselves (below Project Lead, or a viewer): nothing " +
           "is here until a project lead uploads the audio or video. 'Project Lead' " +
           "is the project role name; match the members screen.",
+      },
+      "editor.empty.mediaNeedsEveryLanguage": {
+        description:
+          "Body under editor.empty.noMediaSegments for a Project Lead who may not add " +
+          "the file's recording: it is shared by every language, so adding it needs " +
+          "access to every language of the project, and his does not cover them all. " +
+          "'Maintainer' is the project role name; match the members screen.",
+      },
+      "editor.empty.mediaAccessChecking": {
+        description:
+          "Shown briefly (or while offline) in place of the 'add a recording' action " +
+          "while the app asks the server whether this person may add the file's recording.",
       },
       "editor.note.footnote": {
         description:

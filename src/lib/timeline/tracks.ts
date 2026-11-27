@@ -99,6 +99,13 @@ export interface TimelineTrack {
    * is most often another voice.
    */
   setsLineLengths?: false
+  /**
+   * AQU-2664 (board 74): the track's own volume, dB, −150…+6 or −Infinity
+   * (silence) — the fader in its header. Absent means 0 dB. Shared (everyone hears it) and exported: the
+   * mixer's track stage and every export apply it, after each take's evening
+   * out, own volume and fades.
+   */
+  volumeDb?: number
 }
 
 /**
@@ -132,6 +139,19 @@ export interface PersistedTrackPatch {
    *  the server accepts; only `false` means anything. HAND-MIRRORED with the
    *  handler's PATCH_KEYS. */
   setsLineLengths?: boolean
+  /** AQU-2664: the track's volume, dB (see TimelineTrack.volumeDb), or
+   *  "-inf" for silence. HAND-MIRRORED with the handler's PATCH_KEYS. */
+  volumeDb?: number | "-inf"
+}
+
+/** AQU-2664: a stored track volume this build can use, or undefined: the
+ *  number (−150…+6 dB), or "-inf" for silence (read as −Infinity). The rule is
+ *  lib/audio/track-volume-store.ts `fromStoredVolume`, HAND-MIRRORED here because
+ *  this module has no imports (a test holds the two together), and the
+ *  worker's (file-track-set.ts). Anything else reads as none. */
+export function overrideVolumeDb(value: unknown): number | undefined {
+  if (value === "-inf" || value === -Infinity) return -Infinity
+  return typeof value === "number" && Number.isFinite(value) && value >= -150 && value <= 6 ? value : undefined
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
@@ -453,6 +473,8 @@ export function mergeTrackOverrides(
       if (color !== null) target.color = color
       const contentFileId = overrideContentFileId(patch.contentFileId)
       if (contentFileId !== undefined) target.contentFileId = contentFileId
+      const volumeDb = overrideVolumeDb(patch.volumeDb)
+      if (volumeDb !== undefined) target.volumeDb = volumeDb
       continue
     }
     // A reserved id the caller left out of `defaults` stays reserved — a delta
@@ -489,6 +511,7 @@ export function mergeTrackOverrides(
         ? { contentFileId: overrideContentFileId(patch.contentFileId) } : {}),
       // AQU-2252: only an audio track has takes to set a line's length with.
       ...(patch.kind === "audio" && patch.setsLineLengths === false ? { setsLineLengths: false as const } : {}),
+      ...(overrideVolumeDb(patch.volumeDb) !== undefined ? { volumeDb: overrideVolumeDb(patch.volumeDb) } : {}),
     })
   }
 

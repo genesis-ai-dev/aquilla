@@ -683,6 +683,40 @@ export function findConceptMatches(
   return out
 }
 
+/**
+ * The concepts of `concepts` that `findConceptMatches(haystack, …)` would have
+ * to compile a pattern for first (AQU-2655): the prefilter does not rule them
+ * out of this text, and their shared regex has not been built yet. Compiling
+ * one is the expensive step (several ms each at 1x CPU, see `compileOnce`), so a
+ * caller that runs from render asks this before matching, and has the rest
+ * compiled in the background (`prepareConceptMatcher`) when there are many.
+ */
+export function conceptsAwaitingCompile<T extends ConceptLike>(
+  haystack: string,
+  concepts: readonly T[],
+  project?: TermMatchingSettings,
+): T[] {
+  const cold: T[] = []
+  for (const concept of concepts) {
+    if (!mayMatch(conceptPrefilter(concept, project), haystack)) continue
+    if (!conceptMatcherReady(concept, project)) cold.push(concept)
+  }
+  return cold
+}
+
+/** True when `findConceptMatches` would find this concept's regex already compiled. */
+export function conceptMatcherReady(concept: ConceptLike, project?: TermMatchingSettings): boolean {
+  const source = compiledFor(concept, project).source
+  if (source === undefined) return false
+  if (source === null) return true
+  return compiledPatterns.get(source)?.has(concept.caseSensitive ? "gu" : "giu") ?? false
+}
+
+/** Compile the regex `findConceptMatches` uses for this concept, so the next match is cheap. */
+export function prepareConceptMatcher(concept: ConceptLike, project?: TermMatchingSettings): void {
+  sharedConceptRegex(concept, project)
+}
+
 interface PlainTerm {
   source: string
   prefilter: Prefilter

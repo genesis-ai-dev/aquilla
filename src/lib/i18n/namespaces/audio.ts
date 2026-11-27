@@ -144,7 +144,7 @@ export const audio = defineNamespace({
     "audio.newVoice.inworldLanguageLabel": "Language",
     "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
     "audio.newVoice.inworldLanguageHint":
-      "At least one project language isn't a code Inworld recognizes. Choose the closest match so we can load matching voices.",
+      "At least one language lane doesn't use a language code Inworld recognizes. Choose the closest match so we can load matching voices.",
     "audio.newVoice.inworldLanguageOther": "Other",
     "audio.newVoice.inworldLanguageCodeLabel": "Language code",
     "audio.newVoice.inworldLanguageCodeHint":
@@ -177,9 +177,9 @@ export const audio = defineNamespace({
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
-    "audio.newVoice.errorNameRequired": "Name the voice",
-    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice",
-    "audio.newVoice.errorCloneConsentRequired": "Confirm the speaker's consent before creating a cloned voice",
+    "audio.newVoice.errorNameRequired": "Name the voice.",
+    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice.",
+    "audio.newVoice.errorCloneConsentRequired": "Confirm the speaker's consent before creating a cloned voice.",
     "audio.newVoice.makeNarratorHint":
       "Make this the narrator — used for lines without an explicit speaker.",
     "audio.newVoice.makeNarratorButton": "Make narrator",
@@ -256,15 +256,15 @@ export const audio = defineNamespace({
     "audio.recordingModal.capturedHint": "Captured — review and save, or retake.",
     "audio.recordingModal.saveFailedNotice":
       "Saving failed — the take is safe, try Save again. ({error})",
-    "audio.recordingModal.savedStatus": "Saved — moving to next cell…",
+    "audio.recordingModal.savedStatus": "Saved — moving to the next line…",
     "audio.recordingModal.idleHintPrefix": "Press",
     "audio.recordingModal.idleHintSuffix":
       "or click Start. The beep plays a 3-2-1 countdown before recording.",
     "audio.recordingModal.genericError": "Something went wrong.",
     "audio.recordingModal.errorHint": "Press Space or Start to try again.",
-    "audio.recordingModal.prevCellTooltip": "Previous cell (←)",
+    "audio.recordingModal.prevCellTooltip": "Previous line (←)",
     "audio.recordingModal.prevButton": "Prev",
-    "audio.recordingModal.nextCellTooltip": "Next cell (→)",
+    "audio.recordingModal.nextCellTooltip": "Next line (→)",
     "audio.recordingModal.retakeTooltip": "Retake (Esc)",
     "audio.recordingModal.retakeButton": "Retake",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
@@ -318,7 +318,7 @@ export const audio = defineNamespace({
     "audio.tts.offlineBlocked": "Offline: {engine} needs a connection to generate audio.",
     "audio.tts.offlineSuggestLocal": "Offline: {engine} needs a connection. Switch this voice to the on-device MMS voice to preview it offline.",
     "audio.tts.offlinePreviewOnly": "Offline: preview with the on-device voice. The clip won't be saved.",
-    "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
+    "audio.tts.failedTooltip": "Couldn't generate audio — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.maxDuration": "max {minutes}m",
     "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
@@ -642,8 +642,8 @@ export const audio = defineNamespace({
     ),
     "audio.batchVoice.cancelledRest": plural(
       {
-        one: "Cancelled — {count} line was not attempted",
-        other: "Cancelled — {count} lines were not attempted",
+        one: "Canceled — {count} line was not attempted",
+        other: "Canceled — {count} lines were not attempted",
       },
       "count",
     ),
@@ -684,8 +684,8 @@ export const audio = defineNamespace({
     // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
     // it is the engine's brand name — so only the hint sentence is keyed here.)
     "audio.provider.inworldHint":
-      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered.",
-    "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No API key needed; usage counts toward your AI allowance.",
+    "audio.provider.geminiHint": "Bring your own Google AI key. High-quality voices you can describe in words.",
 
     // ElevenLabs engine (AQU-2299, bring-your-own-key): connect card, voice
     // browser, model + settings, cloning, and its error popovers.
@@ -861,8 +861,8 @@ export const audio = defineNamespace({
     "audio.aiError.elevenLabsFailedTitle": "ElevenLabs couldn't do that",
     "audio.aiError.elevenLabsFailedBody": "ElevenLabs didn't complete the request. Try again; if it keeps failing, check the voice still exists in your ElevenLabs account.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
-    "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
-    "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
+    "audio.provider.mmsHintHosted": "Local browser voices loaded from hosted MMS models.",
+    "audio.provider.mmsHintFallback": "Local browser voices for supported MMS languages.",
 
     // CastGutterVoice — the small per-row character/voice avatar in the
     // stacked media lens' text-table gutter.
@@ -930,7 +930,7 @@ export const audio = defineNamespace({
     "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
     "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
-    "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
+    "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on Git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
     "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
     "audio.aiError.ttsNotConfiguredTitle": "Voice generation isn't set up",
@@ -950,7 +950,7 @@ export const audio = defineNamespace({
       "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
     // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
     "audio.aiError.spendCeilingBody":
-      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
     // AQU-1964: a draft refused for changing a protected IDML anchor. The
@@ -962,7 +962,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedBody":
       "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
     "audio.aiError.translationNotConfiguredBody":
-      "Set up a completion provider for this project before generating voice on untranslated cells.",
+      "Set up an AI provider for this project before generating voice on untranslated cells.",
     "audio.aiError.ttsNotConfiguredBody":
       "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
     "audio.aiError.networkBody":

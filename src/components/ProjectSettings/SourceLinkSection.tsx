@@ -61,6 +61,7 @@ import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { clearLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { ChooseLinkedFilesDialog } from "./ChooseLinkedFilesDialog"
+import { JoinLinkedCopyDialog } from "./JoinLinkedCopyDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -121,6 +122,8 @@ export function SourceLinkSection({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chooseFilesOpen, setChooseFilesOpen] = useState(false)
+  // AQU-2549: "Join a copy into my file".
+  const [joinOpen, setJoinOpen] = useState(false)
 
   // AQU-1544: "idle" until the user presses Sync now. "empty" is a sync that
   // worked and had nothing to bring, which on a never-synced link means the
@@ -319,6 +322,18 @@ export function SourceLinkSection({
                 {t("projectSettings.sourceLink.chooseFilesButton")}
               </Button>
             )}
+            {/* AQU-2549: only a link to the upstream's SOURCE can join a copy
+                into a file imported on its own — the same rule as replace. */}
+            {sourceLinkMode === "live" && sourceLinkConsumes !== "target" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canDetach || !session}
+                onClick={() => setJoinOpen(true)}
+              >
+                {t("projectSettings.sourceLink.joinButton")}
+              </Button>
+            )}
             <Button
               variant="destructive"
               size="sm"
@@ -335,6 +350,15 @@ export function SourceLinkSection({
         </CardContent>
       </Card>
 
+      {sourceLinkMode === "live" && sourceLinkConsumes !== "target" && canDetach && (
+        <JoinLinkedCopyDialog
+          projectId={projectId}
+          sourceProjectId={sourceProjectId}
+          open={joinOpen}
+          onOpenChange={setJoinOpen}
+          onJoined={() => onFilesAdded?.()}
+        />
+      )}
       {sourceLinkMode === "live" && canDetach && (
         <ChooseLinkedFilesDialog
           projectId={projectId}

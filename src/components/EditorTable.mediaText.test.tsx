@@ -87,6 +87,9 @@ const project: ProjectRecord = {
   createdAt: "2026-01-01T00:00:00Z",
   files: [],
   members: [],
+  // These tests are about which text the source editor opens on, at a floor
+  // that admits a project lead. The product default is Maintainer (AQU-2647).
+  sourceTextFloor: "project_lead",
   syncRole: { level: ROLE.PROJECT_LEAD, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
 }
 

@@ -886,7 +886,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
     renderBar(makeProject(ROLE.REVIEWER), UNTRANSLATED)
     const btn = translateButton()
     expect(btn).toBeDisabled()
-    await expectDisabledNote(btn, "You need contributor role to draft translations")
+    await expectDisabledNote(btn, "You need the contributor role to draft translations")
     vi.restoreAllMocks()
   })
 

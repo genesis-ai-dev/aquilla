@@ -408,6 +408,7 @@ function GroupedTakes({
   )
 }
 
+export type AudioRecordingModalProps = Props
 
 export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,

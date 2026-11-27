@@ -6,6 +6,7 @@
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { UserError } from "@/lib/errors/user-error"
 import { formatScopePath } from "@/lib/access/scope-path"
+import type { PlaceGrantability } from "@/lib/access/grant-rules"
 import type { AccessChainEntry, ScopeRef } from "@/lib/access/types"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { originLabel, roleLabel } from "@/components/access/labels"
@@ -18,6 +19,8 @@ export interface DirectGrantee {
   isGuest?: boolean
   source?: "direct" | "creator" | "invite"
   pendingInvite?: { expiresAt: string | null }
+  /** AQU-2322, project nodes: their way in is these lane grants (the lanes this viewer can see). */
+  lanes?: { id: string; name: string; roleLevel: number }[]
 }
 
 /** An ancestor grant that resolves to this place. One person, or one team. */
@@ -39,8 +42,26 @@ export interface AccessTreeNode {
   /** Absent on payloads from before AQU-2318. The lens treats that as none. */
   inherited?: InheritedSource[]
 }
-export interface OrgAccessPerson { userId: string; displayName: string; isGuest: boolean; grants: AccessChainEntry[] }
-export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
+export interface OrgAccessPerson {
+  userId: string
+  displayName: string
+  /**
+   * The name the write routes look this account up by. Null (or absent, on a
+   * payload from before it was sent) means no write may name them.
+   */
+  username?: string | null
+  isGuest: boolean
+  email?: string | null
+  lastActiveAt?: string | null
+  pendingInvite?: { expiresAt: string | null; roleLevel: number }
+  grants: AccessChainEntry[]
+}
+export interface OrgAccessPayload {
+  tree: AccessTreeNode[]
+  people: OrgAccessPerson[]
+  /** AQU-2320: per place (`type:id`), may this viewer give access there. Absent before AQU-2320: nothing is grantable. */
+  grantable?: Record<string, PlaceGrantability>
+}
 
 export async function fetchOrgAccess(jwt: string, orgId: number, apiUrl: string = FRONTIER_API_URL): Promise<OrgAccessPayload> {
   const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/access`, { headers: { Authorization: `Bearer ${jwt}` } })

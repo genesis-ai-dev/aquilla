@@ -17,7 +17,7 @@ export const projectSettings = defineNamespace({
   keys: {
     "projectSettings.checking.position": "{current} of {total}",
     "projectSettings.checking.creatorTitle": "Community checking links",
-    "projectSettings.checking.wipNotice": "Feature-flagged WIP. Guests hear selected recordings and leave feedback in project comments. Reviewer links currently collect feedback; formal validation is not included.",
+    "projectSettings.checking.wipNotice": "Experimental feature. Guests hear selected recordings and leave feedback in project comments. Reviewer links currently collect feedback; formal validation is not included.",
     "projectSettings.checking.loadingProject": "Loading project passages…",
     "projectSettings.checking.linkTitle": "Link title",
     "projectSettings.checking.guestAccess": "Guest access",
@@ -81,7 +81,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.feedbackOn": "Feedback on {label}",
     "projectSettings.checking.allSection": "All {section}",
 
-    "projectSettings.checking.flagLabel": "Community checking (WIP)",
+    "projectSettings.checking.flagLabel": "Community checking (experimental)",
     "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days. Only on this device.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
@@ -154,7 +154,7 @@ export const projectSettings = defineNamespace({
     }),
     // Mode is implied by shape (self-contained → optional clone; linked-target → live).
     // These intros replace the old clone/live radio pair under Advanced.
-    "projectSettings.create.cloneModeName": "Cloned",
+    "projectSettings.create.cloneModeName": "cloned",
     "projectSettings.create.cloneIntro":
       "Do you want to import a {mode} copy of another project? This will create a " +
       "one-time snapshot and then remain independent.",
@@ -172,7 +172,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.upstreamProjectNoMatches": "No projects match.",
     "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
-      "Which corpus should become this project's source?",
+      "What should become this project's source?",
     "projectSettings.create.linkConsumesSourceName": "Its source",
     "projectSettings.create.linkConsumesSource": plural({
       one:
@@ -189,7 +189,7 @@ export const projectSettings = defineNamespace({
       "{name} — chain case (this project translates one of the upstream project's " +
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
-      "Choose which corpus should become this project's source",
+      "Choose what should become this project's source",
     // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
     // asked for "One of its Targets" — the sibling case consumes the upstream's
     // one source lane, so there is nothing to choose. Offered only for the lanes
@@ -357,7 +357,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyRequired": "API key *",
     "projectSettings.field.apiKeyPlaceholder": "Paste your API key",
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
+    "projectSettings.advancedLlm.modelPlaceholder": "Type a model ID",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
     "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
@@ -368,7 +368,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingInfoAria": "About adding and editing timeline tracks",
     "projectSettings.timeline.trackEditingHint":
-      "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+      "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colors and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this — a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
     "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
     "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
@@ -398,6 +398,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellLabel.label": "Who can label cells",
     "projectSettings.cellLabel.description":
       "A label is a short note typed on a line — a section name, a reviewer's mark. It is never a voice or a character. Maintainers can label cells unless you open this to project leads.",
+    // AQU-2647: who may edit source text. The same people may hide a cell and
+    // split a line at quotes. "language lane" is the phrase the word list allows.
+    "projectSettings.sourceText.label": "Who can edit source text",
+    "projectSettings.sourceText.description":
+      "Who may change the source text. The same people may hide a cell and split a line at quotation marks. Maintainers and owners always may. This project uses the organization default unless you set one here.",
+    "projectSettings.sourceText.optionMaintainer": "Maintainer",
+    "projectSettings.sourceText.optionProjectLead": "Project Lead on any language lane",
+    "projectSettings.sourceText.optionContributor": "Contributor on any language lane",
     // AQU-2309: who may set, rename, resize and remove a hand-set milestone.
     // Sits under the same "Content structure" heading, and reuses the
     // cell-editing ladder's role names.
@@ -426,11 +434,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.membersLabel": "Members",
     "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
-    "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
+    "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, Git sync",
     "projectSettings.group.aiLabel": "AI",
     "projectSettings.group.aiDescription": "Instructions, drafting, model, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
-    "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
+    "projectSettings.group.validationDescription": "Validation rules, harmonization, health",
     "projectSettings.group.audioMediaLabel": "Media",
     "projectSettings.group.audioMediaDescription": "How audio loads, and the timeline",
     "projectSettings.group.metricsLabel": "AI metrics",
@@ -482,7 +490,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.advancedLlm": "AI model (advanced)",
     "projectSettings.section.voice": "Voice",
     "projectSettings.section.localModels": "On-device AI models",
-    "projectSettings.section.decay": "Decay",
+    "projectSettings.section.decay": "Health",
     "projectSettings.section.validation": "Validation",
     "projectSettings.section.audioMedia": "Audio loading",
     "projectSettings.section.gitSync": "Git sync",
@@ -503,9 +511,9 @@ export const projectSettings = defineNamespace({
 
     // ── Bible resources card ──
     "projectSettings.bible.description": "Scholarly reference data from bibletranslation.org in Search and the agent.",
-    "projectSettings.bible.scriptureDefaultHint": "Available by default for scripture projects — turn off to disable.",
-    "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
-    "projectSettings.bible.disabledHint": "Turned off for this project. This is always respected, even for scripture projects.",
+    "projectSettings.bible.scriptureDefaultHint": "Available by default for Scripture projects — turn off to disable.",
+    "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-Scripture projects — turn on to enable.",
+    "projectSettings.bible.disabledHint": "Turned off for this project. This is always respected, even for Scripture projects.",
 
     // ── Import card ──
     "projectSettings.import.excludeFrontMatterLabel": "Exclude USFM front matter",
@@ -528,19 +536,16 @@ export const projectSettings = defineNamespace({
 
     // ── AI Instructions card ──
     "projectSettings.ai.instructionsHelp":
-      "Describe what this project is producing and how translations should read — the " +
-      "AI uses this on every completion. Use {sourceVar} and {targetVar} as placeholders.",
-    "projectSettings.ai.topKLabel": "Examples retrieved (top_k)",
+      "Describe what this project is producing and how translations should read — the AI uses this for every translation. Use {sourceVar} and {targetVar} as placeholders.",
+    "projectSettings.ai.topKLabel": "Reference examples",
     "projectSettings.ai.topKDescription":
       "How many reference examples the AI retrieves per translation (1–20). Default: {defaultCount}.",
-    "projectSettings.ai.completionBatchSizeLabel": "AI completions batch size",
+    "projectSettings.ai.completionBatchSizeLabel": "AI translation batch size",
     "projectSettings.ai.completionBatchSizeDescription":
-      "How many untranslated cells one \"Run AI completions\" package drafts (1–50). " +
-      "Run again to advance further. Default: {defaultSize}.",
+      "How many untranslated cells one \"Translate all\" run drafts (1–50). Run again to advance further. Default: {defaultSize}.",
     "projectSettings.ai.validationBatchSizeLabel": "Batch validation size",
     "projectSettings.ai.validationBatchSizeHelp":
-      "How many eligible cells one \"Batch validate\" run approves (0–500). {zeroNote} " +
-      "set a cap to validate in bounded batches.",
+      "How many eligible cells one \"Batch validate\" run validates (0–500). {zeroNote} set a cap to validate in bounded batches.",
     "projectSettings.ai.validationBatchSizeZeroNote": "0 validates all eligible cells (default);",
     "projectSettings.ai.liveBacktranslationLabel": "Live back-translation",
     "projectSettings.ai.liveBacktranslationDescription":
@@ -562,7 +567,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
     "projectSettings.ai.assistantLanguageDescription":
       "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
-    "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
+    "projectSettings.ai.approvedExamplesOnlyLabel": "Validated examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +
       "drafts never enter the trusted example pool.",
@@ -575,10 +580,9 @@ export const projectSettings = defineNamespace({
       "translations to imitate.",
 
     // ── Draft Context card ──
-    "projectSettings.draftContext.precedingCellsLabel": "Preceding committed-target cells",
+    "projectSettings.draftContext.precedingCellsLabel": "Preceding translated cells",
     "projectSettings.draftContext.precedingCellsDescription":
-      "How many immediately preceding committed target cells to include as discourse " +
-      "left-context when drafting. 0 disables preceding-context. Default: {defaultCount}.",
+      "How many immediately preceding saved translations to include as prior context when drafting. Set to 0 to disable. Default: {defaultCount}.",
 
     // ── Advanced LLM details ──
     "projectSettings.advancedLlm.summary": "AI model (advanced)",
@@ -591,8 +595,7 @@ export const projectSettings = defineNamespace({
       "{name} (recommended) — uses your Aquilla login. Works out of the box.",
     "projectSettings.advancedLlm.providerCustomName": "Custom endpoint",
     "projectSettings.advancedLlm.providerCustom":
-      "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API " +
-      "(OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.",
+      "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API (OpenRouter, OpenAI, Groq, Together, …). Bring your own key.",
     "projectSettings.advancedLlm.presetLabel": "Provider preset",
     "projectSettings.advancedLlm.presetLocalLabel": "Local / self-hosted (no key)",
     "projectSettings.advancedLlm.presetCustomLabel": "Other (enter URL manually)",
@@ -621,7 +624,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
     "projectSettings.advancedLlm.modelManualPlaceholderOpenRouter": "anthropic/claude-3.5-sonnet",
-    "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Type a model id",
+    "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Type a model ID",
     "projectSettings.advancedLlm.modelManualHelp":
       "Click Connect to discover models, or type one manually (required for providers " +
       "that don't expose {modelsPath}).",
@@ -648,8 +651,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.openVoicesButton": "Open Voices",
     "projectSettings.voice.leadsManageLabel": "Project Leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
-      "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
-      "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
+      "When this is on, a project lead can create, edit, and assign voices on the language lanes they can edit. When it is off, only a maintainer can. Voices already created stay either way.",
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
@@ -665,15 +667,14 @@ export const projectSettings = defineNamespace({
     // of minting duplicates. "(default)" is the only project-settings-owned text.
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
-      "Only users with at least this role can open a harmonization sweep on this project. The floor " +
-      "cannot be lowered below Project Lead (hard floor per spec).",
+      "Only users with at least this role can open a harmonization sweep on this project. This cannot be lowered below Project Lead.",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
     "projectSettings.gitSync.minutesSuffix": "minutes (only when there are changes)",
     // Oct 29 second pass: the switch's label, hard-coded English before.
     "projectSettings.gitSync.autoSyncSwitch": "Auto-sync",
-    "projectSettings.gitSync.intervalNote": "Interval is floored at 1 minute. Sync will only push when there are local changes.",
+    "projectSettings.gitSync.intervalNote": "Minimum interval is 1 minute. Sync will only push when there are local changes.",
 
     // ── Terminology card ──
     "projectSettings.terminology.title": "Terminology library",
@@ -768,9 +769,7 @@ export const projectSettings = defineNamespace({
     // validate" alone, twice, would read as one rule stated twice.
     "projectSettings.validation.minRoleAudioLabel": "Minimum role to validate recordings",
     "projectSettings.validation.minRoleAudioDescription":
-      "Who may sign off a recording. Set separately from the text rule above — a " +
-      "project can want a higher bar for audio than for translations, or the other " +
-      "way round.",
+      "Who can validate a recording. Set separately from the text rule above — a project may want a higher bar for audio than for text, or the other way around.",
     "projectSettings.validation.allowSelfAudioLabel": "Allow validating your own recordings",
     "projectSettings.validation.allowSelfAudioDescription":
       "When off, whoever recorded a take cannot validate it — someone else has to " +
@@ -784,13 +783,10 @@ export const projectSettings = defineNamespace({
     // ── DecaySettingsSection.tsx ──
     "projectSettings.decay.summary": "Health",
     "projectSettings.decay.description":
-      "This health signal measures proximity to approved neighboring cells in the " +
-      "retrieval graph. It can prioritize review, but it is not a translation-quality " +
-      "score and never removes the human-review requirement.",
+      "This health signal measures how close a cell is to validated nearby cells. It can help prioritize review, but it is not a translation-quality score and never removes the need for human review.",
     "projectSettings.decay.maxHopsLabel": "Max hops",
     "projectSettings.decay.maxHopsDescription":
-      "Propagation radius from approved cells. Larger values let health ripple " +
-      "further through the retrieval graph. Default {defaultValue}.",
+      "How far health spreads from validated cells. Larger values let health reach more nearby cells. Default {defaultValue}.",
     "projectSettings.decay.attentionThresholdLabel": "Attention threshold",
     "projectSettings.decay.attentionThresholdDescription":
       "Low health beyond this threshold shows the cell's review-priority marker " +
@@ -835,7 +831,7 @@ export const projectSettings = defineNamespace({
     // AQU-1605: which of the upstream's translations the link consumes.
     "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
-    "projectSettings.sourceLink.gateEveryCommit": "every commit",
+    "projectSettings.sourceLink.gateEveryCommit": "every save",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
     // AQU-1559: how much of the upstream this link follows. A subset link is
     // pinned to the files it was made with; a whole-project one keeps picking up
@@ -854,6 +850,30 @@ export const projectSettings = defineNamespace({
     // later slice). The dialog reuses the link flow's count sentence, scope
     // notes and same-name warning, so the two read the same.
     "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    // ── AQU-2549: join a copy the link brought in into the project's own file.
+    "projectSettings.sourceLink.joinButton": "Join a copy into my file",
+    "projectSettings.sourceLink.joinTitle": "Join a copy into my existing file",
+    "projectSettings.sourceLink.joinDescription":
+      "Your file takes the source project's text and keeps its translations and validations. " +
+      "The copy goes to Recently deleted.",
+    "projectSettings.sourceLink.joinLoading": "Looking for copies…",
+    "projectSettings.sourceLink.joinLoadFailed": "Couldn't load the copies. Close this and try again.",
+    "projectSettings.sourceLink.joinNoCopies": "This project has no copies from the source project to join.",
+    "projectSettings.sourceLink.joinCopyLabel": "Copy from the source project",
+    "projectSettings.sourceLink.joinTargetLabel": "Your file to join it into",
+    "projectSettings.sourceLink.joinCopyTranslated":
+      "{name} can't be joined because it has translations of its own, which would end up on a deleted file.",
+    "projectSettings.sourceLink.joinNoMatch": plural({
+      one: "These two files are not the same material: {same} of {count} line matches, so they can't be joined.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines match, so they can't be joined.",
+    }),
+    "projectSettings.sourceLink.joinConfirm": "Join",
+    "projectSettings.sourceLink.joinJoining": "Joining…",
+    "projectSettings.sourceLink.joinIncomplete":
+      "The copy is still being joined. This can take a moment for a big file.",
+    "projectSettings.sourceLink.joinNoConnection":
+      "The copy wasn't joined because there's no connection. Try again when you're connected.",
     "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
     "projectSettings.sourceLink.chooseFilesDescription":
       "Files this link follows are checked. Check more of the source project's " +
@@ -993,7 +1013,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote":
+      "Project Lead or above required to choose, join or replace files, or detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -1074,11 +1095,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.previewNoneSelected":
       "Pick at least one file to link.",
     // ── AQU-1679: a file this project already has can follow the link itself,
-    // instead of gaining a second copy. Offered per same-named file, off by
-    // default, and shown with what it will do before anything is linked.
+    // instead of gaining a second copy, shown with what it will do before
+    // anything is linked. AQU-2549: ticked by default when exactly one file
+    // shares the name; the lead can pick any other of his files.
     "projectSettings.linkSource.replaceOption":
       "Replace the source in my existing {name} and keep its translations",
+    // AQU-2549: the lead picks which of his files a row replaces; a row whose
+    // name matches exactly one file starts ticked with that file.
+    "projectSettings.linkSource.replaceOptionChoose":
+      "Replace the source in one of my files and keep its translations",
+    "projectSettings.linkSource.replaceTargetLabel": "Your file to replace with {name}",
+    "projectSettings.linkSource.replaceTargetPlaceholder": "Choose a file",
+    "projectSettings.linkSource.replaceTargetTaken":
+      "Another file in this list is already set to replace {name}. Pick a different file for one of them.",
+    // AQU-2549: a file picked under another name takes the source file's name.
+    "projectSettings.linkSource.replaceRenames": "{from} will be renamed {to}, the source file's name.",
     "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    // AQU-2549: the source project's import of the file has not finished.
+    "projectSettings.linkSource.replaceStillImporting":
+      "This file is still importing in the source project. Try again when the import finishes.",
     "projectSettings.linkSource.replaceCompareFailed":
       "Couldn't compare the two files. Turn this off and on to try again, or " +
       "leave it off to add the file as a separate copy.",
@@ -1201,9 +1236,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversTextAndAudio": "Text and audio",
     "projectSettings.languages.deliversChoose": "Choose",
     "projectSettings.languages.deliversHint":
-      "Delivers decides how a language lane's progress is counted. Text: a line is done when its " +
-      "text is validated. Audio: a line is done when its recording is approved, and no text is " +
-      "needed. Text and audio: a line is done only when both its text and its recording are approved.",
+      "Delivers decides how a language lane's progress is counted. Text: a line is done when its text is validated. Audio: a line is done when its recording is validated, and no text is needed. Text and audio: a line is done only when both its text and its recording are validated.",
     "projectSettings.languages.deliversNeedsChoice":
       "This language lane had \"Records audio\" turned on. Choose whether it delivers Text, or Text " +
       "and audio. Until you choose, its progress is counted as before.",
@@ -1336,7 +1369,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
     "projectSettings.monday.orgSettingsLinkText": "organization settings",
     "projectSettings.monday.orgNotConnectedInstructions":
-      "An org maintainer can connect it in {settingsLink}, or ask an org maintainer to set it up.",
+      "An org maintainer can connect it in {settingsLink}.",
     "projectSettings.monday.noBoardLinkedReadOnly":
       "No Monday board is linked to this project. Maintainers can set one up here.",
     "projectSettings.monday.linkBoardPrompt":
@@ -1369,7 +1402,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.fileSubitemsLabel": "Files as subitems",
     "projectSettings.monday.fileSubitemsDescription":
       "Each file gets a subitem under the project's row on Monday, with its own progress.",
-    "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
+    "projectSettings.monday.lastPushOk": "Last push {date} — OK.",
     "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
@@ -1412,16 +1445,16 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
     "projectSettings.monday.columnPickerOnBoard": "On your board",
     "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
-    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
+    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and validated by enough reviewers, as a percentage.",
     "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
-    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
+    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have a validated recording, as a percentage.",
     "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
     "projectSettings.monday.columnInfo.deadline":
       "The project deadline. Empty when the project has none.",
     "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
     "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
     "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
-    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
+    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and validated.",
     "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
     "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
     "projectSettings.monday.columnInfo.schedule_status":
@@ -2131,6 +2164,31 @@ export const projectSettings = defineNamespace({
           "is (a short note typed on a line), that it is never a voice or a character, " +
           "and that maintainers may label cells unless the setting opens it to project " +
           "leads. Role names as in common.role.*.",
+      },
+      "projectSettings.sourceText.label": {
+        description:
+          "Row label for the dropdown in Project settings → Content structure that " +
+          "says who may edit source text. A question-like noun phrase, matching " +
+          "'Who can add and remove cells'.",
+      },
+      "projectSettings.sourceText.description": {
+        description:
+          "Help text under that row. Says the same people may hide a cell and split " +
+          "a line at quotation marks, that maintainers and owners always may, and that " +
+          "the project follows the organization until it sets its own.",
+      },
+      "projectSettings.sourceText.optionMaintainer": {
+        description: "Dropdown option: only maintainers and owners may edit source text. Also the closed-trigger label.",
+      },
+      "projectSettings.sourceText.optionProjectLead": {
+        description:
+          "Dropdown option: a Project Lead on any language lane may edit source text, " +
+          "and so may someone who still holds the project role Project Lead. Also the closed-trigger label.",
+      },
+      "projectSettings.sourceText.optionContributor": {
+        description:
+          "Dropdown option: a Contributor on any language lane may edit source text, " +
+          "and so may someone who still holds the project role Contributor. Also the closed-trigger label.",
       },
       "projectSettings.milestones.label": {
         description:
@@ -3007,6 +3065,55 @@ export const projectSettings = defineNamespace({
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
       },
+      "projectSettings.sourceLink.joinButton": {
+        description:
+          "Button on the Source link card (live link to the source project's source, " +
+          "Project Lead or higher). Opens a dialog to join a second copy of a file, " +
+          "which the link brought in, into the project's own file.",
+      },
+      "projectSettings.sourceLink.joinTitle": { description: "Title of the join dialog." },
+      "projectSettings.sourceLink.joinDescription": {
+        description:
+          "What joining does: the project's own file takes the source project's text and " +
+          "keeps its translations and validations; the copy is moved to Recently deleted " +
+          "(the app's name for the bin of deleted files).",
+      },
+      "projectSettings.sourceLink.joinLoading": { description: "While the dialog reads the list of copies." },
+      "projectSettings.sourceLink.joinLoadFailed": { description: "The list of copies could not be read." },
+      "projectSettings.sourceLink.joinNoCopies": {
+        description: "The project holds no copy of a source project file that could be joined.",
+      },
+      "projectSettings.sourceLink.joinCopyLabel": {
+        description: "Accessible name of the picker of copies the link brought in.",
+      },
+      "projectSettings.sourceLink.joinTargetLabel": {
+        description: "Accessible name of the picker of the project's own files the copy joins into.",
+      },
+      "projectSettings.sourceLink.joinCopyTranslated": {
+        description:
+          "Refusal: the copy has translations made on it, so it cannot be joined (joining " +
+          "removes the copy).",
+        placeholders: { name: "The copy's file name \u2014 never translated." },
+      },
+      "projectSettings.sourceLink.joinNoMatch": {
+        description:
+          "Refusal in the join dialog when fewer than half of the lines are identical: the " +
+          "two files are not the same text, so the copy cannot be joined into this file.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.sourceLink.joinConfirm": { description: "Confirm button of the join dialog." },
+      "projectSettings.sourceLink.joinJoining": { description: "Confirm button while the join runs." },
+      "projectSettings.sourceLink.joinIncomplete": {
+        description: "The join was recorded but the sync has not finished it yet (a big file).",
+      },
+      "projectSettings.sourceLink.joinNoConnection": {
+        description:
+          "Join pressed while the request could not reach the server (no connection). " +
+          "Nothing was joined and nothing is retried later: the person presses Join again.",
+      },
       "projectSettings.sourceLink.chooseFilesButton": {
         description:
           "Button on the Source link card (Project Settings) that opens a list of the " +
@@ -3209,9 +3316,52 @@ export const projectSettings = defineNamespace({
           "project already has exactly one file of the same name. On: the link " +
           "follows into that existing file \u2014 its source text is replaced by the " +
           "source project's and its translations stay \u2014 instead of adding a second " +
-          "file of that name. Off by default.",
+          "file of that name. Ticked by default when exactly one file of this project " +
+          "shares the name; a picker under it lets the lead choose another file.",
         placeholders: {
           name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceStillImporting": {
+        description:
+          "Shown under replaceOption instead of the comparison when the source " +
+          "project is still importing the file, so there is nothing to compare yet. " +
+          "It is a wait, not a mismatch.",
+      },
+      "projectSettings.linkSource.replaceOptionChoose": {
+        description:
+          "Checkbox under an upstream file in the link confirm step and in Choose files, " +
+          "when no file of this project has been picked yet for it to replace. On: a " +
+          "file picker appears to choose which of the project's files follows the link.",
+      },
+      "projectSettings.linkSource.replaceTargetLabel": {
+        description:
+          "Accessible name of the file picker under replaceOption: which of this " +
+          "project's files the upstream file replaces the source of.",
+        placeholders: {
+          name: "The source project's file name — never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceTargetPlaceholder": {
+        description: "Empty state of the file picker under replaceOption.",
+      },
+      "projectSettings.linkSource.replaceTargetTaken": {
+        description:
+          "Shown under replaceOption when two upstream files are set to replace the " +
+          "same file of this project. One file can follow only one upstream file, so " +
+          "the link waits until the lead picks another.",
+        placeholders: {
+          name: "The project's file both rows picked — never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceRenames": {
+        description:
+          "Under replaceOption (link confirm step, Choose files) and in the join dialog, when " +
+          "the project's file picked has another name than the source project's file: the " +
+          "project's file takes the source file's name once it follows it.",
+        placeholders: {
+          from: "The project's own file name as it is now \u2014 never translated.",
+          to: "The source project's file name it takes \u2014 never translated.",
         },
       },
       "projectSettings.linkSource.replaceComparing": {

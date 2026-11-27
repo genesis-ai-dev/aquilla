@@ -17,7 +17,7 @@ import {
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
 import { useRowMetrics } from "./useRowMetrics"
-import { TimelineSlotButton } from "./TimelineSlotButton"
+import { SlotTooltipScope, TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard, type TimelineCardProps } from "./TimelineCard"
@@ -219,6 +219,7 @@ export function TimelineLane({
       : []
 
   return (
+    <SlotTooltipScope>
     <div
       data-testid="tl-lane"
       data-variant={variant}
@@ -312,5 +313,6 @@ export function TimelineLane({
       )}
       {cells.length === 0 && emptyPrompt}
     </div>
+    </SlotTooltipScope>
   )
 }

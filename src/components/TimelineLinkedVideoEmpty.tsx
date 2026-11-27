@@ -76,6 +76,9 @@ interface TimelineLinkedVideoEmptyProps {
   /** AQU-1681: make the rows from the video's own sound. Absent below
    *  maintainer and for a YouTube video, whose sound cannot be read. */
   videoSound?: LinkedVideoSoundActions
+  /** AQU-2682: when the recording is withheld from someone who could
+   *  otherwise add it, why (shown where its link would be). */
+  recordingNote?: string | null
 }
 
 
@@ -92,6 +95,7 @@ export function TimelineLinkedVideoEmpty({
   onAttachCaptions,
   onUseCaptionTrackAsRows,
   videoSound,
+  recordingNote,
 }: TimelineLinkedVideoEmptyProps) {
   const t = useT()
   const [busy, setBusy] = useState(false)
@@ -241,6 +245,9 @@ export function TimelineLinkedVideoEmpty({
                 {t("editor.media.openMediaView")}
               </Button>
             ) : null}
+            {!onAttachFile && recordingNote && (
+              <p className="mt-2 text-[0.8rem] text-muted-foreground">{recordingNote}</p>
+            )}
             {onAttachFile && (captionAction || onOpenMediaView ? (
               // "or" joins this to the button above; only the action is a link.
               <p className="mt-2 text-[0.8rem] text-muted-foreground">

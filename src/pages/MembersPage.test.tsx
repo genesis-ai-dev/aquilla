@@ -558,6 +558,6 @@ describe("MembersPage pending invites", () => {
       </QueryClientProvider>,
     )
     await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
-    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone with the link can join/)
   })
 })

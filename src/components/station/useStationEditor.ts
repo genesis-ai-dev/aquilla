@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import {
   clampTrim,
+  clipDb,
   lengthOf,
   mapWindow,
   MIN_KEPT_SEC,
@@ -22,10 +23,11 @@ import {
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
-import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
+import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, startShiftAfter, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
 import { previewCanMix, StationPreview } from "@/lib/station/preview"
 import { mixWhole, renderSegments, type PcmSource } from "@/lib/station/render"
+import { stationLevelOf } from "@/lib/station/station-level"
 import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
 
@@ -102,29 +104,64 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     [pcm, sources, live],
   )
   // A draft brought back after a reload: load its inserted audio again.
+  // AQU-2493 (review, Nov 9): an insert whose audio can't be loaded again (a
+  // file or a recording made here lives only in this device's audio cache,
+  // which drops its oldest entries) is remembered as lost, so Save can refuse
+  // to write silence in its place.
   const restoring = useRef(new Set<string>())
+  // (Review, Nov 9, finding 14) Why each could not be loaded: "gone" — a file
+  // or a recording made here that is no longer in this device's cache;
+  // "failed" — it could not be loaded this time (part of another recording,
+  // fetched over the network, offline say), so it can be tried again.
+  const [lost, setLost] = useState<ReadonlyMap<string, "gone" | "failed">>(() => new Map())
+  const lostRef = useRef(lost)
+  lostRef.current = lost
   useEffect(() => {
     for (const [id, meta] of Object.entries(draft.sources)) {
       if (sources[id] || restoring.current.has(id)) continue
       restoring.current.add(id)
-      const done = (p: PcmSource | null) => {
+      const done = (p: PcmSource | null, why: "gone" | "failed" = "failed") => {
         if (p) setSources((m) => ({ ...m, [id]: p }))
+        else setLost((m) => new Map(m).set(id, why))
       }
       if (meta.kind === "take") {
-        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then(done, () => {})
+        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then((p) => done(p), () => done(null))
       } else {
         void audioCacheGet(meta.cacheId, meta.ext)
           .then((bytes) => (bytes ? decodeToMono48k(bytes) : null))
-          .then((data) => done(data ? putStationPcm(id, data) : null), () => {})
+          .then((data) => done(data ? putStationPcm(id, data) : null, "gone"), () => done(null))
       }
     }
-  }, [draft.sources, sources, project.id, getSyncToken])
+  }, [draft.sources, sources, project.id, getSyncToken, lost])
+  /** AQU-2493 (review, Nov 9), finding 14: try loading again the inserted
+   *  audio that could not be loaded last time. */
+  const retryInserts = useCallback(() => {
+    const failed = [...lostRef.current].filter(([, why]) => why === "failed").map(([id]) => id)
+    if (failed.length === 0) return
+    for (const id of failed) restoring.current.delete(id)
+    setLost((m) => {
+      const next = new Map(m)
+      for (const id of failed) next.delete(id)
+      return next
+    })
+  }, [])
 
   const placed: PlacedSegment[] = useMemo(() => {
     const shown: EditOp[] = live ? [...ops, { kind: "ins", at: live.at, src: LIVE_SRC, len: live.src.data.length / live.src.rate, label: "" }] : [...ops]
     return placeSegments(segmentsOf(BASE_SRC, pcm?.duration ?? 0, shown))
   }, [pcm, ops, live])
   const length = useMemo(() => Math.max(MIN_KEPT_SEC, lengthOf(placed)), [placed])
+  // AQU-2493 (review, Nov 9): inserted audio still in the recording that has
+  // no samples here: "loading" while it is being loaded again, "lost" when it
+  // can't be. Either way a save would write silence where it sits.
+  // (Finding 14) "failed" when one could not be loaded this time, and may load
+  // if tried again.
+  const insertsMissing = useMemo((): "loading" | "lost" | "failed" | null => {
+    const without = placed.filter((g) => g.src !== BASE_SRC && g.src !== LIVE_SRC && !sources[g.src])
+    if (without.length === 0) return null
+    if (without.some((g) => lost.get(g.src) === "failed")) return "failed"
+    return without.some((g) => lost.has(g.src)) ? "lost" : "loading"
+  }, [placed, sources, lost])
 
   // ——— The kept part: the take's stored trim (carried through any unsaved
   // edits so it keeps its sound), or the draft's own, or the edge being dragged.
@@ -150,9 +187,12 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   )
   const [liveLevel, setLiveLevel] = useState<{ gainDb: number; fadeIn: number; fadeOut: number } | null>(null)
   const level = liveLevel ?? stored
+  // AQU-2664: the evening-out correction plays and draws under the volume
+  // line, as on the timeline; the line itself stays the take's own volume.
+  const { correctionDb } = stationLevelOf(take.att)
   const clip: ClipMix = useMemo(
-    () => ({ trimA, trimB, fadeIn: level.fadeIn, fadeOut: level.fadeOut, gainDb: level.gainDb }),
-    [trimA, trimB, level.fadeIn, level.fadeOut, level.gainDb],
+    () => ({ trimA, trimB, fadeIn: level.fadeIn, fadeOut: level.fadeOut, gainDb: level.gainDb, correctionDb }),
+    [trimA, trimB, level.fadeIn, level.fadeOut, level.gainDb, correctionDb],
   )
   /** Save the level as one Undo step (`take.gain`). */
   const commitLevel = useCallback(
@@ -230,7 +270,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // volume line doesn't render on every move).
   useEffect(() => {
     if (!pcm) return
-    const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+    const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
     // A plain recording plays from its own bytes (no re-encode: slice 12),
     // its volume and fades applied by the mixer.
     // Only a long one, and never a recorder's webm: a MediaRecorder webm has
@@ -238,7 +278,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     // and webm play from a WAV render instead.
     const playOriginal = pcm.original && pcm.duration > STATION_LONG_SEC && !pcm.original.type.includes("webm")
     if (ops.length === 0 && playOriginal && pcm.original && (flat || previewCanMix())) {
-      preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+      preview.setLevel(flat ? null : { gainDb: clipDb(clip), fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
       preview.setBlob(pcm.original, { mix: previewCanMix() })
       return
     }
@@ -252,7 +292,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       // The mixer applies the volume and fades (and guards the peak); with no
       // AudioContext they are baked into the samples instead.
       if (previewCanMix()) {
-        preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+        preview.setLevel(flat ? null : { gainDb: clipDb(clip), fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
         preview.setSamples(whole, pcm.rate, { mix: true })
       } else preview.setSamples(mixWhole(whole, pcm.rate, clip), pcm.rate)
     }, 150)
@@ -358,7 +398,8 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     pause()
     const op: EditOp = { kind: "del", a: round3(sel.a), b: round3(sel.b) }
     const tr = shiftTrim(op, trimA, trimB, atEdge)
-    setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr }))
+    // AQU-2493 (review, Nov 9): how far this moved Start, from where it is now.
+    setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, startShiftSec: startShiftAfter(draft, op, trimA) }))
     setSel({ a: op.a, b: op.a })
   }, [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB])
 
@@ -370,7 +411,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       const op: EditOp = { kind: "ins", at: round3(sel.a), src: id, len, label: meta.label }
       setSources((m) => ({ ...m, [id]: src }))
       const tr = shiftTrim(op, trimA, trimB, atEdge)
-      setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, sources: { ...draft.sources, [id]: meta } }))
+      setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, sources: { ...draft.sources, [id]: meta }, startShiftSec: startShiftAfter(draft, op, trimA) }))
       setSel({ a: op.at, b: op.at + len })
     },
     [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB],
@@ -407,6 +448,8 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     sources,
     setSources,
     placed,
+    insertsMissing,
+    retryInserts,
     length,
     trimA,
     trimB,

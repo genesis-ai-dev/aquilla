@@ -110,7 +110,16 @@ export interface MediaEmptyGates {
   canUploadSourceMedia: boolean
   /** AQU-1681: make the rows from the linked video's own sound. */
   offerVideoSoundRows: boolean
+  /**
+   * AQU-2682: why a Project Lead or above is not offered the recording:
+   * "needsEveryLanguage" when the server said his access does not cover every
+   * language, "checking" while it has not answered. Null when the upload is
+   * offered, or below Project Lead (the waiting line already says who can).
+   */
+  sourceMediaNote: SourceMediaNote | null
 }
+
+export type SourceMediaNote = "checking" | "needsEveryLanguage"
 
 /**
  * AQU-1681's rows from the film's own sound are not offered for now. Making
@@ -143,6 +152,12 @@ const FILM_SOUND_ROWS_OFFERED = false
  * `roleLevel` null is "not known yet": the source-audio check fails open like
  * every `role-policy` check, the maintainer checks fail closed as the
  * workspace always has.
+ *
+ * AQU-2682: both source-audio offers (the recording and the video's sound)
+ * also need the server's yes to "does this person's access cover every
+ * language?" (`coversEveryLanguage`, from useSourceAudioAccess). Null, not
+ * answered yet on a slow or absent network, offers neither: an offer that
+ * then fails leaves lines with no audio.
  */
 export function mediaEmptyGates(input: {
   roleLevel: number | null | undefined
@@ -151,13 +166,20 @@ export function mediaEmptyGates(input: {
   canEditTracks: boolean
   /** The file's linked video (`coreMediaUrl`). */
   linkedVideoUrl?: string | null
+  /** The server's answer; null until it arrives. */
+  coversEveryLanguage: boolean | null
 }): MediaEmptyGates {
   const maintainer = (input.roleLevel ?? 0) >= ROLE.MAINTAINER
+  const roleMay = canAttachSourceAudio(input.roleLevel ?? null)
+  const languagesMay = input.coversEveryLanguage === true
   return {
     offerCaptionRows: input.captionRowsMode && maintainer,
     canImportCaptions: input.captionRowsMode ? maintainer : input.canEditTracks,
-    canUploadSourceMedia: canAttachSourceAudio(input.roleLevel ?? null),
+    canUploadSourceMedia: roleMay && languagesMay,
     offerVideoSoundRows: FILM_SOUND_ROWS_OFFERED && input.captionRowsMode && maintainer
-      && canReadVideoSound(input.linkedVideoUrl),
+      && languagesMay && canReadVideoSound(input.linkedVideoUrl),
+    sourceMediaNote: !roleMay || languagesMay
+      ? null
+      : input.coversEveryLanguage === false ? "needsEveryLanguage" : "checking",
   }
 }

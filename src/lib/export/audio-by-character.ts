@@ -24,7 +24,7 @@
 // The orchestrator takes an injected decode/fetch so tests can supply fakes;
 // production wires real Web Audio + sync-worker fetch.
 
-import { applyClipLevelPcm, guardPeak, levelFields } from "@/lib/export/clip-level"
+import { applyClipLevelPcm, exportGainDb, guardPeak, levelFields } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 import { resolvePcmWindow } from "@/lib/audio/pcm-window"
 import type { CellData } from "@/hooks/useCells"
@@ -66,6 +66,8 @@ export interface CharacterClip {
   trimEndMs?: number | null
   /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
   gainDb?: number | null
+  /** AQU-2664 (review M3): its track's volume, apart from the take's (−∞ = silence). */
+  trackGainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
 }
@@ -622,7 +624,7 @@ export async function exportAudioByCharacter(
           const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
           // AQU-2327: its volume and fades, as the timeline plays them.
           const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
-          placed.push({ pcm: audible, startSec: clip.startSec, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
+          placed.push({ pcm: audible, startSec: clip.startSec, endSec: clip.endSec, ...(exportGainDb(clip) > 0 ? { raised: true } : {}) })
         }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)

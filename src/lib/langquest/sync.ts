@@ -245,7 +245,7 @@ async function applyPlan(deps: LangQuestSyncDeps, plan: SyncPlan, result: LangQu
     const events: CqrsRawEvent[] = []
     let rootAudioId: string | null = null
     for (const [i, card] of take.cards.entries()) {
-      const audioId = langquestAudioId(take.cellId, card)
+      const audioId = langquestAudioId(take.cellId, take.takeId, card)
       const blob = await deps.fetchAudio(card.url)
       await deps.uploadAudio({
         projectId,

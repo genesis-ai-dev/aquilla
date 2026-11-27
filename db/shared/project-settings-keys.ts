@@ -247,6 +247,10 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   // AQU-2309: who may set, rename, resize and remove a hand-set milestone.
   // Two rungs; an absent key reads as maintainer (db/shared/milestone-floor.ts).
   milestoneFloor: { kind: 'enum', values: ['maintainer', 'project_lead'] },
+  // AQU-2647: who may edit source text, hide a cell, and split a line at
+  // quotes. Absent reads as maintainer (db/shared/source-text-floor.ts).
+  // A project may set its own tier looser or stricter than its organization.
+  sourceTextFloor: { kind: 'enum', values: ['contributor', 'project_lead', 'maintainer'] },
   // AQU-1771: this project's own floors for who sees its member list and each
   // member's progress. Stricter-only: the project enforces the higher of its
   // own value and its org's (db/shared/visibility-floors.ts), and an agent

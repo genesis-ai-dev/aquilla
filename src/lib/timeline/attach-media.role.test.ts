@@ -57,7 +57,7 @@ vi.mock("@/lib/audio/auto-transcribe", () => ({
   buildMediaSeedCells: vi.fn(() => []),
 }))
 
-import { attachMediaFileToTimeline, attachMediaUrlToTimeline, type AttachMediaContext } from "./attach-media"
+import { attachMediaFileToTimeline, attachMediaUrlToTimeline, SourceAudioLanguageError, type AttachMediaContext } from "./attach-media"
 import { setCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { InsufficientRoleError } from "@/lib/sync/events-emit"
 import { ROLE } from "@/lib/frontier/roles"
@@ -187,5 +187,45 @@ describe("attachMediaFileToTimeline: over the limit", () => {
     Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
     await expect(attachMediaFileToTimeline(huge, ctx)).rejects.toThrow("Episode 101.mov exceeds the 2 GB media import limit.")
     expect(emitted.uploads).toBe(0)
+  })
+})
+
+// AQU-2682: the server also refuses source audio from someone whose access
+// does not cover every language. The workspace puts the server's answer on
+// the bridge; without a yes, nothing is uploaded and no row is queued, so a
+// Project Lead missing a language is never left with lines and no audio.
+describe("access to every language", () => {
+  const asLead = (sourceAudioCoversEveryLanguage: boolean | null) =>
+    setCqrsOutboxBridge({
+      projectId: "p1", activeFileId: "f1", username: "u", roleLevel: ROLE.PROJECT_LEAD, sourceAudioCoversEveryLanguage,
+    })
+  const file = () => new File([new Uint8Array(16)], "episode.wav", { type: "audio/wav" })
+
+  it("refuses a Project Lead missing a language before uploading or queueing anything", async () => {
+    asLead(false)
+    await expect(attachMediaFileToTimeline(file(), ctx)).rejects.toBeInstanceOf(SourceAudioLanguageError)
+    expect(emitted.uploads).toBe(0)
+    expect(emitted.creates).toHaveLength(0)
+    expect(emitted.attaches).toHaveLength(0)
+  })
+
+  it("refuses a linked url the same way, before probing", async () => {
+    asLead(false)
+    const probe = stubVideoProbe(12)
+    await expect(attachMediaUrlToTimeline("https://cdn.example.com/episode.mp4", ctx)).rejects.toBeInstanceOf(SourceAudioLanguageError)
+    expect(probe).not.toHaveBeenCalledWith("video")
+    expect(emitted.creates).toHaveLength(0)
+  })
+
+  it("refuses while the answer has not arrived (no optimistic attempt)", async () => {
+    asLead(null)
+    await expect(attachMediaFileToTimeline(file(), ctx)).rejects.toBeInstanceOf(SourceAudioLanguageError)
+    expect(emitted.uploads).toBe(0)
+  })
+
+  it("lets a Project Lead with every language through", async () => {
+    asLead(true)
+    await expect(attachMediaFileToTimeline(file(), ctx)).resolves.toMatchObject({ segments: 2 })
+    expect(emitted.attaches).toHaveLength(2)
   })
 })

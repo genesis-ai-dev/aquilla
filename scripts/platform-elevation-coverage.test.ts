@@ -114,6 +114,13 @@ const EXEMPTIONS: Record<string, number> = {
   "sync-worker/src/events/merge-sibling-route.ts": 1,
   "sync-worker/src/events/plan-route.ts": 1,
   "sync-worker/src/events/lane-read-wall.ts": 1,
+  // AQU-2682: the audio routes apply the lane wall's own rule (Maintainer+ and
+  // platform pass) and the events route's skip of the membership re-check for
+  // a platform token. Copies of the two rules above, no new reach: a platform
+  // view token is still a Viewer, refused writes by the role floors.
+  "sync-worker/src/audio-write-guard.ts": 1,
+  "sync-worker/src/events/source-audio-access.ts": 1,
+  "sync-worker/src/events/source-audio-access-route.ts": 1,
 }
 
 describe("platform-source sync tokens are minted only behind elevation", () => {
@@ -351,7 +358,7 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (17) ───────────────────────────────────────────────────────
+  // ── decides (20) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
@@ -363,6 +370,8 @@ const LEDGER: Record<string, LedgerState> = {
   "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
   "member-scopes.ts": "decides", // OPS-56 (the lane grant rows the read wall enforces, written by one PUT)
   "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
+  "org-access-person.ts": "decides", // The inspector supplies the roster’s live elevation check.
+  "org-access-lanes.ts": "decides", // AQU-2322 (one lane grant row at a time; projectElevationDenial after the visibility gate)
   "org-access.ts": "decides", // AQU-2318 follow-up (pending invites on the access tree, gated like the invite lists)
   "org-settings.ts": "decides", // D7 (the org's live vendor keys)
   "orgs.ts": "decides",
@@ -519,8 +528,11 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // 11-24: AQU-2318 follow-up adds org-access.ts as a new deciding module —
     // pending invites on the access tree need the invite-list gates, and
     // platform power counts there only while elevated; 22 of 53.
+    // 11-26: AQU-2322 adds org-access-lanes.ts, deciding on arrival
+    // (projectElevationDenial after the visibility gate); 23 of 54.
+    // AQU-2323: the person inspector checks roster elevation as well; 24 of 55.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 19, delegates: 3, undecided: 31 })
+      .toEqual({ decides: 21, delegates: 3, undecided: 31 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

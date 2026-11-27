@@ -634,3 +634,26 @@ describe("a YouTube film linked with no lines yet (Nov 8)", () => {
   })
 })
 
+describe("track volume (AQU-2664)", () => {
+  it("carries a stored volume onto a default row and an added track", () => {
+    const tracks = mergeTrackOverrides(deriveDefaultTracks(), {
+      "target-audio": { volumeDb: -9 },
+      "trk-music": { kind: "audio", name: "Music", volumeDb: 3.5 },
+    })
+    expect(tracks.find((tr) => tr.id === "target-audio")?.volumeDb).toBe(-9)
+    expect(tracks.find((tr) => tr.id === "trk-music")?.volumeDb).toBe(3.5)
+  })
+
+  it("reads an unusable or out-of-range volume as none, and clamps nothing silently", () => {
+    const tracks = mergeTrackOverrides(deriveDefaultTracks(), {
+      "target-audio": { volumeDb: Number.NaN },
+      "trk-a": { kind: "audio", name: "A", volumeDb: "3" as unknown as number },
+      "trk-b": { kind: "audio", name: "B", volumeDb: 40 },
+    })
+    for (const id of ["target-audio", "trk-a", "trk-b"]) expect(tracks.find((tr) => tr.id === id)?.volumeDb).toBeUndefined()
+  })
+
+  it("has no volume (0 dB) on a track nobody set", () => {
+    expect(deriveTracksForFile(null).every((tr) => tr.volumeDb === undefined)).toBe(true)
+  })
+})

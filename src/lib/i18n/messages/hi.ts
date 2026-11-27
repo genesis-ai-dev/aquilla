@@ -4782,6 +4782,7 @@ export const hi: Catalog = {
   "importExport.errors.pdfPassword": "यह PDF पासवर्ड से सुरक्षित है। पासवर्ड हटाएँ और इसे फिर से इम्पोर्ट करें।",
   "importExport.errors.pdfUnreadable": "इस फ़ाइल को PDF के रूप में पढ़ा नहीं जा सका।",
   "importExport.errors.pdfReaderFailed": "Aquilla अपना PDF रीडर शुरू नहीं कर सका। पेज फिर से लोड करें और PDF को फिर से इम्पोर्ट करें।",
+  "importExport.errors.pdfReaderSlow": "Aquilla के PDF रीडर को लोड होने में बहुत समय लगा। अपना कनेक्शन जांचें, फिर PDF को फिर से इम्पोर्ट करें।",
   "importExport.errors.pdfServerRefused": "पेज फिर से लोड करें, फिर यह PDF दोबारा जोड़ें।",
   "importExport.errors.pdfTooComplex": "यह PDF पढ़ने के लिए बहुत जटिल है। इसे बनाने वाले प्रोग्राम से इसे फिर से सेव करें, या मूल दस्तावेज़ इम्पोर्ट करें।",
   "importExport.notices.basicParserFallback": "Aquilla इस संरचित लेआउट को एआई से सत्यापित नहीं कर सका, इसलिए उसने मूल पार्सर उपयोग किया। आयात से पहले पूर्वावलोकन ध्यान से जाँचें।",

@@ -4232,6 +4232,7 @@ export const zh_Hant: Catalog = {
   "importExport.errors.pdfPassword": "此 PDF 受密碼保護。請移除密碼後重新匯入。",
   "importExport.errors.pdfUnreadable": "無法將此檔案當作 PDF 讀取。",
   "importExport.errors.pdfReaderFailed": "Aquilla 無法啟動其 PDF 閱讀器。請重新載入頁面，然後再次匯入該 PDF。",
+  "importExport.errors.pdfReaderSlow": "Aquilla 的 PDF 閱讀器載入時間過長。請檢查網路連線，然後再次匯入該 PDF。",
   "importExport.errors.pdfServerRefused": "請重新載入頁面，然後再次新增此 PDF。",
   "importExport.errors.pdfTooComplex": "此 PDF 過於複雜，無法讀取。請在建立它的程式中重新儲存，或匯入原始文件。",
   "importExport.notices.basicParserFallback": "Aquilla 無法以 AI 驗證這個結構化版面，因此改用了基本解析器。匯入前請仔細檢查預覽內容。",

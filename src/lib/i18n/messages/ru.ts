@@ -4263,6 +4263,7 @@ export const ru: Catalog = {
   "importExport.errors.pdfPassword": "Этот PDF защищён паролем. Снимите пароль и импортируйте его снова.",
   "importExport.errors.pdfUnreadable": "Не удалось прочитать этот файл как PDF.",
   "importExport.errors.pdfReaderFailed": "Aquilla не удалось запустить средство чтения PDF. Перезагрузите страницу и снова импортируйте PDF.",
+  "importExport.errors.pdfReaderSlow": "Средство чтения PDF в Aquilla загружается слишком долго. Проверьте подключение, затем снова импортируйте PDF.",
   "importExport.errors.pdfServerRefused": "Перезагрузите страницу, затем снова добавьте этот PDF.",
   "importExport.errors.pdfTooComplex": "Этот PDF слишком сложен для чтения. Сохраните его заново в программе, в которой он создан, или импортируйте исходный документ.",
   "importExport.notices.basicParserFallback": "Aquilla не смогла проверить эту структурированную разметку с помощью ИИ, поэтому использовала базовый разборщик. Внимательно проверьте предпросмотр перед импортом.",

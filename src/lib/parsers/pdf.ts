@@ -23,8 +23,10 @@ import { splitFootnoteAware } from "./docx"
 import { pdfPagesToParagraphs, type PdfPageContent, type PdfPageItem, type PdfStructNode } from "./pdf-blocks"
 
 /** `reader`: pdf.js itself could not start (its worker or code failed to
- *  load), which says nothing about the PDF. */
-export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable" | "reader" | "too-complex"
+ *  load), which says nothing about the PDF. `reader-timeout`: pdf.js was
+ *  still downloading when READER_LOAD_TIMEOUT_MS ran out (a slow network);
+ *  that says nothing about the PDF either. */
+export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable" | "reader" | "reader-timeout" | "too-complex"
 
 /** A PDF the import refuses, with the reason. The caller words the message. */
 export class PdfReadError extends Error {
@@ -49,6 +51,8 @@ export interface PdfParseOptions {
   cellUnit?: CellUnit
   /** Test hook: the read's time budget (READ_BUDGET_MS). */
   budgetMs?: number
+  /** Test hook: how long loading the reader may take (READER_LOAD_TIMEOUT_MS). */
+  loadTimeoutMs?: number
 }
 
 /** AQU-2551 review finding 4: a crafted PDF held a tab for 74 s at 1.65 GB.
@@ -56,6 +60,15 @@ export interface PdfParseOptions {
  *  task is destroyed (which ends its worker) and the PDF is refused as too
  *  complex. A real 58-page Word PDF reads in about 2 s. */
 export const READ_BUDGET_MS = 20_000
+
+/** AQU-2551 (browser pass, finding 6c): the budget measures only the reading.
+ *  It starts once pdf.js's code and its worker have loaded; on a slow network
+ *  their download (about 0.5 MB compressed) counted against the PDF, and a
+ *  6 KB PDF was refused as too complex. Loading has this separate, generous
+ *  limit (about 40 kbit/s for the whole reader), and running out of it says
+ *  the reader did not load. The download is not given up: trying again keeps
+ *  waiting on it. */
+export const READER_LOAD_TIMEOUT_MS = 120_000
 
 // AQU-2551 review finding 12: the legacy build, for the main module and the
 // worker. The modern build calls Map.prototype.getOrInsertComputed and
@@ -69,7 +82,20 @@ let pdfjsPromise: Promise<PdfJs> | null = null
  *  PDF (AQU-2551). */
 const WORKER_FAILED = /Setting up fake worker failed/i
 
-async function loadPdfJs(): Promise<PdfJs> {
+/** Waits for `work` until `deadline` (a `performance.now()` time), then
+ *  gives up waiting with `reader-timeout`; the work itself goes on. */
+function beforeLoadDeadline<T>(work: Promise<T>, deadline: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new PdfReadError("reader-timeout", "PDF reader took too long to load")),
+      Math.max(0, deadline - performance.now()),
+    )
+  })
+  return Promise.race([work, late]).finally(() => clearTimeout(timer))
+}
+
+async function loadPdfJs(deadline: number): Promise<PdfJs> {
   pdfjsPromise ??= (async () => {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
     if (typeof window !== "undefined" && typeof Worker !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
@@ -78,12 +104,100 @@ async function loadPdfJs(): Promise<PdfJs> {
     }
     return pdfjs
   })()
+  const loading = pdfjsPromise
   try {
-    return await pdfjsPromise
+    return await beforeLoadDeadline(loading, deadline)
   } catch (err) {
-    pdfjsPromise = null
+    // still downloading: a retry waits on this same download
+    if (err instanceof PdfReadError) throw err
+    if (pdfjsPromise === loading) pdfjsPromise = null
     throw new PdfReadError("reader", `PDF reader could not load: ${(err as Error)?.message ?? String(err)}`, { cause: err })
   }
+}
+
+/** A worker made by the reader, ready once pdf.js's worker script has
+ *  downloaded and run (it then posts "ready"). */
+interface StartingWorker {
+  port: Worker
+  ready: Promise<void>
+  failed: boolean
+}
+
+/** A worker still downloading when a read gave up waiting for it: the next
+ *  read takes it, so trying again does not start the download over. */
+let spareWorker: StartingWorker | null = null
+
+/** Starts pdf.js's worker; undefined when the constructor throws (no module
+ *  workers, a cross-origin URL). */
+function startWorker(src: string): StartingWorker | undefined {
+  let port: Worker
+  try {
+    port = new Worker(src, { type: "module" })
+  } catch {
+    return undefined
+  }
+  const starting: StartingWorker = { port, ready: Promise.resolve(), failed: false }
+  starting.ready = new Promise<void>((resolve, reject) => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { sourceName?: string; action?: string } | null
+      if (data?.sourceName !== "worker" || data.action !== "ready") return
+      done()
+      resolve()
+    }
+    // AQU-2551 re-review finding 1: a worker that fails to start, or whose
+    // script fails to load, fires `error`. That is the reader failing, never
+    // the PDF: refuse at once.
+    const onError = () => {
+      done()
+      starting.failed = true
+      reject(new PdfReadError("reader", "PDF reader worker failed to start"))
+    }
+    const done = () => {
+      port.removeEventListener("message", onMessage as EventListener)
+      port.removeEventListener("error", onError)
+    }
+    port.addEventListener("message", onMessage as EventListener)
+    port.addEventListener("error", onError)
+  })
+  starting.ready.catch(() => {})
+  return starting
+}
+
+/** Loads the reader: pdf.js's code, then a worker that has said it is ready
+ *  (or, with no Web Worker, pdf.js's in-page fallback). Within the load
+ *  timeout; none of this counts against the read's budget. */
+async function openReader(loadTimeoutMs: number): Promise<{ pdfjs: PdfJs; port?: Worker; pdfWorker?: InstanceType<PdfJs["PDFWorker"]> }> {
+  const deadline = performance.now() + loadTimeoutMs
+  const pdfjs = await loadPdfJs(deadline)
+  if (typeof window !== "undefined" && typeof Worker !== "undefined" && pdfjs.GlobalWorkerOptions.workerSrc) {
+    const spare = spareWorker && !spareWorker.failed ? spareWorker : null
+    spareWorker = null
+    const starting = spare ?? startWorker(pdfjs.GlobalWorkerOptions.workerSrc)
+    if (starting) {
+      try {
+        await beforeLoadDeadline(starting.ready, deadline)
+      } catch (err) {
+        if (err instanceof PdfReadError && err.code === "reader-timeout" && !starting.failed) spareWorker = starting
+        else starting.port.terminate()
+        throw err
+      }
+      // AQU-2551: pdf.js's constructor types say `port?: null` (its JSDoc),
+      // while its PDFWorkerParameters, and the code, take a Worker.
+      return { pdfjs, port: starting.port, pdfWorker: new pdfjs.PDFWorker({ port: starting.port as unknown as null }) }
+    }
+  }
+  // AQU-2551 re-review finding 1: no worker of our own. pdf.js makes its own,
+  // or falls back to reading in the page (downloading its worker code as a
+  // module); either way that loading is waited for here, not in the budget.
+  const pdfWorker = new pdfjs.PDFWorker()
+  try {
+    await beforeLoadDeadline(Promise.resolve(pdfWorker.promise), deadline)
+  } catch (err) {
+    pdfWorker.destroy()
+    if (err instanceof PdfReadError) throw err
+    throw new PdfReadError("reader", `PDF reader failed: ${(err as Error)?.message ?? String(err)}`, { cause: err })
+  }
+  return { pdfjs, pdfWorker }
 }
 
 /** The pdf.js drawing operations that paint an image. */
@@ -140,7 +254,7 @@ const hasText = (items: readonly PdfPageItem[]) => items.some((it) => "s" in it 
 
 /** Read a PDF into import cells. Throws `PdfReadError` for a PDF it refuses. */
 export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOptions): Promise<PdfImport> {
-  const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }), options?.budgetMs)
+  const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }), options)
   return { strings: paragraphsToStrings(read.paragraphs, options?.cellUnit), imageOnlyPages: read.imageOnlyPages, tagged: read.tagged }
 }
 
@@ -149,8 +263,8 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
  *  import's own reader, and send the server only this text (review findings
  *  1–3: the server no longer parses PDFs). A footnote stays at its mark, in
  *  brackets. Throws `PdfReadError` for a PDF it refuses, as the import does. */
-export async function extractPdfText(buffer: ArrayBuffer, options?: Pick<PdfParseOptions, "budgetMs">): Promise<string> {
-  const read = await readPdfParagraphs(buffer, (text) => ` [${text}]`, options?.budgetMs)
+export async function extractPdfText(buffer: ArrayBuffer, options?: Pick<PdfParseOptions, "budgetMs" | "loadTimeoutMs">): Promise<string> {
+  const read = await readPdfParagraphs(buffer, (text) => ` [${text}]`, options)
   return read.paragraphs.map((p) => p.text).join("\n")
 }
 
@@ -160,9 +274,13 @@ interface PdfParagraphsRead {
   tagged: boolean
 }
 
-async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) => string, budgetMs = READ_BUDGET_MS): Promise<PdfParagraphsRead> {
-  const pdfjs = await loadPdfJs()
-  // The budget. In the browser pdf.js works in its own Web Worker, so a
+async function readPdfParagraphs(
+  buffer: ArrayBuffer,
+  footnote: (text: string) => string,
+  { budgetMs = READ_BUDGET_MS, loadTimeoutMs = READER_LOAD_TIMEOUT_MS }: Pick<PdfParseOptions, "budgetMs" | "loadTimeoutMs"> = {},
+): Promise<PdfParagraphsRead> {
+  const { pdfjs, port, pdfWorker } = await openReader(loadTimeoutMs)
+  // The budget, from here: the reader has loaded. In the browser pdf.js works in its own Web Worker, so a
   // timer fires while one page is still being read: every wait on pdf.js
   // races it. Where pdf.js runs on this thread (tests), timers wait for it,
   // so the clock is also read after every wait.
@@ -171,22 +289,9 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
   // AQU-2551 (browser run): pdf.js's own destroy() waits for its worker, and a
   // worker busy decoding one huge stream answers only when it is done (54 s
   // for a 1 GB stream). So in the browser the reader owns the worker, and the
-  // budget ends it outright: terminate(), then refuse at once.
-  // AQU-2551 re-review finding 1: the worker is made inside a guard. A
-  // constructor that throws (no module workers, a cross-origin URL) leaves
-  // pdf.js to make its own, with its main-thread fallback; the budget still
-  // holds, though it can then only destroy the loading task.
-  let port: Worker | undefined
-  if (typeof window !== "undefined" && typeof Worker !== "undefined" && pdfjs.GlobalWorkerOptions.workerSrc) {
-    try {
-      port = new Worker(pdfjs.GlobalWorkerOptions.workerSrc, { type: "module" })
-    } catch {
-      port = undefined
-    }
-  }
-  // AQU-2551: pdf.js's constructor types say `port?: null` (its JSDoc), while
-  // its PDFWorkerParameters, and the code, take a Worker.
-  const pdfWorker = port ? new pdfjs.PDFWorker({ port: port as unknown as null }) : undefined
+  // budget ends it outright: terminate(), then refuse at once. Without a
+  // worker of our own (openReader) the budget still holds, though it can
+  // then only destroy the loading task.
   /** Set when the read is given up (the budget ran out, or the worker
    *  failed): pdf.js is then not waited for. */
   let abandoned = false
@@ -199,16 +304,15 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
       reject(err)
     }
     timer = setTimeout(() => abandon(tooComplex()), budgetMs)
-    // AQU-2551 re-review finding 1: pdf.js's own setup listened for this; a
-    // worker that fails to start, or whose script fails to load, fires
-    // `error`. That is the reader failing, never the PDF: refuse at once.
-    port?.addEventListener("error", () => abandon(new PdfReadError("reader", "PDF reader worker failed to start")))
+    // a worker that dies while reading is the reader failing, never the PDF
+    port?.addEventListener("error", () => abandon(new PdfReadError("reader", "PDF reader worker failed")))
   })
   /** Ends pdf.js: politely when it is idle, at once when the read was given up. */
   const finish = async (): Promise<void> => {
     clearTimeout(timer)
     if (abandoned) {
       void task.destroy().catch(() => {})
+      pdfWorker?.destroy()
     } else {
       await task.destroy().catch(() => {})
       pdfWorker?.destroy()

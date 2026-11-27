@@ -1170,6 +1170,7 @@ export const importExport = defineNamespace({
     "importExport.errors.pdfPassword": "This PDF is password-protected. Remove the password and import it again.",
     "importExport.errors.pdfUnreadable": "This file could not be read as a PDF.",
     "importExport.errors.pdfReaderFailed": "Aquilla could not start its PDF reader. Reload the page and import the PDF again.",
+    "importExport.errors.pdfReaderSlow": "Aquilla's PDF reader took too long to load. Check your connection, then import the PDF again.",
     // AQU-2551: the server no longer reads PDFs; the app reads them. Seen only
     // when a page from before that change sends a PDF to the server.
     "importExport.errors.pdfServerRefused": "Reload the page, then add this PDF again.",
@@ -3013,6 +3014,9 @@ export const importExport = defineNamespace({
       },
       "importExport.errors.pdfReaderFailed": {
         description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",
+      },
+      "importExport.errors.pdfReaderSlow": {
+        description: "Shown when the app's PDF reader was still downloading after two minutes (a slow or weak network), so the PDF was not read yet. The PDF is not at fault; importing it again keeps waiting on the same download.",
       },
       "importExport.errors.pdfTooComplex": {
         description: "Shown when a PDF takes too long to read (a damaged or deliberately crafted file), so the app stopped reading it. Saving it again from the program that made it (Word, InDesign…) usually gives a normal PDF; the person can also import that program's own document instead.",

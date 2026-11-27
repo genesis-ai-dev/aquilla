@@ -4872,6 +4872,7 @@ export const pa: Catalog = {
   "importExport.errors.pdfPassword": "ਇਹ PDF ਪਾਸਵਰਡ ਨਾਲ ਸੁਰੱਖਿਅਤ ਹੈ। ਪਾਸਵਰਡ ਹਟਾਓ ਅਤੇ ਇਸਨੂੰ ਦੁਬਾਰਾ ਇੰਪੋਰਟ ਕਰੋ।",
   "importExport.errors.pdfUnreadable": "ਇਸ ਫ਼ਾਈਲ ਨੂੰ PDF ਵਜੋਂ ਪੜ੍ਹਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ।",
   "importExport.errors.pdfReaderFailed": "Aquilla ਆਪਣਾ PDF ਰੀਡਰ ਸ਼ੁਰੂ ਨਹੀਂ ਕਰ ਸਕਿਆ। ਪੰਨਾ ਦੁਬਾਰਾ ਲੋਡ ਕਰੋ ਅਤੇ PDF ਦੁਬਾਰਾ ਇੰਪੋਰਟ ਕਰੋ।",
+  "importExport.errors.pdfReaderSlow": "Aquilla ਦੇ PDF ਰੀਡਰ ਨੂੰ ਲੋਡ ਹੋਣ ਵਿੱਚ ਬਹੁਤ ਸਮਾਂ ਲੱਗਿਆ। ਆਪਣਾ ਕਨੈਕਸ਼ਨ ਜਾਂਚੋ, ਫਿਰ PDF ਦੁਬਾਰਾ ਇੰਪੋਰਟ ਕਰੋ।",
   "importExport.errors.pdfServerRefused": "ਪੰਨਾ ਦੁਬਾਰਾ ਲੋਡ ਕਰੋ, ਫਿਰ ਇਹ PDF ਦੁਬਾਰਾ ਸ਼ਾਮਲ ਕਰੋ।",
   "importExport.errors.pdfTooComplex": "ਇਹ PDF ਪੜ੍ਹਨ ਲਈ ਬਹੁਤ ਗੁੰਝਲਦਾਰ ਹੈ। ਇਸਨੂੰ ਬਣਾਉਣ ਵਾਲੇ ਪ੍ਰੋਗਰਾਮ ਤੋਂ ਦੁਬਾਰਾ ਸੇਵ ਕਰੋ, ਜਾਂ ਮੂਲ ਦਸਤਾਵੇਜ਼ ਇੰਪੋਰਟ ਕਰੋ।",
   "importExport.notices.basicParserFallback": "Aquilla ਇਸ ਢਾਂਚੇ ਨੂੰ AI ਨਾਲ ਤਸਦੀਕ ਨਹੀਂ ਕਰ ਸਕਿਆ, ਇਸ ਲਈ ਇਸਨੇ ਮੂਲ ਪਾਰਸਰ ਵਰਤਿਆ. ਇੰਪੋਰਟ ਤੋਂ ਪਹਿਲਾਂ ਝਲਕ ਧਿਆਨ ਨਾਲ ਵੇਖੋ.",

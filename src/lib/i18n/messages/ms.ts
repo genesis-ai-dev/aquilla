@@ -4196,6 +4196,7 @@ export const ms: Catalog = {
   "importExport.errors.pdfPassword": "PDF ini dilindungi kata laluan. Alih keluar kata laluan dan import semula.",
   "importExport.errors.pdfUnreadable": "Fail ini tidak dapat dibaca sebagai PDF.",
   "importExport.errors.pdfReaderFailed": "Aquilla tidak dapat memulakan pembaca PDF-nya. Muat semula halaman dan import PDF itu semula.",
+  "importExport.errors.pdfReaderSlow": "Pembaca PDF Aquilla mengambil masa terlalu lama untuk dimuatkan. Semak sambungan anda, kemudian import PDF itu semula.",
   "importExport.errors.pdfServerRefused": "Muat semula halaman, kemudian tambah PDF ini semula.",
   "importExport.errors.pdfTooComplex": "PDF ini terlalu kompleks untuk dibaca. Simpan semula daripada program yang menghasilkannya, atau import dokumen asal.",
   "importExport.notices.basicParserFallback": "Aquilla tidak dapat mengesahkan tata letak berstruktur ini dengan AI, jadi ia menggunakan penganalisis asas. Semak pratonton dengan teliti sebelum mengimport.",

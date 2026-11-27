@@ -4197,6 +4197,7 @@ export const fr: Catalog = {
   "importExport.errors.pdfPassword": "Ce PDF est protégé par un mot de passe. Supprimez le mot de passe et importez-le à nouveau.",
   "importExport.errors.pdfUnreadable": "Ce fichier n'a pas pu être lu comme un PDF.",
   "importExport.errors.pdfReaderFailed": "Aquilla n'a pas pu démarrer son lecteur de PDF. Rechargez la page et importez à nouveau le PDF.",
+  "importExport.errors.pdfReaderSlow": "Le lecteur de PDF d'Aquilla a mis trop de temps à se charger. Vérifiez votre connexion, puis importez à nouveau le PDF.",
   "importExport.errors.pdfServerRefused": "Rechargez la page, puis ajoutez à nouveau ce PDF.",
   "importExport.errors.pdfTooComplex": "Ce PDF est trop complexe pour être lu. Enregistrez-le à nouveau depuis le programme qui l'a créé, ou importez le document d'origine.",
   "importExport.notices.basicParserFallback": "Aquilla n'a pas pu vérifier cette mise en page structurée avec l'IA, elle a donc utilisé l'analyseur de base. Vérifiez attentivement l'aperçu avant d'importer.",

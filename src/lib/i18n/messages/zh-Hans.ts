@@ -4231,6 +4231,7 @@ export const zh_Hans: Catalog = {
   "importExport.errors.pdfPassword": "此 PDF 受密码保护。请移除密码后重新导入。",
   "importExport.errors.pdfUnreadable": "无法将此文件作为 PDF 读取。",
   "importExport.errors.pdfReaderFailed": "Aquilla 无法启动其 PDF 阅读器。请重新加载页面，然后再次导入该 PDF。",
+  "importExport.errors.pdfReaderSlow": "Aquilla 的 PDF 阅读器加载时间过长。请检查网络连接，然后再次导入该 PDF。",
   "importExport.errors.pdfServerRefused": "请重新加载页面，然后再次添加此 PDF。",
   "importExport.errors.pdfTooComplex": "此 PDF 过于复杂，无法读取。请在创建它的程序中重新保存，或导入原始文档。",
   "importExport.notices.basicParserFallback": "Aquilla 无法以 AI 验证这个结构化版面，因此改用了基本解析器。导入前请仔细检查预览内容。",

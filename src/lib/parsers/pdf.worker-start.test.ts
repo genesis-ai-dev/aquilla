@@ -23,7 +23,8 @@ vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   VerbosityLevel: { ERRORS: 0 },
   PDFWorker: class {
     port: unknown
-    constructor({ port }: { port: unknown }) { this.port = port }
+    promise = Promise.resolve()
+    constructor({ port }: { port?: unknown } = {}) { this.port = port }
     destroy() {}
   },
   getDocument: (params: Record<string, unknown>) => {
@@ -52,7 +53,8 @@ import { readPdfImport } from "@/lib/import/pdf-import"
 
 const pdf = () => new TextEncoder().encode("%PDF-1.7").buffer as ArrayBuffer
 
-/** A worker whose script fails to load: the browser fires `error` on it. */
+/** A worker whose script fails to load: the browser fires `error` on it
+ *  (and pdf.js's worker never says "ready"). */
 class DeadWorker extends EventTarget {
   dead = true
   terminated = false
@@ -94,7 +96,8 @@ describe("a browser whose Worker constructor throws", () => {
     vi.stubGlobal("Worker", NoModuleWorker)
     const read = await extractPdfImport(pdf())
     expect(read.strings.map((s) => s.original)).toEqual(["Hello world."])
-    expect(S.params[0]?.worker).toBeUndefined()
+    // pdf.js's own worker: none of the reader's
+    expect((S.params[0]?.worker as { port?: unknown } | undefined)?.port).toBeUndefined()
   })
 
   it("still keeps the read's budget", async () => {

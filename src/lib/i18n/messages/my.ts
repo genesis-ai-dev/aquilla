@@ -4215,6 +4215,7 @@ export const my: Catalog = {
   "importExport.errors.pdfPassword": "ဤ PDF ကို စကားဝှက်ဖြင့် ကာကွယ်ထားသည်။ စကားဝှက်ကို ဖယ်ရှားပြီး ပြန်လည်တင်သွင်းပါ။",
   "importExport.errors.pdfUnreadable": "ဤဖိုင်ကို PDF အဖြစ် ဖတ်၍မရပါ။",
   "importExport.errors.pdfReaderFailed": "Aquilla သည် ၎င်း၏ PDF ဖတ်စနစ်ကို စတင်၍မရပါ။ စာမျက်နှာကို ပြန်ဖွင့်ပြီး PDF ကို ပြန်လည်တင်သွင်းပါ။",
+  "importExport.errors.pdfReaderSlow": "Aquilla ၏ PDF ဖတ်စနစ်ကို ဖွင့်ရန် အချိန်ကြာလွန်းနေပါသည်။ သင့်ချိတ်ဆက်မှုကို စစ်ဆေးပြီးနောက် PDF ကို ပြန်လည်တင်သွင်းပါ။",
   "importExport.errors.pdfServerRefused": "စာမျက်နှာကို ပြန်ဖွင့်ပြီးနောက် ဤ PDF ကို ထပ်မံထည့်ပါ။",
   "importExport.errors.pdfTooComplex": "ဤ PDF သည် ဖတ်ရန် ရှုပ်ထွေးလွန်းသည်။ ၎င်းကို ဖန်တီးခဲ့သော ပရိုဂရမ်မှ ပြန်သိမ်းပါ၊ သို့မဟုတ် မူရင်းစာရွက်စာတမ်းကို တင်သွင်းပါ။",
   "importExport.notices.basicParserFallback": "Aquilla သည်ဤတည်ဆောက်သည့်အသုံးအနှုန်းကို AI အကျည်းစီစဉ်မည်မဟုတ်။အခြေခံအလုံးအစုသုံးစွဲခဲ့သည်။တင်သွင်းမီအစဉ်အလာအစီအမံကြည့်ပါ။",

@@ -4216,6 +4216,7 @@ export const th: Catalog = {
   "importExport.errors.pdfPassword": "PDF นี้ได้รับการป้องกันด้วยรหัสผ่าน ลบรหัสผ่านออกแล้วนำเข้าอีกครั้ง",
   "importExport.errors.pdfUnreadable": "ไม่สามารถอ่านไฟล์นี้เป็น PDF ได้",
   "importExport.errors.pdfReaderFailed": "Aquilla เริ่มตัวอ่าน PDF ไม่ได้ โหลดหน้านี้ใหม่แล้วนำเข้า PDF อีกครั้ง",
+  "importExport.errors.pdfReaderSlow": "ตัวอ่าน PDF ของ Aquilla ใช้เวลาโหลดนานเกินไป ตรวจสอบการเชื่อมต่อของคุณ แล้วนำเข้า PDF อีกครั้ง",
   "importExport.errors.pdfServerRefused": "โหลดหน้านี้ใหม่ แล้วเพิ่ม PDF นี้อีกครั้ง",
   "importExport.errors.pdfTooComplex": "PDF นี้ซับซ้อนเกินกว่าจะอ่านได้ บันทึกใหม่จากโปรแกรมที่สร้างไฟล์นี้ หรือนำเข้าเอกสารต้นฉบับ",
   "importExport.notices.basicParserFallback": "Aquilla ไม่สามารถตรวจสอบเลย์เอาต์ที่มีโครงสร้างนี้ด้วย AI ดังนั้นจึงใช้เครื่องแยกวิเคราะห์พื้นฐาน ตรวจสอบการแสดงตัวอย่างอย่างระมัดระวังก่อนนำเข้า",

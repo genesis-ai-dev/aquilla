@@ -4887,6 +4887,7 @@ export const bn: Catalog = {
   "importExport.errors.pdfPassword": "এই PDF পাসওয়ার্ড দিয়ে সুরক্ষিত। পাসওয়ার্ডটি সরিয়ে আবার ইমপোর্ট করুন।",
   "importExport.errors.pdfUnreadable": "এই ফাইলটি PDF হিসেবে পড়া যায়নি।",
   "importExport.errors.pdfReaderFailed": "Aquilla তার PDF রিডার চালু করতে পারেনি। পেজটি আবার লোড করুন এবং PDF আবার ইমপোর্ট করুন।",
+  "importExport.errors.pdfReaderSlow": "Aquilla-র PDF রিডার লোড হতে অনেক বেশি সময় নিয়েছে। আপনার সংযোগ পরীক্ষা করুন, তারপর PDF আবার ইমপোর্ট করুন।",
   "importExport.errors.pdfServerRefused": "পেজটি আবার লোড করুন, তারপর এই PDF আবার যোগ করুন।",
   "importExport.errors.pdfTooComplex": "এই PDF পড়ার জন্য খুব জটিল। যে প্রোগ্রামে এটি তৈরি হয়েছে সেখান থেকে আবার সেভ করুন, অথবা মূল ডকুমেন্টটি ইমপোর্ট করুন।",
   "importExport.notices.basicParserFallback": "Aquilla এআই দিয়ে এই কাঠামোবদ্ধ লেআউট যাচাই করতে পারেনি, তাই মৌলিক পার্সার ব্যবহার করেছে। আমদানির আগে প্রাকদর্শন মনোযোগ দিয়ে দেখুন।",

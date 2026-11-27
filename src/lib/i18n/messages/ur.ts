@@ -4871,6 +4871,7 @@ export const ur: Catalog = {
   "importExport.errors.pdfPassword": "یہ PDF پاس ورڈ سے محفوظ ہے۔ پاس ورڈ ہٹائیں اور اسے دوبارہ امپورٹ کریں۔",
   "importExport.errors.pdfUnreadable": "اس فائل کو PDF کے طور پر نہیں پڑھا جا سکا۔",
   "importExport.errors.pdfReaderFailed": "Aquilla اپنا PDF ریڈر شروع نہیں کر سکا۔ صفحہ دوبارہ لوڈ کریں اور PDF دوبارہ امپورٹ کریں۔",
+  "importExport.errors.pdfReaderSlow": "Aquilla کے PDF ریڈر کو لوڈ ہونے میں بہت زیادہ وقت لگا۔ اپنا کنکشن چیک کریں، پھر PDF دوبارہ امپورٹ کریں۔",
   "importExport.errors.pdfServerRefused": "صفحہ دوبارہ لوڈ کریں، پھر یہ PDF دوبارہ شامل کریں۔",
   "importExport.errors.pdfTooComplex": "یہ PDF پڑھنے کے لیے بہت پیچیدہ ہے۔ اسے بنانے والے پروگرام سے دوبارہ محفوظ کریں، یا اصل دستاویز امپورٹ کریں۔",
   "importExport.notices.basicParserFallback": "Aquilla اس ساخت والی ترتیب کی اے آئی سے تصدیق نہیں کر سکا، اس لیے بنیادی پارسر استعمال ہوا۔ درآمد سے پہلے پیش منظر غور سے دیکھیں۔",

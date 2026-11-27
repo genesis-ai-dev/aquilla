@@ -4872,6 +4872,7 @@ export const sw: Catalog = {
   "importExport.errors.pdfPassword": "PDF hii imelindwa kwa nenosiri. Ondoa nenosiri kisha uiingize tena.",
   "importExport.errors.pdfUnreadable": "Faili hii haikuweza kusomwa kama PDF.",
   "importExport.errors.pdfReaderFailed": "Aquilla haikuweza kuanzisha kisomaji chake cha PDF. Pakia upya ukurasa kisha uingize PDF tena.",
+  "importExport.errors.pdfReaderSlow": "Kisomaji cha PDF cha Aquilla kimechukua muda mrefu mno kupakia. Kagua muunganisho wako, kisha uingize PDF tena.",
   "importExport.errors.pdfServerRefused": "Pakia upya ukurasa, kisha uongeze PDF hii tena.",
   "importExport.errors.pdfTooComplex": "PDF hii ni changamano mno kusomwa. Ihifadhi tena kutoka programu iliyoiunda, au uingize hati asili.",
   "importExport.notices.basicParserFallback": "Aquilla haikuweza kuthibitisha mpangilio huu wenye muundo kwa AI, hivyo ilitumia kichambuzi cha msingi. Angalia hakiki kwa makini kabla ya kuingiza.",

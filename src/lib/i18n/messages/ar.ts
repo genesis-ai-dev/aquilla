@@ -4225,6 +4225,7 @@ export const ar: Catalog = {
   "importExport.errors.pdfPassword": "ملف PDF هذا محمي بكلمة مرور. أزل كلمة المرور واستورده مرة أخرى.",
   "importExport.errors.pdfUnreadable": "تعذّرت قراءة هذا الملف كملف PDF.",
   "importExport.errors.pdfReaderFailed": "تعذّر على Aquilla تشغيل قارئ PDF. أعد تحميل الصفحة واستورد ملف PDF مرة أخرى.",
+  "importExport.errors.pdfReaderSlow": "استغرق تحميل قارئ PDF في Aquilla وقتًا طويلًا جدًا. تحقّق من اتصالك، ثم استورد ملف PDF مرة أخرى.",
   "importExport.errors.pdfServerRefused": "أعد تحميل الصفحة، ثم أضف ملف PDF هذا مرة أخرى.",
   "importExport.errors.pdfTooComplex": "ملف PDF هذا معقّد جدًا ولا يمكن قراءته. احفظه مرة أخرى من البرنامج الذي أنشأه، أو استورد المستند الأصلي.",
   "importExport.notices.basicParserFallback": "لم تتمكن Aquilla من التحقق من هذا التخطيط المنظم باستخدام الذكاء الاصطناعي، لذا استخدمت المُحلل الأساسي. تحقق من المعاينة بعناية قبل الاستيراد.",

@@ -4226,6 +4226,7 @@ export const id: Catalog = {
   "importExport.errors.pdfPassword": "PDF ini dilindungi kata sandi. Hapus kata sandinya lalu impor lagi.",
   "importExport.errors.pdfUnreadable": "File ini tidak dapat dibaca sebagai PDF.",
   "importExport.errors.pdfReaderFailed": "Aquilla tidak dapat memulai pembaca PDF-nya. Muat ulang halaman lalu impor PDF lagi.",
+  "importExport.errors.pdfReaderSlow": "Pembaca PDF Aquilla terlalu lama dimuat. Periksa koneksi Anda, lalu impor PDF lagi.",
   "importExport.errors.pdfServerRefused": "Muat ulang halaman, lalu tambahkan PDF ini lagi.",
   "importExport.errors.pdfTooComplex": "PDF ini terlalu rumit untuk dibaca. Simpan lagi dari program yang membuatnya, atau impor dokumen aslinya.",
   "importExport.notices.basicParserFallback": "Aquilla tidak dapat memverifikasi tata letak terstruktur ini dengan AI, jadi ia memakai pengurai dasar. Periksa pratinjaunya dengan saksama sebelum mengimpor.",

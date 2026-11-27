@@ -4758,6 +4758,7 @@ export const pt: Catalog = {
   "importExport.errors.pdfPassword": "Este PDF está protegido por senha. Remova a senha e importe-o novamente.",
   "importExport.errors.pdfUnreadable": "Não foi possível ler este arquivo como PDF.",
   "importExport.errors.pdfReaderFailed": "O Aquilla não conseguiu iniciar o leitor de PDF. Recarregue a página e importe o PDF novamente.",
+  "importExport.errors.pdfReaderSlow": "O leitor de PDF do Aquilla demorou demais para carregar. Verifique sua conexão e importe o PDF novamente.",
   "importExport.errors.pdfServerRefused": "Recarregue a página e adicione este PDF novamente.",
   "importExport.errors.pdfTooComplex": "Este PDF é complexo demais para ser lido. Salve-o novamente no programa que o criou ou importe o documento original.",
   "importExport.notices.basicParserFallback": "Aquilla não pôde verificar este layout estruturado com IA, então usou o analisador básico. Confira a prévia com cuidado antes de importar.",

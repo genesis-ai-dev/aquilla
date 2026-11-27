@@ -4876,6 +4876,7 @@ export const ha: Catalog = {
   "importExport.errors.pdfPassword": "Wannan PDF tana da kariyar kalmar sirri. Cire kalmar sirrin sannan ka sake shigo da ita.",
   "importExport.errors.pdfUnreadable": "Ba a iya karanta wannan fayil a matsayin PDF ba.",
   "importExport.errors.pdfReaderFailed": "Aquilla ta kasa fara mai karanta PDF ɗinta. Sake loda shafin sannan ka sake shigo da PDF ɗin.",
+  "importExport.errors.pdfReaderSlow": "Mai karanta PDF na Aquilla ya ɗauki lokaci mai tsawo kafin ya loda. Duba haɗin intanet ɗinka, sannan ka sake shigo da PDF ɗin.",
   "importExport.errors.pdfServerRefused": "Sake loda shafin, sannan ka sake ƙara wannan PDF.",
   "importExport.errors.pdfTooComplex": "Wannan PDF ta yi rikitarwa sosai da ba za a iya karanta ta ba. Sake ajiye ta daga shirin da ya yi ta, ko shigo da ainihin takardar.",
   "importExport.notices.basicParserFallback": "Aquilla ta kasa tabbatar da wannan tsari tare da AI, don haka ta yi amfani da mai nazari na asali. Ku duba duba da hankali kafin shigowa.",

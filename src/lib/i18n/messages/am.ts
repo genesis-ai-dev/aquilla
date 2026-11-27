@@ -4881,6 +4881,7 @@ export const am: Catalog = {
   "importExport.errors.pdfPassword": "ይህ PDF በይለፍ ቃል የተጠበቀ ነው። የይለፍ ቃሉን አስወግደው እንደገና ያስመጡት።",
   "importExport.errors.pdfUnreadable": "ይህ ፋይል እንደ PDF ሊነበብ አልቻለም።",
   "importExport.errors.pdfReaderFailed": "Aquilla የPDF አንባቢውን መጀመር አልቻለም። ገጹን እንደገና ይጫኑ እና PDFውን እንደገና ያስመጡ።",
+  "importExport.errors.pdfReaderSlow": "የAquilla PDF አንባቢ ለመጫን በጣም ረጅም ጊዜ ወሰደ። ግንኙነትዎን ያረጋግጡ፣ ከዚያ PDFውን እንደገና ያስመጡ።",
   "importExport.errors.pdfServerRefused": "ገጹን እንደገና ይጫኑ፣ ከዚያ ይህን PDF እንደገና ያክሉ።",
   "importExport.errors.pdfTooComplex": "ይህ PDF ለማንበብ በጣም ውስብስብ ነው። ከፈጠረው ፕሮግራም እንደገና ያስቀምጡት፣ ወይም የመጀመሪያውን ሰነድ ያስመጡ።",
   "importExport.notices.basicParserFallback": "Aquilla ይህን የተዋቀረ አቀማመጥ በAI ማረጋገጥ አልቻለም፣ ስለዚህ መሠረታዊ ተንታኙን ተጠቅሟል። ከማስመጣት በፊት ቅድመ እይታውን በጥንቃቄ ይፈትሹ።",

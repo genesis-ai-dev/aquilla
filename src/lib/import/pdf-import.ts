@@ -20,6 +20,7 @@ const REFUSAL: Record<PdfReadErrorCode, MessageKey> = {
   password: "importExport.errors.pdfPassword",
   unreadable: "importExport.errors.pdfUnreadable",
   reader: "importExport.errors.pdfReaderFailed",
+  "reader-timeout": "importExport.errors.pdfReaderSlow",
   "too-complex": "importExport.errors.pdfTooComplex",
 }
 
@@ -39,7 +40,7 @@ export interface PdfImportRead {
   importNotices: ImportPreviewNotice[]
 }
 
-export async function readPdfImport(buffer: ArrayBuffer, options?: { cellUnit?: CellUnit; budgetMs?: number }): Promise<PdfImportRead> {
+export async function readPdfImport(buffer: ArrayBuffer, options?: { cellUnit?: CellUnit; budgetMs?: number; loadTimeoutMs?: number }): Promise<PdfImportRead> {
   let read: Awaited<ReturnType<typeof extractPdfImport>>
   try {
     read = await extractPdfImport(buffer, options)

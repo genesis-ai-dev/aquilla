@@ -90,6 +90,41 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.files[0]).toMatchObject({ cellCount: 4, filledCount: 2 })
   })
 
+  it("reports untouched drafts for one target language and withholds the sum when there are several", async () => {
+    const one = await makeTestDb({
+      lanes: [{ id: "tgtfr001", project_id: "proj-a", role: "target", legacy_tag: "fr" }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, filled_count: 4, ai_drafted_count: 6,
+      }],
+    })
+    const oneToken = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const oneRes = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${oneToken}` },
+    }), envWith(one.db)))!
+    const oneBody = (await oneRes.json()) as { files: Array<{ aiDraftedCount: number | null }> }
+    expect(oneBody.files[0]?.aiDraftedCount).toBe(6)
+    await one.close()
+
+    const many = await makeTestDb({
+      lanes: [
+        { id: "tgtfr001", project_id: "proj-a", role: "target", legacy_tag: "fr" },
+        { id: "tgtsw001", project_id: "proj-a", role: "target", legacy_tag: "sw" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, filled_count: 4, ai_drafted_count: 9,
+      }],
+    })
+    const manyToken = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const manyRes = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${manyToken}` },
+    }), envWith(many.db)))!
+    const manyBody = (await manyRes.json()) as { files: Array<{ aiDraftedCount: number | null }> }
+    expect(manyBody.files[0]?.aiDraftedCount).toBeNull()
+    await many.close()
+  })
+
   it("does not list one file once per tagged lane when there is no blank bridge", async () => {
     const { db } = await makeTestDb({
       lanes: [

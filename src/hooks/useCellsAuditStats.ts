@@ -194,7 +194,7 @@ function mergeStatsRows(
  * whole Bible the full answer was ~9 MB. A worker that predates the flag
  * answers in full, without `sparse: true`, and `complete` stays false.
  */
-async function fetchCellsAuditStats(
+export async function fetchFileAuditStats(
   fileId: string,
   jwt: string,
   lane: string,
@@ -332,7 +332,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
         setIsLoading(false)
         return
       }
-      const { map, complete: sparse } = await fetchCellsAuditStats(fid, token, activeLane)
+      const { map, complete: sparse } = await fetchFileAuditStats(fid, token, activeLane)
       if (generationRef.current !== gen) return
       mergedHeadsRef.current.clear()
       const rendered = renderedRef.current

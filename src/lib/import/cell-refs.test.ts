@@ -38,4 +38,18 @@ describe("file target import cell references", () => {
     expect(fileTargetCellRef(store.getAllSummaries()[0])).not.toHaveProperty("startMs")
     expect(fileTargetCellRef(store.getAllSummaries()[0])).not.toHaveProperty("cueRef")
   })
+
+  // AQU-2544: a translation pairs paragraph by paragraph, so a line's stored
+  // paragraph start has to reach the review from the real store.
+  it("carries a line's paragraph start from the stored metadata", () => {
+    const store = new CellStore()
+    store.setRuntime({ projectId: "p", fileId: "f", username: "alice", requiredValidations: 1, auditStats: new Map() })
+    const row: CellRow = {
+      cellId: "a", side: "source", value: "First.", valueHtml: null, type: "text",
+      canonicalRef: null, anchorCellId: null, eventId: "src-a", sourceEventId: null,
+      lastEditor: "alice", lastEditAt: 1, validated: false, wordCount: 1, metadata: { paragraphStart: true },
+    }
+    store.replaceRows([row, { ...row, cellId: "b", value: "Second.", anchorCellId: "a", eventId: "src-b", metadata: null }])
+    expect(store.getAllSummaries().map(fileTargetCellRef).map((ref) => ref.paragraphStart)).toEqual([true, undefined])
+  })
 })

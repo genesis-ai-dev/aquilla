@@ -590,7 +590,7 @@ export const importExport = defineNamespace({
     "importExport.upload.categoryTranslation": "Translation",
     "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
     "importExport.upload.categoryDocuments": "Documents",
-    "importExport.upload.formatsDocuments": "DOCX, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)",
+    "importExport.upload.formatsDocuments": "DOCX, PDF, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)",
     "importExport.upload.categoryLocalization": "Localization",
     "importExport.upload.formatsLocalization": "PO/POT, Java properties",
     "importExport.upload.categorySubtitles": "Subtitles",
@@ -652,6 +652,16 @@ export const importExport = defineNamespace({
       "preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the " +
       "original file to have been imported after round-trip export support was added — files " +
       "imported before then may lack a stored original (re-import to enable).",
+    // AQU-2551 (question 54): offered where the round-trip Word export is not.
+    "importExport.format.docxLines.label": "New Word document (.docx)",
+    "importExport.format.docxLines.description":
+      "A new Word document written from the lines: headings stay headings, each paragraph's lines " +
+      "are one paragraph, and notes are Word footnotes. The original file's page layout is not kept.",
+    // AQU-2680 (question 54): offered beside "New Word document"; the browser's print window saves the PDF.
+    "importExport.format.pdfPrint.label": "PDF (.pdf)",
+    "importExport.format.pdfPrint.description":
+      "Laid out like the new Word document and opened in your browser's print window, where you " +
+      "choose \"Save as PDF\". Notes are listed at the end.",
     "importExport.format.pptx.label": "PowerPoint (.pptx)",
     "importExport.format.pptx.description":
       "Translations injected back into the original slide deck. Slide/shape/paragraph structure is " +
@@ -750,6 +760,16 @@ export const importExport = defineNamespace({
     "importExport.dialog.episodeConfirmStart": "Start export",
     "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
     "importExport.status.exportCancelled": "Export canceled. Nothing was downloaded.",
+    // AQU-2680: the notes list at the end of the HTML page export and the PDF's print page.
+    "importExport.htmlPage.notes": "Notes",
+    "importExport.htmlPage.backToText": "Back to text",
+    // AQU-2680: the PDF export opens the print window; the person saves the PDF there. Shown before
+    // it opens and still there after it closes (re-check finding 5), so it is worded for both.
+    "importExport.status.pdfChooseSaveAsPdf": "In the print window, choose \"Save as PDF\" to save the file.",
+    // AQU-2680 re-check finding 3: beside the print message, for a browser that cannot print but doesn't say so.
+    "importExport.dialog.pdfOrDownloadWord": "Or download the Word file",
+    // AQU-2680: printing is not available here (another app's built-in browser), so the PDF export saved the Word file.
+    "importExport.status.pdfFellBackToWord": "Printing isn't available here, so this is the Word file. Save it as PDF from Word or Pages, or open this page in Safari or Chrome.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
@@ -1158,6 +1178,18 @@ export const importExport = defineNamespace({
       "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try re-exporting it as MP3 or WAV.",
     "importExport.errors.notAParatextProject":
       "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+    // AQU-2551: a PDF the import refuses (question 56). Never sent to the AI
+    // sandbox, which cannot do better on these.
+    "importExport.errors.pdfScanned": "This PDF is a scanned image. It has no text to import.",
+    "importExport.errors.pdfEmpty": "This PDF has no text.",
+    "importExport.errors.pdfPassword": "This PDF is password-protected. Remove the password and import it again.",
+    "importExport.errors.pdfUnreadable": "This file could not be read as a PDF.",
+    "importExport.errors.pdfReaderFailed": "Aquilla could not start its PDF reader. Reload the page and import the PDF again.",
+    "importExport.errors.pdfReaderSlow": "Aquilla's PDF reader took too long to load. Check your connection, then import the PDF again.",
+    // AQU-2551: the server no longer reads PDFs; the app reads them. Seen only
+    // when a page from before that change sends a PDF to the server.
+    "importExport.errors.pdfServerRefused": "Reload the page, then add this PDF again.",
+    "importExport.errors.pdfTooComplex": "This PDF is too complex to read. Save it again from the program that made it, or import the original document.",
 
     // — Import preview notices: src/lib/import.ts — non-fatal, shown in the
     //   PreviewPanel's "Review before importing" list alongside the row count
@@ -1176,6 +1208,11 @@ export const importExport = defineNamespace({
     "importExport.notices.subtitleCuesUnreadable": plural({
       one: "{count} cue time could not be read, so its wording is not in this import.",
       other: "{count} cue times could not be read, so their wording is not in this import.",
+    }),
+    // AQU-2551: a PDF with some scanned pages imports its text pages.
+    "importExport.notices.pdfImageOnlyPages": plural({
+      one: "Page {pages} is a scanned image with no text, so it is not in this import.",
+      other: "Pages {pages} are scanned images with no text, so they are not in this import.",
     }),
 
     // — Frames written as hundredths (AQU-2197): src/components/import/
@@ -1408,11 +1445,12 @@ export const importExport = defineNamespace({
       "by their source. With none of these, rows match lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.acceptedFormats": "TXT, DOCX, MD, HTML, PPTX, IDML, USFM, USX, PO, XLIFF, TMX, Java " +
+      "properties, CSV, TSV, XLSX, VTT, SRT, or SBV",
     "importExport.fileTarget.backToColumnMapping": "Back to column mapping",
     "importExport.fileTarget.backToSheetList": "Back to sheet list",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
-      "subtitle file. Source text is never changed. You'll review every match " +
+    "importExport.fileTarget.description": "Fills this file's target column from a translation: a text or Word " +
+      "file, USFM, a spreadsheet, subtitles, and more. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
     "importExport.fileTarget.laneLabel": "Fill which language lane",
@@ -1423,6 +1461,8 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
+    "importExport.fileTarget.versesNeedReferences": "The open file's lines are verses, which a translation fills by " +
+      "reference. Import the translation as USFM, or as a spreadsheet with a reference column.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
     // values land as staged proposals behind the approval gate.
@@ -1443,8 +1483,8 @@ export const importExport = defineNamespace({
       one: "{count} row skipped — already matches the current translation.",
       other: "{count} rows skipped — already match the current translation.",
     }),
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
-      "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use a text or Word file, USFM, a " +
+      "spreadsheet, subtitles, or another type listed above.",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -1576,6 +1616,8 @@ export const importExport = defineNamespace({
       "added or left out, every row after it is on the wrong line.",
     "importExport.review.countMismatchCues": "Cues in this file: {rows}. Lines in the open file: {lines}. If a cue was " +
       "added or left out, every cue after it is on the wrong line.",
+    "importExport.review.countMismatchParagraphs": "Paragraphs in this file: {rows}. Paragraphs in the open file: " +
+      "{lines}. If a paragraph was added or left out, every paragraph after it is on the wrong lines.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
@@ -1597,6 +1639,11 @@ export const importExport = defineNamespace({
     "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
     "importExport.review.rowBridgedPill": "Bridged verses",
     "importExport.review.rowBridged": "The uploaded file joins verses {first}–{last} into one translation, but this file keeps them as separate lines. The whole text goes on verse {first}; the rest of the range gets no text of its own.",
+    "importExport.review.rowSharedOutPill": "Shared out",
+    "importExport.review.rowSharedOut": "Shared out over this paragraph's lines: check where the sentences fall",
+    "importExport.review.rowSharedOutShort": "Shared out over this paragraph's lines, but the translation is " +
+      "shorter than its lines, so the last ones stay empty: check it",
+    "importExport.review.rowSameAsSource": "Same as the source",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
@@ -1724,7 +1771,7 @@ export const importExport = defineNamespace({
     // translation review (format, another lane), and a Contributor's empty project.
     "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
     "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
-    "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+    "importExport.translationCheck.formatSourceOnly": "A translation can't be imported from this type of file, so it can only come in as source text.",
     "importExport.translationCheck.otherLane":
       "It says it's in {language}, which this project translates into in another language lane. To " +
       "import it as that translation, switch to that language lane in the editor, then start again " +
@@ -1816,6 +1863,13 @@ export const importExport = defineNamespace({
         placeholders: {
           count:
             "Number of cue timestamp lines that produced no cue; also governs the plural form.",
+        },
+      },
+      "importExport.notices.pdfImageOnlyPages": {
+        description:
+          "Preview notice after importing a PDF in which some pages are scanned images with no text. Their text pages are imported; these pages are not. Count-governed.",
+        placeholders: {
+          pages: "The page numbers, comma-separated (\"2, 5, 9\") — not translated.",
         },
       },
 
@@ -2988,6 +3042,42 @@ export const importExport = defineNamespace({
         description: "Thrown when a selected file has zero bytes.",
         placeholders: { fileName: "Name of the empty file — not translated." },
       },
+      "importExport.errors.pdfScanned": {
+        description: "Shown when a PDF dropped on import holds only scanned page images, so there is no text to import. Aquilla does not read text out of images.",
+      },
+      "importExport.errors.pdfEmpty": {
+        description: "Shown when a PDF dropped on import has no text and no images: an empty document.",
+      },
+      "importExport.errors.pdfPassword": {
+        description: "Shown when a PDF dropped on import needs a password to open. The person removes the password (in the program that made it) and imports it again.",
+      },
+      "importExport.errors.pdfUnreadable": {
+        description: "Shown when a PDF could not be read: damaged, not really a PDF, or broken partway through (any error once it is open).",
+      },
+      "importExport.errors.pdfReaderFailed": {
+        description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",
+      },
+      "importExport.status.pdfFellBackToWord": {
+        description: "Shown after a PDF export when this browser cannot print (for example a browser built into another app, such as Facebook or Instagram), so the app saved the translation as a Word file instead. Word and Pages are the programs; the person opens the file there and saves it as a PDF.",
+      },
+      "importExport.status.pdfChooseSaveAsPdf": {
+        description: "Shown after the person exports as PDF: the browser's print window has opened with the translation laid out as pages. \"Save as PDF\" is the browser's own choice in that window (in Chrome it is under Destination; on a phone it may be under Share), so use the name the browser shows in your language.",
+      },
+      "importExport.format.pdfPrint.label": {
+        description: "An export format: the translation as a PDF file. The app opens the browser's print window and the person saves the PDF from there. Keep \".pdf\" as is.",
+      },
+      "importExport.format.pdfPrint.description": {
+        description: "Explains the PDF export format. \"Save as PDF\" is the browser's own choice in its print window; use the name the browser shows in your language. \"Notes\" are the translation's footnotes, which the PDF lists after the text.",
+      },
+      "importExport.errors.pdfReaderSlow": {
+        description: "Shown when the app's PDF reader was still downloading after two minutes (a slow or weak network), so the PDF was not read yet. The PDF is not at fault; importing it again keeps waiting on the same download.",
+      },
+      "importExport.errors.pdfTooComplex": {
+        description: "Shown when a PDF takes too long to read (a damaged or deliberately crafted file), so the app stopped reading it. Saving it again from the program that made it (Word, InDesign…) usually gives a normal PDF; the person can also import that program's own document instead.",
+      },
+      "importExport.errors.pdfServerRefused": {
+        description: "Shown in the rule import or the Knowledge Base when the server refused a PDF because the app had not read it first (a page left open across an update). Reloading the page fixes it.",
+      },
       "importExport.errors.unsupportedFileTypeSignIn": {
         description: "Thrown when a file's format can't be detected and the user isn't signed in for AI-assisted detection.",
         placeholders: { fileName: "Name of the file — not translated." },
@@ -3903,8 +3993,8 @@ export const importExport = defineNamespace({
         description:
           "Caption in small grey text under the drag-and-drop area of the panel " +
           "that fills in the open file's translations, listing the file kinds it " +
-          "accepts. Only the conjunction joining the format names is " +
-          "translated; the format names themselves stay as they are.",
+          "accepts, named by their usual file endings. Only the conjunction joining " +
+          "the format names is translated; the format names themselves stay as they are.",
       },
       "importExport.fileTarget.backToColumnMapping": {
         description:
@@ -3980,6 +4070,15 @@ export const importExport = defineNamespace({
           "read successfully but contained no verses, so there is nothing to fill " +
           "in. Single short statement of fact.",
       },
+      "importExport.fileTarget.versesNeedReferences": {
+        description:
+          "Error shown in red under the drop area when a document (a text or Word " +
+          "file, for example) is chosen as the translation of a file whose lines " +
+          "are all verses. The first sentence is about the OPEN file, the one being " +
+          "filled: verses are matched by their reference (book, chapter and verse), " +
+          "which such a document doesn't carry. The second names the two kinds of " +
+          "file that do. 'USFM' is a scripture format name; keep it as it is.",
+      },
       "importExport.fileTarget.title": {
         description:
           "Heading of the panel that fills in the translations of the file the user " +
@@ -3995,8 +4094,9 @@ export const importExport = defineNamespace({
         description:
           "Error shown in red under the drop area when the chosen file is of a kind " +
           "this panel cannot read. A short statement followed by an imperative " +
-          "sentence naming the acceptable alternatives. The bracketed file " +
-          "extensions are literal and stay untranslated.",
+          "sentence naming the most common kinds it can read, then pointing to the " +
+          "full list of file types printed above, inside the drop area. 'Word' is " +
+          "the word processor and 'USFM' a scripture format name; keep both as they are.",
       },
       "importExport.paired.applyingTargets": {
         description:
@@ -4559,6 +4659,18 @@ export const importExport = defineNamespace({
           lines: "Number of lines in the open file.",
         },
       },
+      "importExport.review.countMismatchParagraphs": {
+        description:
+          "Amber note above the match-review list when a translated document was " +
+          "paired with the open file paragraph by paragraph and the two have a " +
+          "different number of paragraphs: one paragraph added or left out puts " +
+          "every later paragraph onto the wrong lines. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of paragraphs in the uploaded file.",
+          lines: "Number of paragraphs in the open file.",
+        },
+      },
       "importExport.review.reasonBackwardsTimecode": {
         description:
           "Reason shown next to one entry in the list of uploaded cues that were not " +
@@ -4695,6 +4807,34 @@ export const importExport = defineNamespace({
           first: "The first verse number of the bridged range, such as '27'.",
           last: "The last verse number of the bridged range, such as '28'.",
         },
+      },
+      "importExport.review.rowSharedOutPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list. A paragraph of the uploaded translation came in a different number " +
+          "of pieces than the open file's paragraph has lines, so its text was " +
+          "divided among those lines; this row holds one part. The row stays " +
+          "ticked unless the translation ran short. One or two words, no closing full stop.",
+      },
+      "importExport.review.rowSharedOut": {
+        description:
+          "Note that opens on a click of the 'Shared out' pill: the paragraph's " +
+          "translation was divided among the paragraph's lines, so where one line " +
+          "ends and the next begins may need moving. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowSharedOutShort": {
+        description:
+          "The same note as for 'Shared out', when the paragraph's translation is " +
+          "too short to give every line of the paragraph some text, so the last " +
+          "lines get none and the row starts unticked. True for any script, with or " +
+          "without spaces between words. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowSameAsSource": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list: the uploaded text for this line is exactly the line's original " +
+          "(source) text, so it is probably not a translation. The row starts " +
+          "unticked. A few words, no closing full stop.",
       },
       "importExport.review.rowWrittenAs": {
         description:
@@ -5272,7 +5412,7 @@ export const importExport = defineNamespace({
       },
       "importExport.translationCheck.formatSourceOnly": {
         description:
-          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence; USFM is a file format name, do not translate it.",
+          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence.",
       },
       "importExport.translationCheck.otherLane": {
         description:

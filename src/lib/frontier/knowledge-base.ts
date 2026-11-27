@@ -1,5 +1,9 @@
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { activeLocale, t } from "@/lib/i18n/standalone"
+import { formatFileSize } from "@/lib/i18n/format"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 export type KnowledgeIndexStatus = "pending" | "ready" | "failed"
 
@@ -107,12 +111,40 @@ export class KnowledgeBaseApiError extends Error {
   }
 }
 
+/** A file the app could not read before uploading it (AQU-2551: a PDF is read
+ *  here, not on the server). Its message is the import's own, meant to be shown. */
+export class KnowledgeBaseReadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = "KnowledgeBaseReadError"
+  }
+}
+
+/** A Word file over the DOCX limit, the same sentence whether this client
+ *  caught it or the server did. */
+function docxTooLargeMessage(): string {
+  return t("knowledgeBase.docxTooLarge", { limit: formatFileSize(MAX_DOCX_BYTES, activeLocale()) })
+}
+
+/** Server error codes this client words itself, in place of the server's text. */
+const SERVER_CODE_MESSAGES: Readonly<Record<string, () => string>> = {
+  // AQU-2551: a PDF reached the server without its text (a page from before
+  // PDFs were read in the browser).
+  pdf_text_required: () => t("importExport.errors.pdfServerRefused"),
+  // Checked here before uploading; the server's check is the backstop.
+  docx_too_large: docxTooLargeMessage,
+}
+
 /** Pull `{ error: { message } }` off a non-OK response, if it has one. The body
  *  may be empty or not JSON at all (a gateway error page), which is not itself
  *  worth failing on — the status alone still produces a usable error. */
 async function readServerMessage(response: Response): Promise<string | undefined> {
   try {
-    const body = (await response.clone().json()) as { error?: { message?: unknown } }
+    const body = (await response.clone().json()) as { error?: { code?: unknown; message?: unknown } }
+    const code = body.error?.code
+    if (typeof code === "string" && Object.prototype.hasOwnProperty.call(SERVER_CODE_MESSAGES, code)) {
+      return SERVER_CODE_MESSAGES[code]()
+    }
     const message = body.error?.message
     return typeof message === "string" && message.trim() ? message : undefined
   } catch {
@@ -184,13 +216,36 @@ export async function uploadKnowledgeDocument(
   jwt: string,
   file: File,
 ): Promise<KnowledgeUpload> {
+  if (file.name.toLowerCase().endsWith(".docx") && file.size > MAX_DOCX_BYTES) {
+    throw new KnowledgeBaseReadError(docxTooLargeMessage())
+  }
   const response = await request(scope, jwt, "", {
     method: "POST",
     headers: { "x-doc-name": encodeURIComponent(file.name) },
-    body: file,
+    body: file.name.toLowerCase().endsWith(".pdf") ? await pdfUploadBody(file) : file,
   })
   const body = (await response.json()) as { doc: KnowledgeDocument; textTruncated?: boolean }
   return { doc: body.doc, textTruncated: body.textTruncated === true }
+}
+
+/** AQU-2551 (review findings 1–3): the server no longer parses PDFs. A PDF is
+ *  read here with the import's reader, and the upload carries the original,
+ *  untouched, beside its text. */
+async function pdfUploadBody(file: File): Promise<FormData> {
+  const { readPdfText } = await import("@/lib/import/pdf-import")
+  let text: string
+  try {
+    text = await readPdfText(await file.arrayBuffer())
+  } catch (err) {
+    throw new KnowledgeBaseReadError(err instanceof Error ? err.message : String(err), { cause: err })
+  }
+  const form = new FormData()
+  form.append("file", file, file.name)
+  // Only the first MAX_KB_TEXT_CHARS are kept. The one character past the cap
+  // lets the server see the text was longer and mark it truncated; without
+  // the cut, a huge PDF's text would push the form past its byte limit.
+  form.append("text", text.slice(0, MAX_KB_TEXT_CHARS + 1))
+  return form
 }
 
 export async function deleteKnowledgeDocument(

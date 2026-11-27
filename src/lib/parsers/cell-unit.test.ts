@@ -147,10 +147,66 @@ describe("plaintext — cellUnit: paragraph", () => {
     expect(cells.map((cell) => cell.original)).toEqual([LONG_PARAGRAPH, "Second block."])
   })
 
+  // AQU-2544, question 51: a blank line at the very start or end of the file
+  // separates nothing. One extra Enter at the end used to flip a file written
+  // one line per paragraph into a single paragraph. The cost, the one
+  // question 51 accepts: a single hard-wrapped paragraph whose only blank line
+  // is at the end comes in one line per wrapped line, as it does without one.
+  it("ignores a blank line at the very start or end of the file", () => {
+    for (const text of ["One.\nTwo.\nThree.\n\n", "\n\nOne.\nTwo.\nThree.\n", "One.\r\nTwo.\r\nThree.\r\n \r\n"]) {
+      expect(extractPlaintextStrings(text, { cellUnit: "paragraph" }).map((cell) => cell.original))
+        .toEqual(["One.", "Two.", "Three."])
+    }
+    const wrapped = "This is one paragraph that was\nhard-wrapped across\nthree lines.\n\n"
+    expect(extractPlaintextStrings(wrapped, { cellUnit: "paragraph" }).map((cell) => cell.original))
+      .toEqual(["This is one paragraph that was", "hard-wrapped across", "three lines."])
+  })
+
+  it("still rejoins the wrapped lines of real blank-line paragraphs", () => {
+    expect(extractPlaintextStrings("A wrapped\nline.\n\nB wrapped\ntoo.\n\n", { cellUnit: "paragraph" }).map((cell) => cell.original))
+      .toEqual(["A wrapped line.", "B wrapped too."])
+  })
+
   it("leaves sentence mode (the default) splitting as before", () => {
     const text = [LONG_PARAGRAPH, "Second block."].join("\n")
     expect(extractPlaintextStrings(text).length).toBeGreaterThan(2)
     expect(extractPlaintextStrings(text, {}).length).toBeGreaterThan(2)
+  })
+})
+
+// AQU-2544, question 51 for Sam: on the Sentence setting every line of a .txt
+// is its own paragraph, blank lines or not. Joined into 200-character cells, a
+// file written one sentence per line could never line up with its
+// translation written the same way.
+describe("plaintext — every line its own paragraph, on the Sentence setting", () => {
+  const sentence = (text: string) => extractPlaintextStrings(text)
+
+  it("makes each line its own paragraph", () => {
+    const cells = sentence("In the beginning.\nAnd the earth.\nAnd God said.\n")
+    expect(cells.map((cell) => cell.original)).toEqual(["In the beginning.", "And the earth.", "And God said."])
+    expect(cells.every((cell) => cell.paragraphStart)).toBe(true)
+    expect(new Set(cells.map((cell) => cell.group)).size).toBe(3)
+  })
+
+  it("skips blank lines, wherever they are", () => {
+    for (const text of ["Title\n\nOne.\nTwo.\n", "\nTitle\nOne.\nTwo.\n\n\n", "Title\r\n \r\nOne.\r\nTwo."]) {
+      expect(sentence(text).map((cell) => cell.original)).toEqual(["Title", "One.", "Two."])
+    }
+  })
+
+  it("still cuts a long line into sentences inside its own paragraph", () => {
+    const cells = sentence(`${LONG_PARAGRAPH}\n\nSecond block.`)
+    const long = cells.slice(0, -1)
+    expect(long.length).toBeGreaterThan(1)
+    expect(new Set(long.map((cell) => cell.group)).size).toBe(1)
+    expect(long.map((cell) => cell.original).join(" ")).toBe(LONG_PARAGRAPH)
+    expect(cells.at(-1)).toMatchObject({ original: "Second block.", paragraphStart: true })
+  })
+
+  it("makes hard-wrapped text one line per wrapped line", () => {
+    const wrapped = "This is one paragraph that was\nhard-wrapped across\nthree lines.\n\nAnd a second.\n"
+    expect(sentence(wrapped).map((cell) => cell.original))
+      .toEqual(["This is one paragraph that was", "hard-wrapped across", "three lines.", "And a second."])
   })
 })
 

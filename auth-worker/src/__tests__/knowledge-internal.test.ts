@@ -169,6 +169,18 @@ describe("POST /api/v2/internal/projects/:projectId/knowledge", () => {
     expect(text?.extracted_text).toContain("Prefer active voice.")
   })
 
+  // AQU-2551 review findings 1–3: the server no longer reads PDFs, and the
+  // Agent API has no browser to read one first, so it refuses them plainly.
+  it("refuses a PDF, saying to send its text instead", async () => {
+    stubIndexingFetch()
+    const res = await internalPost(new TextEncoder().encode("%PDF-1.7\n%%EOF\n"), { docName: "bible.pdf" })
+    expect(res.status).toBe(415)
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.message).toMatch(/can't be read through the API/)
+    expect(body.error.message).toMatch(/\.txt or \.md/)
+    expect(bucket.store.size).toBe(0)
+  })
+
   it("passes the upstream extension refusal through as validation_failed", async () => {
     stubIndexingFetch()
     const res = await internalPost("binary", { docName: "bible.usfm" })

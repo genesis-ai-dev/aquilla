@@ -116,6 +116,13 @@ interface RecipeMetadata {
 const SCRIPTURE_VERSE_RE = /^([1-3]?[A-Z]{2,3})\s+(\d+):(\d+[a-z]?(?:-\d+[a-z]?)?)$/i
 const SCRIPTURE_STRUCTURE_RE = /^([1-3]?[A-Z]{2,3})(?:\s+(\d+))?:([a-z]+\d*):(\d+)$/i
 
+/** True for a scripture address a line is stored with: a verse (`GEN 1:4`) or
+ *  a heading's place among them (`GEN 1:s1:1`). Lines of other files store
+ *  none (see `canonicalRef` below). */
+export function isScriptureAddress(ref: string | null | undefined): boolean {
+  return !!ref && (SCRIPTURE_VERSE_RE.test(ref) || SCRIPTURE_STRUCTURE_RE.test(ref))
+}
+
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
@@ -357,6 +364,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "srt":
     case "sbv":
       return "content-only"
+    case "pdf":
     case "audio":
     case "video":
       return "preserved-only"

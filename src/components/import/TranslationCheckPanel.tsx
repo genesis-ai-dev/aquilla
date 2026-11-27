@@ -9,7 +9,7 @@
  *    its translation, update that file's source text, or import it separately.
  *    Update is offered only when that file's book is known rather than
  *    guessed from its name, and is never the suggested (first) answer.
- *  - A file the translation review can't read (a .usx), or one in another
+ *  - A file the translation review can't read (a JSON file), or one in another
  *    lane's language, can only come in as source text; the question then
  *    says so instead of asking whether it is a translation.
  *  - One file, its book in several files: choose the file it translates, or
@@ -69,8 +69,8 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
   // another lane's language must not be handed over to fill this one
   // (AQU-1365 review).
   const otherLane = language !== null && !language.active
-  // The review reads USFM, spreadsheets and subtitles; another format can
-  // only be imported as source text.
+  // A format the review can't read (a JSON file, an unknown ending) can only be
+  // imported as source text.
   const readable = signal !== null && isFileTargetFileName(signal.fileName)
   const canHandOff = canImportTranslation && readable && !otherLane
   const languageLine = !language

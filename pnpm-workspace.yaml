@@ -28,3 +28,8 @@ onlyBuiltDependencies:
 # onnxruntime-node directly and move it back to onlyBuiltDependencies.
 ignoredBuiltDependencies:
   - onnxruntime-node
+
+# AQU-2551: pdfjs-dist lists the native @napi-rs/canvas as optional; it is only
+# for rendering pages in Node. The browser reader never needs it.
+ignoredOptionalDependencies:
+  - '@napi-rs/canvas'

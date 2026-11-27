@@ -49,7 +49,9 @@ import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { formatDateTime, formatNumber } from "@/lib/i18n/format"
+import { formatDateTime, formatFileSize, formatNumber } from "@/lib/i18n/format"
+import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
@@ -61,6 +63,7 @@ import {
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
   uploadKnowledgeDocument,
+  KnowledgeBaseReadError,
   type KnowledgeDocument,
   type KnowledgeScope,
 } from "@/lib/frontier/knowledge-base"
@@ -79,11 +82,6 @@ interface ViewerState {
   failed: boolean
 }
 
-function formatBytes(bytes: number, locale: string): string {
-  if (bytes < 1024) return `${formatNumber(bytes, locale)} B`
-  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, locale, { maximumFractionDigits: 1 })} KB`
-  return `${formatNumber(bytes / (1024 * 1024), locale, { maximumFractionDigits: 1 })} MB`
-}
 
 /** A stalled doc reads as a failure, because that is what it is — the job that
  *  owned it is gone (AQU-1376). A doc indexed without its summaries is not a
@@ -265,7 +263,10 @@ export function KnowledgeBaseSurface({
       // actively misleading for a rejection that no retry can clear (a .docx
       // whose word/document.xml is too bloated to read) — the reason names the
       // fix, so the uploader is not left guessing.
-      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage : undefined
+      // AQU-2551: a PDF the app could not read says why, in the import's words.
+      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage
+        : err instanceof KnowledgeBaseReadError ? err.message
+        : undefined
       toast.add({
         type: "error",
         priority: "high",
@@ -388,7 +389,12 @@ export function KnowledgeBaseSurface({
         ) : null}
 
         {canManage ? (
-          <p className="text-xs text-muted-foreground">{t("knowledgeBase.acceptedFormats")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("knowledgeBase.acceptedFormats", {
+              limit: formatFileSize(MAX_KB_ORIGINAL_BYTES, locale),
+              docxLimit: formatFileSize(MAX_DOCX_BYTES, locale),
+            })}
+          </p>
         ) : (
           <p className="text-xs text-muted-foreground">{t("common.readOnly")}</p>
         )}
@@ -457,7 +463,7 @@ export function KnowledgeBaseSurface({
                       <span className="truncate">{doc.name}</span>
                     </CardTitle>
                     <CardDescription>
-                      {doc.createdBy} · <DateTooltip value={doc.createdAt} label={t("common.date.created")} /> · {formatBytes(doc.sizeBytes, locale)}
+                      {doc.createdBy} · <DateTooltip value={doc.createdAt} label={t("common.date.created")} /> · {formatFileSize(doc.sizeBytes, locale)}
                     </CardDescription>
                     <CardAction>
                       <div className="flex items-center gap-2">

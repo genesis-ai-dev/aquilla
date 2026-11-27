@@ -15,9 +15,9 @@ import {
   roleWithoutUnelevatedAdmin,
   orgLevelWithoutUnelevatedAdmin,
 } from "../services/elevation-gate"
-import { DocumentExtractionError, extractTextFromDocx, extractPdfText } from "./parse-document"
+import { DocumentExtractionError, extractTextFromDocx, startsAsPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
-import { readBytesWithLimit } from "../../../shared/http-body-limit"
+import { declaresOversizeBody, readBytesWithLimit } from "../../../shared/http-body-limit"
 import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
@@ -34,11 +34,11 @@ import {
   kbExtension,
   kbR2Key,
   MAX_KB_ORIGINAL_BYTES,
-  MAX_KB_EXTRACT_INPUT_BYTES,
   MAX_KB_TEXT_CHARS,
   type KnowledgeScopeRef,
   type KnowledgeDocMeta,
 } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
 
 type ErrorCode =
   | "not_found"
@@ -46,6 +46,11 @@ type ErrorCode =
   | "validation_failed"
   | "storage_unavailable"
   | "job_failed"
+  // AQU-2551: a PDF arrived without the text the app reads from it.
+  | "pdf_text_required"
+  // A DOCX over MAX_DOCX_BYTES. The app checks the size before uploading and
+  // words this code itself; the message is for other callers.
+  | "docx_too_large"
 
 function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode) {
   return { body: { error: { code, message } }, status } as const
@@ -101,29 +106,29 @@ type ExtractResult =
       documentXmlBytes?: number
     }
 
-function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
+/** `pdfText`: the text the app read from a PDF in the browser (AQU-2551). The
+ *  server never reads a PDF itself; it checks that the original is one. */
+function extractText(fileName: string, bytes: Uint8Array, pdfText: string | null): ExtractResult {
   const ext = kbExtension(fileName)
   let text: string
-  let pdfTruncated = false
   if (ext === ".md" || ext === ".txt") {
     text = new TextDecoder().decode(bytes)
-  } else if (ext === ".docx" || ext === ".pdf") {
-    if (bytes.byteLength > MAX_KB_EXTRACT_INPUT_BYTES) {
+  } else if (ext === ".pdf") {
+    if (!startsAsPdf(bytes)) {
+      return { ok: false, code: "validation_failed", message: "the file is not a PDF", status: 422 }
+    }
+    text = pdfText ?? ""
+  } else if (ext === ".docx") {
+    if (bytes.byteLength > MAX_DOCX_BYTES) {
       return {
         ok: false,
-        code: "validation_failed",
-        message: `file exceeds the ${MAX_KB_EXTRACT_INPUT_BYTES}-byte extraction limit`,
+        code: "docx_too_large",
+        message: `file exceeds the ${MAX_DOCX_BYTES}-byte extraction limit`,
         status: 400,
       }
     }
     try {
-      if (ext === ".docx") {
-        text = extractTextFromDocx(bytes)
-      } else {
-        const pdf = extractPdfText(bytes)
-        text = pdf.text
-        pdfTruncated = pdf.truncated
-      }
+      text = extractTextFromDocx(bytes)
     } catch (err) {
       // AQU-1499: this used to be a bare `catch` returning a flat "could not
       // extract text", so an uploader whose file failed for a knowable,
@@ -158,7 +163,7 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
   return {
     ok: true,
     text: text.slice(0, MAX_KB_TEXT_CHARS),
-    truncated: pdfTruncated || text.length > MAX_KB_TEXT_CHARS,
+    truncated: text.length > MAX_KB_TEXT_CHARS,
   }
 }
 
@@ -311,6 +316,86 @@ async function restartIndexing(c: Context<AuthHonoEnv>, docId: string): Promise<
   return c.json({ ok: true }, 202)
 }
 
+/** The multipart envelope of a PDF upload: the original (up to its own cap)
+ *  plus its text (up to MAX_KB_TEXT_CHARS, at most 3 UTF-8 bytes a UTF-16
+ *  unit), with room for the part headers. */
+export const MAX_KB_PDF_FORM_BYTES = MAX_KB_ORIGINAL_BYTES + 3 * MAX_KB_TEXT_CHARS + 64 * 1024
+
+const PDF_TEXT_REQUIRED: Record<"app" | "api", string> = {
+  app: "PDFs are read in the app before they are uploaded: reload the page and upload this PDF again.",
+  api: "PDFs can't be read through the API: send the document's text as a .txt or .md file, or upload the PDF in the app.",
+}
+
+/** AQU-2551 re-review finding 6: a PDF form of up to ~31 MB was held three
+ *  times at once (the raw body, the parsed form, the file's buffer), about
+ *  80–90 MB of a Worker's 128 MB. Now: a declared Content-Length over the cap
+ *  is refused before a byte is read; the form is parsed once, straight from
+ *  the request, through a byte counter that stops it past the cap (a body
+ *  with no declared length); and only the file's one buffer is kept. */
+export async function readPdfForm(
+  headers: Headers,
+  body: ReadableStream<Uint8Array> | null,
+): Promise<{ ok: true; bytes: Uint8Array; text: string } | { ok: false; reason: "too-large" | "bad-form" | "no-text" }> {
+  if (declaresOversizeBody(headers, MAX_KB_PDF_FORM_BYTES)) return { ok: false, reason: "too-large" }
+  let seen = 0
+  let tooLarge = false
+  const capped = body?.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, ctrl) {
+      seen += chunk.byteLength
+      if (seen > MAX_KB_PDF_FORM_BYTES) {
+        tooLarge = true
+        ctrl.error(new Error("form exceeds its limit"))
+        return
+      }
+      ctrl.enqueue(chunk)
+    },
+  }))
+  let file: ReturnType<FormData["get"]>
+  let text: ReturnType<FormData["get"]>
+  try {
+    const form = await new Response(capped ?? null, { headers: { "content-type": headers.get("content-type") ?? "" } }).formData()
+    file = form.get("file")
+    text = form.get("text")
+  } catch {
+    return { ok: false, reason: tooLarge ? "too-large" : "bad-form" }
+  }
+  if (!file || typeof file === "string") return { ok: false, reason: "bad-form" }
+  if (typeof text !== "string") return { ok: false, reason: "no-text" }
+  const bytes = new Uint8Array(await (file as File).arrayBuffer())
+  file = null
+  // A form sends its text's line ends as CRLF; the text is stored with LF.
+  // Only the first MAX_KB_TEXT_CHARS + 1 characters are kept (the one past
+  // the cap tells the route the text was cut), so the line-end pass runs
+  // over no more than that. A CRLF shrinks to one character, so a raw prefix
+  // twice that long always holds them, whatever its line ends.
+  const kept = MAX_KB_TEXT_CHARS + 1
+  return { ok: true, bytes, text: text.slice(0, 2 * kept).replace(/\r\n?/g, "\n").slice(0, kept) }
+}
+
+/** AQU-2551 (review findings 1–3): the server no longer reads PDFs. The app
+ *  reads one in the browser and posts a form with the original (`file`) and
+ *  its text (`text`); the original is stored as it came. A PDF sent any other
+ *  way (raw bytes from an old page, or the Agent API) is refused with
+ *  `pdf_text_required`. */
+async function readPdfUpload(
+  c: Context<AuthHonoEnv>,
+  via: "app" | "api",
+): Promise<
+  | { ok: true; bytes: Uint8Array; text: string }
+  | { ok: false; body: ReturnType<typeof errorJson>["body"]; status: ContentfulStatusCode }
+> {
+  const refused = () => errorJson("pdf_text_required", PDF_TEXT_REQUIRED[via], 415)
+  const type = c.req.header("content-type") ?? ""
+  if (via === "api" || !type.toLowerCase().startsWith("multipart/form-data")) return { ok: false, ...refused() }
+  const read = await readPdfForm(c.req.raw.headers, c.req.raw.body)
+  if (read.ok) return read
+  if (read.reason === "too-large") {
+    return { ok: false, ...errorJson("validation_failed", `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`, 400) }
+  }
+  if (read.reason === "no-text") return { ok: false, ...refused() }
+  return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
+}
+
 /** The one upload implementation: extension allowlist → size cap → text
  *  extraction → R2 put → row insert → async indexing. Exported so the
  *  server-to-server route the Agent API bridges through (routes/
@@ -339,6 +424,8 @@ export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,
+  /** "api": the Agent API, which has no browser to read a PDF first. */
+  via: "app" | "api" = "app",
 ): Promise<Response> {
   const bucket = c.env.SNAPSHOTS
   if (!bucket) {
@@ -367,11 +454,34 @@ export async function handleUpload(
   // get them rendered as HTML for any viewer who opens the original. Derive it instead
   // from the extension we already validated above.
   const contentType = kbContentTypeForExtension(fileName)
-  // AQU-2594: read through the cap (AQU-1858's reader), not whole and then
-  // measured: a chunked body could otherwise hold the platform's 100 MB+
-  // request limit in a 128 MB isolate.
-  const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_ORIGINAL_BYTES)
-  if (!upload.ok) {
+  let bytes: Uint8Array
+  let pdfText: string | null = null
+  if (kbExtension(fileName) === ".pdf") {
+    const read = await readPdfUpload(c, via)
+    if (!read.ok) return c.json(read.body, read.status)
+    bytes = read.bytes
+    pdfText = read.text
+  } else {
+    // AQU-2594: read through the cap (AQU-1858's reader), not whole and then
+    // measured: a chunked body could otherwise hold the platform's 100 MB+
+    // request limit in a 128 MB isolate.
+    const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_ORIGINAL_BYTES)
+    if (!upload.ok) {
+      const { body, status } = errorJson(
+        "validation_failed",
+        `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`,
+        400,
+      )
+      return c.json(body, status)
+    }
+    bytes = upload.bytes
+  }
+  if (bytes.byteLength === 0) {
+    const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
+    return c.json(body, status)
+  }
+  // A PDF's form is capped at MAX_KB_PDF_FORM_BYTES; its original has its own cap.
+  if (bytes.byteLength > MAX_KB_ORIGINAL_BYTES) {
     const { body, status } = errorJson(
       "validation_failed",
       `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`,
@@ -379,13 +489,8 @@ export async function handleUpload(
     )
     return c.json(body, status)
   }
-  const bytes = upload.bytes
-  if (bytes.byteLength === 0) {
-    const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
-    return c.json(body, status)
-  }
 
-  const extracted = extractText(fileName, bytes)
+  const extracted = extractText(fileName, bytes, pdfText)
   if (!extracted.ok) {
     // AQU-1499: count the rejections. Partners hit this on their first
     // knowledge-base upload and work around it privately (re-saving the file),

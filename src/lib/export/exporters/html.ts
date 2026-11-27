@@ -597,7 +597,7 @@ export function htmlExportFooter(opts: HtmlExportOptions, untranslated: number):
 /** A primary language subtag with optional subtags, and not the "undetermined" tag. */
 const LANGUAGE_TAG_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i
 
-function isLanguageTag(value: string | null | undefined): value is string {
+export function isLanguageTag(value: string | null | undefined): value is string {
   return !!value && value.toLowerCase() !== "und" && LANGUAGE_TAG_RE.test(value)
 }
 

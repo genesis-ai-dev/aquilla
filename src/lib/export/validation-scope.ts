@@ -81,6 +81,8 @@ export const DEFAULT_EXPORT_CONTENT_MODE: ExportContentMode = "current"
 interface ScopableCell {
   status: "empty" | "unvalidated" | "validated"
   hidden?: boolean
+  /** Set on the line that starts an imported paragraph. */
+  paragraphStart?: boolean
 }
 
 /** True when this cell meets the project's validation threshold (AQU-279). */
@@ -113,13 +115,39 @@ export function isHiddenFromExport(cell: ScopableCell): boolean {
 export function scopeCellsForExport<T extends ScopableCell>(
   cells: T[],
   mode: ExportContentMode,
+  /** AQU-2551 re-review finding 7: the dialog's own filters (voice, chapter)
+   *  drop lines here, through the same paragraph-start carry, never before. */
+  alsoKeep?: (cell: T) => boolean,
 ): T[] {
   // AQU-1423: hidden cells go in BOTH modes — parking a cell is not a choice
   // about this download. Checked first so the identity return below still holds
   // for the overwhelmingly common file that has nothing parked.
   const hidden = cells.some(isHiddenFromExport)
-  if (mode === "current") return hidden ? cells.filter((c) => !isHiddenFromExport(c)) : cells
-  return cells.filter((c) => isValidatedForExport(c) && !isHiddenFromExport(c))
+  if (mode === "current" && !hidden && !alsoKeep) return cells
+  const scoped = (c: T) => !isHiddenFromExport(c) && (mode === "current" || isValidatedForExport(c))
+  return keepParagraphStarts(cells, alsoKeep ? (c) => scoped(c) && alsoKeep(c) : scoped)
+}
+
+/**
+ * The cells `keep` accepts, in order. AQU-2551 review finding 9: a dropped
+ * line's "paragraph starts here" mark passes to the next kept line, so a
+ * paragraph whose first line is hidden, or left out by validated-only, does
+ * not run into the paragraph before it in the exports that lay out paragraphs
+ * from these marks (New Word document, HTML page). The caller's cells are
+ * not changed: a line that takes the mark is a copy.
+ */
+function keepParagraphStarts<T extends ScopableCell>(cells: T[], keep: (cell: T) => boolean): T[] {
+  const out: T[] = []
+  let carry = false
+  for (const c of cells) {
+    if (!keep(c)) {
+      carry ||= c.paragraphStart === true
+      continue
+    }
+    out.push(carry && c.paragraphStart !== true ? { ...c, paragraphStart: true } : c)
+    carry = false
+  }
+  return out
 }
 
 /**

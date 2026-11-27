@@ -150,7 +150,7 @@ const KNOWN_CONTEXT_HEADERS = new Set([
  * bilingual field keyword. A pure positional fallback would misclassify
  * real data rows (e.g. "Hello,Hola") as headers.
  */
-function isHeaderRow(row: string[]): boolean {
+export function isHeaderRow(row: string[]): boolean {
   if (row.length < 2) return false
   const lc = row.map((c) => c.trim().toLowerCase())
   return lc.some(

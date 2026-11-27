@@ -24,6 +24,8 @@
 
 import type { UsfmInlineMark, UsfmNotePart } from "@/lib/parsers/usfm-display"
 import { segmentUsfmForDisplay, TABLE_ROLE_PREFIX } from "@/lib/parsers/usfm-display"
+import { t } from "@/lib/i18n/standalone"
+import { detectStrongTextDirection } from "@/lib/text-direction"
 
 /** One inline piece of a rendered line. */
 export type InlineRun =
@@ -376,16 +378,22 @@ export function createNoteCollector(sectionId: string): NoteCollector {
     },
     listHtml() {
       if (entries.length === 0) return ""
+      // AQU-2680 re-check finding 2: the app's words, not fixed English (the
+      // page has no catalog in the target language), and each note in its own
+      // direction, so an Arabic or Hebrew note reads right to left.
+      const title = escapeHtml(t("importExport.htmlPage.notes"))
+      const back = escapeHtml(t("importExport.htmlPage.backToText"))
       const items = entries.map((entry) => {
         const kind = entry.note.noteKind === "xref" ? "xref" : "footnote"
         const ref = entry.note.ref ? `<span class="note-ref">${escapeHtml(entry.note.ref)}</span> ` : ""
+        const dir = detectStrongTextDirection(entry.note.text) === "rtl" ? ` dir="rtl"` : ""
         return (
-          `<li class="note ${kind}" id="${entry.id}">` +
-          `<a class="note-back" href="#${entry.id}-ref" aria-label="Back to text">${escapeHtml(entry.label)}</a> ` +
+          `<li class="note ${kind}" id="${entry.id}"${dir}>` +
+          `<a class="note-back" href="#${entry.id}-ref" aria-label="${back}">${escapeHtml(entry.label)}</a> ` +
           `${ref}<span class="note-text">${noteTextHtml(entry.note)}</span></li>`
         )
       })
-      return `<aside class="notes" aria-label="Notes">\n<h3 class="notes-title">Notes</h3>\n<ul>\n${items.join("\n")}\n</ul>\n</aside>`
+      return `<aside class="notes" aria-label="${title}">\n<h3 class="notes-title">${title}</h3>\n<ul>\n${items.join("\n")}\n</ul>\n</aside>`
     },
   }
 }

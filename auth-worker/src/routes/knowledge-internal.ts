@@ -6,7 +6,8 @@
 //
 // Why the Agent API's knowledge routes land here rather than being reimplemented
 // in sync-worker: the knowledge base is auth-worker's end to end — the extension
-// allowlist and the docx/pdf text extraction (routes/parse-document.ts), the
+// allowlist and the docx text extraction (routes/parse-document.ts; PDFs are
+// read in the app's browser and refused here, AQU-2551), the
 // PageIndex indexing job that holds the OpenRouter key (lib/knowledge/
 // index-doc.ts), and the `kb/…` R2 layout. A second uploader in sync-worker
 // would fork extraction and leave every agent-uploaded doc at index_status
@@ -94,7 +95,8 @@ async function gate(
 knowledgeInternal.post("/projects/:projectId/knowledge", async (c) => {
   const gated = await gate(c, ROLE.PROJECT_LEAD)
   if (!gated.ok) return gated.res
-  return handleUpload(c, { projectId: gated.projectId }, gated.createdBy)
+  // AQU-2551: "api" — no browser here to read a PDF first, so one is refused.
+  return handleUpload(c, { projectId: gated.projectId }, gated.createdBy, "api")
 })
 
 knowledgeInternal.get("/projects/:projectId/knowledge", async (c) => {

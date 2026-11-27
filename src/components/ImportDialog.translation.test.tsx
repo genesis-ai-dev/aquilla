@@ -57,7 +57,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }))
 
 import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
-import { applyEBibleTargetImport, prepareEBibleTargetImport } from "@/lib/import"
+import { applyEBibleTargetImport, prepareEBibleTargetImport, prepareImportFile } from "@/lib/import"
 import { stageTargetImportAsProposals } from "@/lib/import-file-target-proposals"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
@@ -357,11 +357,37 @@ describe("AQU-1365: importing a translation", () => {
     expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
   })
 
-  it("refuses a file type the review can't read", async () => {
+  it("refuses a file type the review can't read, and names what it can", async () => {
     renderDialog()
     await chooseTranslation()
-    await dropFiles([new File(["x"], "notes.docx")])
-    expect(await screen.findByText(/unsupported file type/i)).toBeInTheDocument()
+    await dropFiles([new File(["{}"], "strings.json")])
+    expect(await screen.findByText(
+      "Unsupported file type. Use a text or Word file, USFM, a spreadsheet, subtitles, or another type listed above.",
+    )).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+
+  // AQU-2544: "txt is not supported as import into target" (Sam). A dropped
+  // .txt reaches the review and fills the chosen file's lines in order.
+  it("takes a .txt, one translation per line, into the chosen file's lines, cut as the project cuts", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/import")>("@/lib/import")
+    vi.mocked(prepareImportFile).mockImplementation(actual.prepareImportFile)
+    // A story imported on the Paragraph setting: one paragraph per line.
+    const story = ["The boat", "The storm"].map((original, i) => ({
+      cellId: `story-${i + 1}`, fileId: "story", sourceEventId: `se-story-${i + 1}`, targetEventId: undefined,
+      translated: "", original, paragraphStart: true,
+    }))
+    renderDialog({
+      cellUnit: "paragraph",
+      translation: host({ files: [...FILES, { id: "story", name: "Story", type: "txt" }], activeFileId: "story", activeFileCells: story }),
+    })
+    await chooseTranslation()
+    await dropFiles([new File(["Кораб\nДавыл\n"], "story-tatar.txt")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("2 matched")).toBeInTheDocument()
+    const row = screen.getByText("Давыл").closest("[data-review-cell]")
+    expect(row).toHaveAttribute("data-review-cell", "story-2")
+    expect(screen.getByRole("button", { name: /import 2 cells/i })).toBeInTheDocument()
   })
 
   it("goes back from the review to the file choice, keeping the file and the upload", async () => {

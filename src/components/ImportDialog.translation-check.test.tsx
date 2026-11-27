@@ -362,19 +362,35 @@ describe("AQU-1365: Is this a translation?", () => {
   // AQU-1365 review: when the upload can't go to the translation review, the
   // screen must not ask "is it a translation?" with no button to say yes, and
   // must never highlight the in-place source update.
-  it("doesn't ask whether a .usx is a translation, since only source answers exist for it", async () => {
+  it("doesn't ask whether a file the review can't read is a translation", async () => {
     renderDialog()
-    await upload([usfm(JON_TATAR.replace(" Siberian Tatar (test)", ""), "JON-tatar.usx")])
+    // An ending the import knows only by reading the file's text.
+    await upload([usfm(JON_TATAR.replace(" Siberian Tatar (test)", ""), "JON-tatar.ptx")])
     const check = await screen.findByTestId("translation-check")
-    expect(check).toHaveTextContent("JON-tatar.usx is for Jonah, and Jonah is already in this project.")
+    expect(check).toHaveTextContent("JON-tatar.ptx is for Jonah, and Jonah is already in this project.")
     expect(check).toHaveTextContent(
-      "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+      "A translation can't be imported from this type of file, so it can only come in as source text.",
     )
     expect(check).not.toHaveTextContent("What is it?")
     expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-separate", "translation-check-update"])
     expect(cards()[0]).toHaveTextContent(/^A separate source text/)
     expect(cards()[1]).toHaveTextContent(/^A new version of Jonah's source text/)
   })
+
+  // AQU-2544: the review picks its reader by what a file holds, so a .usx, and
+  // USFM saved as .txt, go to the USFM reader. The check offers them as a
+  // translation, and the answer leads to the review, not a dead end.
+  for (const name of ["JON-tatar.usx", "JON-tatar.txt"]) {
+    it(`offers ${name.slice(name.lastIndexOf("."))} as a translation and reviews it by verse`, async () => {
+      renderDialog()
+      await upload([usfm(JON_TATAR.replace(" Siberian Tatar (test)", ""), name)])
+      const check = await screen.findByTestId("translation-check")
+      expect(check).toHaveTextContent("What is it?")
+      await answer(/^A translation of Jonah/)
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    })
+  }
 
   it("offers no in-place update of a file whose book is only guessed from its name", async () => {
     renderDialog({ translation: host({ files: [{ id: "jud", name: "Judgment notes", type: "usfm" }, ...FILES] }) })

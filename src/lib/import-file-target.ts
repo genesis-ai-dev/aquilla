@@ -1,6 +1,8 @@
 // File-scoped target import: populate the open file's target column from a
-// USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (VTT — AQU-1142;
-// SRT/SBV — AQU-1144). Two match modes:
+// USFM file, a spreadsheet (CSV/TSV/XLSX), a subtitle file (VTT — AQU-1142;
+// SRT/SBV — AQU-1144), or any other file the source import reads, read by the
+// source import's own parsers (AQU-2544, `parsedLinesToTargetRows`). Two
+// match modes:
 //
 //   - by ref:   incoming rows carry canonical refs ("GEN 1:1") matched against
 //               the file's cells (CellData.group) — same mechanism as the
@@ -29,6 +31,7 @@ import {
 import { extractSbvStrings } from "./parsers/sbv"
 import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { isScriptureAddress } from "@/lib/import/normalized-manifest"
 import { formatVerseReference, parseVerseReference, type VerseReference } from "./scripture-reference"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
@@ -46,6 +49,14 @@ export interface FileTargetCellRef extends SourceCellRef {
    *  it a uniform shift, or a cue pulled onto a neighbouring line, reads
    *  exactly like a perfect pairing. */
   cueRef?: string
+  /** The line is the first of a paragraph (`CellData.paragraphStart`, stored
+   *  by every import since 2026-07-23). A translation is paired with the open
+   *  file paragraph by paragraph when both sides carry it (AQU-2544). Absent
+   *  on a paragraph's later lines, and on every line of an older import. */
+  paragraphStart?: boolean
+  /** A PO entry's context (msgctxt), stored with the line
+   *  (`metadata.po.msgctxt`): two entries with the same msgid pair by it. */
+  sourceContext?: string
 }
 
 /** The slice of an editor cell summary the file-scoped target import reads.
@@ -65,6 +76,8 @@ export interface FileTargetCellSource {
    *  server's `start_ms` by 1000). */
   startTime?: number
   endTime?: number
+  paragraphStart?: boolean
+  msgctxt?: string
 }
 
 /** One open-file cell as the matchers want it.
@@ -89,6 +102,8 @@ export function toFileTargetCell(c: FileTargetCellSource): FileTargetCellRef {
       ? { startMs: Math.round(c.startTime * 1000), endMs: Math.round(c.endTime * 1000) }
       : {}),
     ...(c.context ? { cueRef: c.context } : {}),
+    ...(c.paragraphStart ? { paragraphStart: true } : {}),
+    ...(c.msgctxt ? { sourceContext: c.msgctxt } : {}),
   }
 }
 
@@ -112,6 +127,12 @@ export interface TargetRow {
    *  carries it (a spreadsheet's Source column). An order match pairs rows to
    *  lines by it instead of by position alone (AQU-1375). */
   source?: string
+  /** The gettext context (msgctxt) of a PO entry the row came from, so two
+   *  entries with the same source text pair with their own lines (AQU-2544). */
+  sourceContext?: string
+  /** The row is the first piece of a paragraph of the uploaded file
+   *  (AQU-2544): such rows pair with the open file paragraph by paragraph. */
+  paragraphStart?: boolean
 }
 
 /** Why a pairing is left unticked for a person to check (AQU-1360). */
@@ -138,6 +159,12 @@ export type TargetMatchFlag =
    *  untouched. Left unticked so a person confirms the anchoring (AQU-911 is
    *  what happens when a range decision lands silently). */
   | "bridged"
+  /** The uploaded file's paragraph came in a different number of pieces than
+   *  the open file's paragraph has lines, so its text was shared out over
+   *  those lines (AQU-2544, `fillParagraph`). The paragraph as a whole is
+   *  right, and an export rejoins its lines, so the row stays ticked; only
+   *  where one line ends and the next begins needs a look. */
+  | "sharedOut"
 
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched cell's source text — review-screen context only. */
@@ -173,6 +200,13 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
    *  names the row by the line's reference and shows this beside it
    *  (AQU-1375). */
   writtenAs?: string
+  /** For a `sharedOut` row: the translation had fewer words than the
+   *  paragraph has lines, so the paragraph's last lines got none. */
+  sharedOutShort?: boolean
+  /** The incoming text is exactly the line's own source text (AQU-2544): an
+   *  untranslated template, a file with no translations in it, or an
+   *  export's untranslated lines. Not a conflict, but it starts unticked. */
+  sameAsSource?: boolean
 }
 
 /** Why an incoming row found no line. One code per reason, each with its own
@@ -295,8 +329,9 @@ export interface FileTargetMatchResult {
   untimed?: "lines" | "rows"
   /** A raw-order match's row and line counts, set only when they differ —
    *  the likeliest sign that a row was added or left out and everything after
-   *  it is one line off (AQU-1375). */
-  countMismatch?: { rows: number; lines: number }
+   *  it is one line off (AQU-1375). `paragraphs`: the counts are of
+   *  paragraphs, for a match made paragraph by paragraph (AQU-2544). */
+  countMismatch?: { rows: number; lines: number; paragraphs?: true }
 }
 
 /** A run of chapters of one book, as the review names it ("Exodus 1–3"). */
@@ -335,6 +370,9 @@ function toMatchedCell(
   // Re-importing the text a line already holds used to count as a conflict,
   // unticked, with "Replaces:" naming the very same words (AQU-1360).
   const alreadyThere = current.length > 0 && current === text.trim()
+  // AQU-2544: a translation identical to the line's source is the source
+  // coming back (an untranslated template or export), not a translation.
+  const sameAsSource = !alreadyThere && text.trim().length > 0 && text.trim() === cell.original.trim()
   return {
     cellId: cell.cellId,
     fileId: cell.fileId,
@@ -353,7 +391,24 @@ function toMatchedCell(
     ...(flag ? { flag } : {}),
     ...(contest !== undefined ? { contest } : {}),
     ...(alreadyThere ? { alreadyThere } : {}),
+    ...(sameAsSource ? { sameAsSource } : {}),
   }
+}
+
+/** A line's group as a row label: its reference (`GEN 1:4`, a key) — but not
+ *  a generated id. Lines imported from a document carry a random paragraph id
+ *  there, and the review printed it as the row's name (AQU-2544). */
+const GENERATED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function lineLabel(cell: FileTargetCellRef): string {
+  const ref = cell.canonicalRef ?? ""
+  return GENERATED_ID.test(ref) ? "" : ref
+}
+
+/** True when every line of the open file is a verse, or a heading among the
+ *  verses: a scripture file, which a translation fills by reference, never
+ *  by position (AQU-2544). */
+export function linesAreVerses(cells: readonly FileTargetCellRef[]): boolean {
+  return cells.length > 0 && cells.every((cell) => isScriptureAddress(cell.canonicalRef))
 }
 
 /** A ref in the app's own spelling when it reads as a verse (`Genesis 1:4`,
@@ -1077,7 +1132,7 @@ function matchRowsPositionally(
       orphans.push({ ref: row.ref ?? "", text: row.text, rowIndex: i })
       continue
     }
-    matched.push({ ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? ""), rowIndex: i })
+    matched.push({ ...toMatchedCell(cell, row.text, row.ref ?? lineLabel(cell)), rowIndex: i })
   }
 
   const uncovered = uncoveredLines(cells, matched)
@@ -1218,7 +1273,7 @@ export function matchTargetRowsByOverlap(
       ...toMatchedCell(
         cell,
         row.text,
-        row.ref ?? cell.canonicalRef ?? "",
+        row.ref ?? lineLabel(cell),
         flag,
         drifted,
         flag === "contested" ? contested.numberOf.get(at) : undefined,
@@ -1410,14 +1465,20 @@ function pairStretch(
   return pairs.reverse()
 }
 
+function withContext(key: string, context: string | undefined): string {
+  return context ? `${key}\u0004${context}` : key
+}
+
 /** Order matching steered by the rows' own source text — see above. Rows with
  *  neither text nor source take no part (a spacer row holds no slot here). */
 function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileTargetMatchResult {
   const taking = rows
     .map((row, index) => ({ row, index }))
     .filter(({ row }) => row.text.trim() || row.source?.trim())
-  const rowKeys = taking.map(({ row }) => sourceKey(row.source ?? ""))
-  const cellKeys = cells.map((cell) => sourceKey(cell.original))
+  // A PO entry's msgctxt rides with its text on both sides, so two entries
+  // with the same msgid ("Open" the menu, "Open" the door) each find their own.
+  const rowKeys = taking.map(({ row }) => withContext(sourceKey(row.source ?? ""), row.sourceContext))
+  const cellKeys = cells.map((cell) => withContext(sourceKey(cell.original), cell.sourceContext))
   const similarity = makeSimilarity(rowKeys, cellKeys)
 
   const lineForRow = new Map<number, number>()
@@ -1455,7 +1516,7 @@ function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileT
     const cell = cells[lineAt]
     const differs = similarity(at, lineAt) < SAME_SOURCE
     matched.push({
-      ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? "", differs ? "sourceDiffers" : undefined),
+      ...toMatchedCell(cell, row.text, row.ref ?? lineLabel(cell), differs ? "sourceDiffers" : undefined),
       rowIndex: index,
       ...(differs ? { incomingSource: row.source ?? "" } : {}),
     })
@@ -1468,6 +1529,225 @@ function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileT
     unmatchedSourceCount: uncovered.length,
     uncovered,
     alignedBy: "source",
+  }
+}
+
+// ── Paragraph by paragraph (AQU-2544) ─────────────────────────────────────────
+//
+// A translation read the way its source was read comes in the same
+// paragraphs, but the sentence splitter cuts a long paragraph by its length,
+// and a translation's length is not its source's: a paragraph can come in more
+// pieces, or fewer, than the open file's paragraph has lines. Paired piece by
+// piece in raw order, every line after the first such paragraph would hold
+// the wrong text. So the two sides pair paragraph by paragraph, in order, and
+// line by line inside a paragraph; `fillParagraph` fills a paragraph whose
+// pieces and lines differ in number. A paragraph added or left out still
+// shifts the ones after it, and the count notice, counted in paragraphs, says so.
+
+/** Items split into their paragraphs: one starts at the first item and at
+ *  every item marked as a paragraph's first. */
+function paragraphsOf<T>(items: readonly T[], starts: (item: T) => boolean): T[][] {
+  const groups: T[][] = []
+  for (const item of items) {
+    if (groups.length === 0 || starts(item)) groups.push([item])
+    else groups[groups.length - 1].push(item)
+  }
+  return groups
+}
+
+/** Where a sentence ends, in the scripts the app's languages are written in:
+ *  . ! ? …, Arabic ؟ and Urdu ۔, Devanagari । ॥, CJK 。！？, Armenian ։,
+ *  Ethiopic ።, Myanmar ။. */
+const SENTENCE_END = /[.!?…؟۔।॥。！？։።။]/
+/** Comma, semicolon and colon, and their forms in those scripts. */
+const CLAUSE_MARK = /[,;:،؛、，；：՝፣፤၊]/
+/** Marks written with no space after them: the full-width CJK forms. */
+const UNSPACED_MARK = /[。！？、，；：]/
+/** Closing quotes and brackets, which stay with the sentence before them. */
+const CLOSER = /["'”’»)\]」』）]/
+/** Opening quotes and brackets, and the Spanish ¿ ¡: written apart (French
+ *  spacing), they stay with the word after them. */
+const OPENER = /[«“‘([¿¡「『（]/
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
+const SPACE = /\s/
+
+interface Cut {
+  /** The cut falls before this character. */
+  at: number
+  /** 0 after a sentence end, 1 after a clause mark, 2 between words. */
+  rank: 0 | 1 | 2
+}
+
+/** Every place a paragraph can be cut, in order. A mark written apart from
+ *  its word ("Viens !", "» Puis", "« Viens") is part of that word: a piece
+ *  never starts with a closing mark, nor ends with an opening one. */
+function cutsOf(text: string): Cut[] {
+  /** The mark a cut at `at` follows: the last character before it, past
+   *  closing marks and the spaces French sets before them. */
+  const markBefore = (at: number): string => {
+    let i = at - 1
+    while (i > 0 && (CLOSER.test(text[i]) || SPACE.test(text[i]))) i--
+    return text[i]
+  }
+  const rankOf = (mark: string): Cut["rank"] => (SENTENCE_END.test(mark) ? 0 : CLAUSE_MARK.test(mark) ? 1 : 2)
+  // Each word's place, and what it is made of; the words themselves aren't kept.
+  const words: Array<{ start: number; end: number; marksOnly: boolean; opens: boolean; unspaced: boolean }> = []
+  for (const match of text.matchAll(/\S+/g)) {
+    const word = match[0]
+    const marksOnly = !LETTER_OR_DIGIT.test(word)
+    words.push({
+      start: match.index,
+      end: match.index + word.length,
+      marksOnly,
+      opens: marksOnly && OPENER.test(word),
+      unspaced: UNSPACED_MARK.test(word),
+    })
+  }
+  const cuts: Cut[] = []
+  words.forEach(({ start, end, marksOnly, opens, unspaced }, w) => {
+    // Inside a word: after a mark written with no space after it (CJK).
+    if (unspaced) {
+      for (let at = start + 1; at < end; at++) {
+        if (CLOSER.test(text[at])) continue
+        const mark = markBefore(at)
+        if (UNSPACED_MARK.test(mark)) cuts.push({ at, rank: rankOf(mark) })
+      }
+    }
+    // Between this word and the next: not before a closing mark written
+    // apart, nor after an opening one.
+    const next = words[w + 1]
+    if (!next || (next.marksOnly && !next.opens) || (marksOnly && opens)) return
+    cuts.push({ at: end, rank: rankOf(markBefore(end)) })
+  })
+  return cuts
+}
+
+/** The better of two cuts for a line ending at `target`: the one after a
+ *  sentence end, else after a clause mark, else between words; the nearer
+ *  of two of a kind. */
+function betterCut(a: Cut, b: Cut, target: number): boolean {
+  return a.rank < b.rank || (a.rank === b.rank && Math.abs(a.at - target) < Math.abs(b.at - target))
+}
+
+/** A paragraph's text cut into one piece per line, in order: at its own
+ *  sentence ends where it can, then at clause marks, then between words,
+ *  each line's piece about as long, in proportion, as its source line. Fewer
+ *  pieces than lines only when the text has fewer places to cut than that.
+ *
+ *  One walk over the lines (AQU-2544 review: a search over every line and
+ *  every cut froze the tab on a big paragraph). Each line gets the best cut
+ *  in its own stretch of the text — from halfway after the previous line's
+ *  target to halfway before the next one's — never before the previous
+ *  cut, and always leaving one for every line after it. */
+export function shareOut(text: string, lineLengths: readonly number[]): string[] {
+  const n = lineLengths.length
+  const cuts = n > 1 ? cutsOf(text) : []
+  let chosen = cuts
+  if (cuts.length > n - 1) {
+    const total = lineLengths.reduce((sum, length) => sum + length, 0)
+    const targets: number[] = []
+    let before = 0
+    for (let k = 0; k < n - 1; k++) {
+      before += lineLengths[k]
+      targets.push(text.length * (total > 0 ? before / total : (k + 1) / n))
+    }
+    chosen = []
+    let previous = -1
+    let scan = 0
+    for (let k = 0; k < n - 1; k++) {
+      const first = previous + 1
+      const last = cuts.length - (n - 1 - k)
+      const stretchEnd = k + 1 < n - 1 ? (targets[k] + targets[k + 1]) / 2 : text.length
+      let best = -1
+      let i = Math.max(first, scan)
+      for (; i <= last && cuts[i].at <= stretchEnd; i++) {
+        if (best < 0 || betterCut(cuts[i], cuts[best], targets[k])) best = i
+      }
+      scan = i
+      if (best < 0) {
+        // Nothing in this line's stretch: the nearest cut either side of it.
+        const after = Math.min(Math.max(first, scan), last)
+        const beforeIt = after - 1 >= first ? after - 1 : -1
+        best = beforeIt >= 0 && Math.abs(cuts[beforeIt].at - targets[k]) < Math.abs(cuts[after].at - targets[k])
+          ? beforeIt
+          : after
+      }
+      chosen.push(cuts[best])
+      previous = best
+    }
+  }
+  const pieces: string[] = []
+  let start = 0
+  for (const cut of chosen) {
+    pieces.push(text.slice(start, cut.at).trim())
+    start = cut.at
+  }
+  pieces.push(text.slice(start).trim())
+  return pieces.filter(Boolean)
+}
+
+/**
+ * How one paragraph of the uploaded file fills a paragraph of the open file
+ * (AQU-2544). The one place this is decided: Sam is to choose between this
+ * and the alternative below.
+ *
+ * As many pieces as lines: piece N fills line N. A one-line paragraph takes
+ * the whole paragraph: the splitter's pieces put back together. Otherwise the
+ * paragraph's text is shared out over its lines (`shareOut`), so every line
+ * gets a piece, in order; those rows are flagged `sharedOut` and stay
+ * ticked, because the paragraph as a whole is right and an export rejoins a
+ * paragraph's lines.
+ *
+ * The alternative is AQU-2508's "bridged" shape: the whole text on the
+ * paragraph's first line, flagged and unticked, its other lines left empty
+ * (which an export then fills with their source text).
+ */
+function fillParagraph(
+  lines: FileTargetCellRef[],
+  pieces: readonly TargetRow[],
+  /** The paragraph's place in the uploaded file, from 0: what its rows are
+   *  numbered by, the way the person counts the file ("Row 4" is the 4th
+   *  paragraph, however the splitter cut it). */
+  rowIndex: number,
+): FileTargetMatchedCell[] {
+  if (pieces.length === lines.length) {
+    return lines.map((cell, i) => ({
+      ...toMatchedCell(cell, pieces[i].text, pieces[i].ref ?? lineLabel(cell)),
+      rowIndex,
+    }))
+  }
+  const whole = pieces.map((row) => row.text.trim()).join(" ")
+  if (lines.length === 1) return [{ ...toMatchedCell(lines[0], whole, lineLabel(lines[0])), rowIndex }]
+  const shares = shareOut(whole, lines.map((cell) => cell.original.length))
+  const short = shares.length < lines.length
+  return shares.map((text, i) => ({
+    ...toMatchedCell(lines[i], text, lineLabel(lines[i]), "sharedOut"),
+    rowIndex,
+    ...(short ? { sharedOutShort: true } : {}),
+  }))
+}
+
+/** Order matching paragraph by paragraph — see above. */
+function matchRowsByParagraph(rows: TargetRow[], cells: FileTargetCellRef[]): FileTargetMatchResult {
+  const incoming = paragraphsOf(rows.filter((row) => row.text.trim()), (row) => row.paragraphStart === true)
+  const open = paragraphsOf(cells, (cell) => cell.paragraphStart === true)
+  const matched: FileTargetMatchedCell[] = []
+  const orphans: TargetOrphan[] = []
+  incoming.forEach((paragraph, at) => {
+    const lines = open[at]
+    if (lines) matched.push(...fillParagraph(lines, paragraph, at))
+    else for (const row of paragraph) orphans.push({ ref: row.ref ?? "", text: row.text, rowIndex: at })
+  })
+  const uncovered = uncoveredLines(cells, matched)
+  return {
+    matched,
+    orphans,
+    unmatchedSourceCount: uncovered.length,
+    uncovered,
+    alignedBy: "order",
+    ...(incoming.length !== open.length
+      ? { countMismatch: { rows: incoming.length, lines: open.length, paragraphs: true as const } }
+      : {}),
   }
 }
 
@@ -1484,7 +1764,9 @@ function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileT
  *
  *  Rows carrying their own source text (a spreadsheet's Source column) are
  *  paired with lines by it, falling back to position only where the text
- *  doesn't settle it (`matchRowsBySource`, AQU-1375).
+ *  doesn't settle it (`matchRowsBySource`, AQU-1375). Rows and lines that
+ *  both know their paragraphs pair paragraph by paragraph
+ *  (`matchRowsByParagraph`, AQU-2544).
  *
  *  The result's `alignedBy` says which ran, so the review screen only warns
  *  about order alignment when order alignment is what happened; on an order
@@ -1512,6 +1794,10 @@ export function matchTargetRowsByOrder(
     })
   }
   if (nonEmptyRows.some((row) => row.source?.trim())) return matchRowsBySource(rows, cells)
+  // AQU-2544: both sides know their paragraphs (older imports' lines don't).
+  if (nonEmptyRows.some((row) => row.paragraphStart) && cells.some((cell) => cell.paragraphStart)) {
+    return matchRowsByParagraph(rows, cells)
+  }
   const result = matchRowsPositionally(rows, cells)
   const untimed = timedRows === 0 ? undefined : cellsTimed ? "rows" : "lines"
   return {
@@ -1625,6 +1911,41 @@ export function usfmToTargetRows(
     // projection's own — that keeps a plain verse's edge whitespace handled the
     // way it was before AQU-1363.
     .map(({ ref, text }) => ({ ref, text: usfmContentOnly(text).text.trim() }))
+}
+
+/** A parsed line as the source import's parsers give it (`TranslatableString`). */
+export interface ParsedLine {
+  original: string
+  translated: string
+  /** The parser's own data for the line; a PO entry's holds its msgctxt
+   *  (`po.msgctxt`), stored with the line the same way on import. */
+  metadata?: Record<string, unknown>
+  /** First line of a paragraph (docx, txt, md). */
+  paragraphStart?: boolean
+}
+
+/** Target rows from the lines a source-import parser read out of a file
+ *  (AQU-2544), one row per line, in file order.
+ *
+ *  A file is bilingual when any of its lines carries a translation of its own
+ *  (a PO msgstr, an XLIFF or TMX target). Its rows are then those
+ *  translations, each with the line's own text as its `source` (and a PO
+ *  entry's context), so they pair with the open file's lines by source text
+ *  rather than by position; a line left untranslated keeps its place in that
+ *  pairing and fills nothing. Otherwise the file IS the translation: each
+ *  line's text is a row, and its paragraph start goes with it. */
+export function parsedLinesToTargetRows(lines: readonly ParsedLine[]): TargetRow[] {
+  const bilingual = lines.some((line) => line.translated.trim())
+  if (bilingual) {
+    return lines.map((line) => {
+      const po = line.metadata?.po as { msgctxt?: unknown } | undefined
+      const context = typeof po?.msgctxt === "string" && po.msgctxt ? po.msgctxt : undefined
+      return { text: line.translated.trim(), source: line.original, ...(context ? { sourceContext: context } : {}) }
+    })
+  }
+  return lines
+    .map((line) => ({ text: line.original.trim(), ...(line.paragraphStart ? { paragraphStart: true } : {}) }))
+    .filter((row) => row.text)
 }
 
 /** Subtitle formats whose cues this module can turn into target rows. */

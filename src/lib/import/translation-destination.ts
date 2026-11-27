@@ -13,6 +13,7 @@
 
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { parseCsvRows, parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
+import { FILE_TYPE_BY_EXTENSION, type FileType } from "@/lib/parsers/types"
 import { parseVerseReference } from "@/lib/scripture-reference"
 import { fileBookCode, type GroupableFile } from "@/lib/sidebar/group-by-corpus"
 
@@ -25,8 +26,36 @@ export interface TranslationDestination extends GroupableFile {
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 
-/** The formats the translation review (FileTargetImportPanel) reads. */
-export const FILE_TARGET_EXTENSIONS = ["usfm", "sfm", "usf", "csv", "tsv", "xlsx", "vtt", "srt", "sbv"] as const
+/**
+ * File types the source import reads that the translation review refuses
+ * (AQU-2544). Every other file is read as the source import reads it, so its
+ * lines line up with the lines that import made. These can't be: the source
+ * import asks a question before it makes their lines (which JSON keys hold
+ * text; which EPUB parts to bring in), and the answer given then is not known
+ * here. Media holds no text.
+ */
+const NOT_READ_AS_TRANSLATION: ReadonlySet<FileType> = new Set<FileType>(["json", "epub", "audio", "video"])
+
+/** True for a file type the translation review reads. */
+export function isTranslationType(type: FileType | null): type is FileType {
+  return type !== null && !NOT_READ_AS_TRANSLATION.has(type)
+}
+
+/** The type a file is read as, by its name: the source import's type for its
+ *  extension. `.usf` is USFM here, as it always was for this review. */
+export function translationTypeByName(fileName: string): FileType | null {
+  const ext = extensionOf(fileName)
+  if (Object.prototype.hasOwnProperty.call(FILE_TYPE_BY_EXTENSION, ext)) return FILE_TYPE_BY_EXTENSION[ext]
+  return ext === "usf" ? "usfm" : null
+}
+
+/** Every extension the translation review reads. */
+export const FILE_TARGET_EXTENSIONS: readonly string[] = [
+  ...Object.entries(FILE_TYPE_BY_EXTENSION)
+    .filter(([, type]) => isTranslationType(type))
+    .map(([ext]) => ext),
+  "usf",
+]
 
 /** The same, as an `<input accept>` list. */
 export const FILE_TARGET_ACCEPT = FILE_TARGET_EXTENSIONS.map((ext) => `.${ext}`).join(",")
@@ -34,7 +63,7 @@ export const FILE_TARGET_ACCEPT = FILE_TARGET_EXTENSIONS.map((ext) => `.${ext}`)
 /** True when the translation review can read this file. */
 export function isFileTargetFileName(fileName: string): boolean {
   const dot = fileName.lastIndexOf(".")
-  return dot >= 0 && (FILE_TARGET_EXTENSIONS as readonly string[]).includes(fileName.slice(dot + 1).toLowerCase())
+  return dot >= 0 && FILE_TARGET_EXTENSIONS.includes(fileName.slice(dot + 1).toLowerCase())
 }
 
 export function isUsfmFileName(fileName: string): boolean {

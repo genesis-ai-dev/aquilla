@@ -71,6 +71,7 @@ export const IMPORT_FORMAT_PARITY: Record<FileType, Parity> = {
   tsv: PARSED,
   usfm: PARSED,
   docx: PARSED,
+  pdf: gap('read in the browser with pdf.js (AQU-2551); the Worker has no PDF reader, so no agent command imports one'),
   pptx: DOM_BOUND,
   idml: DOM_BOUND,
   xlsx: gap('imports through spreadsheet column mapping in the app; no agent equivalent'),

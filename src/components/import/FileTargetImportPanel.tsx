@@ -1,7 +1,8 @@
 /**
  * File-scoped target import: populate the OPEN file's target column from a
- * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
- * Target-only — source cells are never created or modified.
+ * USFM file, a spreadsheet (CSV/TSV/XLSX), a subtitle file (SRT/SBV), or any
+ * other file the source import reads (AQU-2544). Target-only — source cells
+ * are never created or modified.
  *
  * Opened from the Import dialog's "A translation" path (AQU-1365), which picks
  * the destination file, opens it, and hands the dropped file over as
@@ -14,6 +15,11 @@
  *      order (cue N → cell N) because cue cells carry no canonical refs
  *      Spreadsheet → [sheet selector] → column mapping (target required,
  *      ref optional; no ref column → rows match cells by order)
+ *      Anything else accepted → read by the source import's own parsers with
+ *      the project's cell unit (readTranslationFile), straight to review,
+ *      paired paragraph by paragraph
+ *      The reader is picked by what the file holds (translationFileType), so
+ *      USFM saved as .txt goes to the USFM reader
  *   3. Review: each incoming row beside the matched cell's source text;
  *      conflicts (cells that already have a translation) need an explicit tick
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
@@ -40,11 +46,11 @@ import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { cn } from "@/lib/utils"
 import {
+  linesAreVerses,
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
   subtitleToTargetRowsWithReport,
-  CUE_TARGET_EXTENSIONS,
   vttToTargetRowsWithReport,
   type ChapterSpan,
   type ContestOverrides,
@@ -61,7 +67,11 @@ import {
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
 import { targetSheetRows } from "@/lib/import/target-sheet-rows"
-import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
+import { FILE_TARGET_ACCEPT, isTranslationType } from "@/lib/import/translation-destination"
+import { readTranslationFile, translationFileType } from "@/lib/import/translation-file"
+import { looksLikeUsx, usxToUsfm } from "@/lib/parsers/usx"
+import type { CellUnit, FileType } from "@/lib/parsers/types"
+import type { SourceArtifactFormat } from "../../../shared/import-contract"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
@@ -122,6 +132,9 @@ export interface FileTargetImportPanelProps {
    *  target rows exclude book-name/title/TOC + intro-block cells, staying
    *  aligned with source cells imported under the same setting. */
   excludeFrontMatter?: boolean
+  /** AQU-2544: the project's import cell unit. A translation read through the
+   *  source import's parsers is cut into lines the way its source was. */
+  cellUnit?: CellUnit
   /** AQU-2197: the destination file's linked film, whose frame rate settles a
    *  subtitle file's frames-as-hundredths fix. */
   filmUrl?: string | null
@@ -171,37 +184,21 @@ export interface FileTargetPanelBack {
 
 type PanelStep = "file" | "sheet" | "mapping" | "matching" | "review"
 
-const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
-const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
-// AQU-1142: WebVTT subtitle target import. Partners producing dubbing/subtitle
-// translations deliver a translated .vtt whose cues should populate the open
-// cue file's target column, matched positionally against the source cues.
-const VTT_EXTENSIONS = new Set(["vtt"])
-
-/** Format tag for the uploaded file's source artifact (SOURCE_ARTIFACT_FORMATS
- *  in shared/import-contract). Spreadsheets fall through to "csv" because
- *  that branch also covers the ".txt-as-delimited" cases parseCsvToSheet
- *  accepts. */
-function sourceArtifactFormat(fileName: string) {
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
-  if (USFM_EXTENSIONS.has(ext)) return "usfm" as const
-  if (VTT_EXTENSIONS.has(ext)) return "vtt" as const
-  if (ext === "sbv") return "sbv" as const
-  if (ext === "srt") return "srt" as const
-  if (ext === "xlsx") return "xlsx" as const
-  if (ext === "tsv") return "tsv" as const
-  return "csv" as const
-}
-
 /** What one incoming row is called on the review screen: a subtitle file's
  *  cues, a USFM file's verses, a spreadsheet's rows (AQU-1375). */
 type RowKind = "cue" | "verse" | "row"
 
-function incomingRowKind(fileName: string): RowKind {
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
-  if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
-  if (USFM_EXTENSIONS.has(ext)) return "verse"
+function incomingRowKind(type: FileType | null): RowKind {
+  if (type === "vtt" || type === "srt" || type === "sbv") return "cue"
+  if (type === "usfm") return "verse"
   return "row"
+}
+
+/** What the dropped file was read as, and the format tag its kept copy
+ *  carries (SOURCE_ARTIFACT_FORMATS in shared/import-contract). */
+interface ReadAs {
+  type: FileType
+  format: SourceArtifactFormat
 }
 
 /** The books and chapters a file covers, the way the review names them:
@@ -391,7 +388,7 @@ const ReviewRow = memo(function ReviewRow({
         {/* Everything to check about a row sits in its corner. "Contested"
             opens the comparison below; a timing pill means only the line's
             own timing is kept. */}
-        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.flag === "bridged" || m.cellRef) && (
+        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.flag === "bridged" || m.flag === "sharedOut" || m.sameAsSource || m.cellRef) && (
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             {rivals && (
               <Badge
@@ -445,6 +442,21 @@ const ReviewRow = memo(function ReviewRow({
                   {t("importExport.review.rowBridgedPill")}
                 </Badge>
               </NoteOnClick>
+            )}
+            {/* A paragraph that came in more or fewer pieces than this file's
+                paragraph has lines, shared out over them (AQU-2544): the same
+                pill and click note as a bridge. */}
+            {m.flag === "sharedOut" && (
+              <NoteOnClick
+                note={t(m.sharedOutShort ? "importExport.review.rowSharedOutShort" : "importExport.review.rowSharedOut")}
+              >
+                <Badge className={AMBER_PILL}>
+                  {t("importExport.review.rowSharedOutPill")}
+                </Badge>
+              </NoteOnClick>
+            )}
+            {m.sameAsSource && (
+              <Badge className={AMBER_PILL}>{t("importExport.review.rowSameAsSource")}</Badge>
             )}
           </div>
         )}
@@ -590,6 +602,7 @@ export function FileTargetImportPanel({
   onError,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  cellUnit,
   filmUrl,
   onBackChange,
   mode = "commit",
@@ -607,6 +620,9 @@ export function FileTargetImportPanel({
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
   const [sourceFile, setSourceFile] = useState<File | null>(null)
+  // What the file was read as: it names the review's rows and tags the copy
+  // kept beside the translation.
+  const [readAs, setReadAs] = useState<ReadAs | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   // A subtitle file's parsed cues, kept so the review's shift tickbox can
@@ -729,7 +745,11 @@ export function FileTargetImportPanel({
           // a decision: ticked, with its pill and a Swap (Sam, 09-23).
           // A bridged row (AQU-2508) is an anchoring decision, not a plain
           // pairing: it starts unticked like a contest or a differing source.
-          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && m.flag !== "bridged" && !m.sharedTimingUnpaired)
+          // So does a row that is only its line's source text (AQU-2544). A
+          // paragraph shared out over its lines is a heads-up and stays
+          // ticked, unless its text ran out before its lines did: that is
+          // almost always a mispairing or missing text.
+          .filter((m) => !m.hasConflict && !m.alreadyThere && !m.sameAsSource && !m.sharedOutShort && m.flag !== "contested" && m.flag !== "sourceDiffers" && m.flag !== "bridged" && !m.sharedTimingUnpaired)
           .map((m) => m.cellId),
     ))
     setStep("review")
@@ -838,55 +858,69 @@ export function FileTargetImportPanel({
     setError(null)
     setFrameRows(null)
     setSourceFile(file)
-    const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
+    setReadAs(null)
     try {
       assertSourceUploadByteLength(file.size)
-      if (USFM_EXTENSIONS.has(ext)) {
-        const text = decodeImportText(await file.arrayBuffer(), file.name)
+      if (file.name.split(".").pop()?.toLowerCase() === "xls") {
+        setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
+        return
+      }
+      // AQU-2544: the reader is chosen by what the file holds, the way the
+      // source import chooses: a USFM file saved as .txt is read as USFM.
+      const detected = await translationFileType(file)
+      const { type } = detected
+      // The file's text, read once; a file that isn't text fails here with
+      // the source import's own message.
+      const text = async () => detected.text ?? decodeImportText(await file.arrayBuffer(), file.name)
+      if (type === "usfm") {
+        const raw = await text()
         if (!(await showMatching())) return
-        const rows = usfmToTargetRows(text, { excludeFrontMatter })
+        // USX reaches the USFM reader converted, as the source import reads it.
+        const usx = looksLikeUsx(raw)
+        const rows = usfmToTargetRows(usx ? usxToUsfm(raw) : raw, { excludeFrontMatter })
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noVersesInUsfm"))
           setStep("file")
           return
         }
+        setReadAs({ type, format: usx ? "usx" : "usfm" })
         showReview(matchTargetRowsByRef(rows, cells), false)
-      } else if (VTT_EXTENSIONS.has(ext)) {
+      } else if (type === "vtt") {
         // AQU-1142: VTT cues carry timestamps, never canonical refs, so match
         // positionally (cue N → cell N) — the review screen surfaces any
         // misalignment before commit via the same order-match warning used
         // for spreadsheets without a ref column.
-        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        const raw = await text()
         if (!(await showMatching())) return
-        const { rows, skippedCues } = vttToTargetRowsWithReport(text)
+        const { rows, skippedCues } = vttToTargetRowsWithReport(raw)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInVtt"))
           setStep("file")
           return
         }
+        setReadAs({ type, format: "vtt" })
         reviewSubtitleRows(rows, skippedCues)
-      } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
+      } else if (type === "srt" || type === "sbv") {
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
         // the same ref-less path as VTT — timecode overlap when the file's
         // cells carry timings (AQU-1143), cue N → cell N otherwise.
-        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        const raw = await text()
         if (!(await showMatching())) return
-        const { rows, skippedCues } = subtitleToTargetRowsWithReport(text, ext)
+        const { rows, skippedCues } = subtitleToTargetRowsWithReport(raw, type)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
           setStep("file")
           return
         }
+        setReadAs({ type, format: type })
         reviewSubtitleRows(rows, skippedCues)
-      } else if (ext === "xls") {
-        setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
-        return
-      } else if (ext === "xlsx") {
+      } else if (type === "xlsx") {
         const parsed = await parseXlsxToSheets(await file.arrayBuffer())
         if (parsed.length === 0) {
           setError(t("importExport.spreadsheet.noSheetsFound"))
           return
         }
+        setReadAs({ type, format: "xlsx" })
         setSheets(parsed)
         if (parsed.length === 1) {
           setSelectedSheet(parsed[0])
@@ -894,11 +928,34 @@ export function FileTargetImportPanel({
         } else {
           setStep("sheet")
         }
-      } else if (SHEET_EXTENSIONS.has(ext)) {
-        const sheet = parseCsvToSheet(decodeImportText(await file.arrayBuffer(), file.name), file.name)
+      } else if (type === "csv" || type === "tsv") {
+        const sheet = parseCsvToSheet(await text(), file.name)
+        setReadAs({ type, format: type })
         setSheets([sheet])
         setSelectedSheet(sheet)
         setStep("mapping")
+      } else if (isTranslationType(type)) {
+        // AQU-2544: any other file is read as the source import reads it, and
+        // its lines fill the open file's paragraph by paragraph (by source
+        // text, when the file carries its own).
+        if (!(await showMatching())) return
+        const run = matchRun.current
+        // A read that ends after the person moved on is dropped, failure too.
+        const read = await readTranslationFile(file, { projectId, cellUnit }).catch((err: unknown) => {
+          if (run === matchRun.current) throw err
+          return null
+        })
+        if (!read || run !== matchRun.current) return
+        // Verses are filled by reference. A file with no source text of its
+        // own could only fill them by position, so it isn't put on a file
+        // whose every line is a verse.
+        if (!read.rows.some((row) => row.source?.trim()) && linesAreVerses(cells)) {
+          setError(t("importExport.fileTarget.versesNeedReferences"))
+          setStep("file")
+          return
+        }
+        setReadAs({ type, format: read.format })
+        showReview(matchTargetRowsByOrder(read.rows, cells), true)
       } else {
         setError(t("importExport.fileTarget.unsupportedFileType"))
       }
@@ -908,7 +965,7 @@ export function FileTargetImportPanel({
       setStep("file")
       onError?.(message, "parse")
     }
-  }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
+  }, [cells, showReview, showMatching, onError, excludeFrontMatter, projectId, cellUnit, t])
 
   // AQU-1365: the host's file is read once. The ref, not the effect's deps,
   // makes it once: StrictMode re-runs mount effects, and a later `cells`
@@ -1008,7 +1065,7 @@ export function FileTargetImportPanel({
           sourceArtifact: {
             name: sourceFile.name,
             bytes: await sourceFile.arrayBuffer(),
-            format: sourceArtifactFormat(sourceFile.name),
+            format: readAs?.format ?? "custom-original",
           },
         },
       )
@@ -1179,6 +1236,8 @@ export function FileTargetImportPanel({
         m.flag === "sharedTiming" ||
         m.flag === "sourceDiffers" ||
         m.flag === "bridged" ||
+        m.flag === "sharedOut" ||
+        m.sameAsSource ||
         m.hasConflict,
     )
     // The counts above the list split the pairings the same way (AQU-1375):
@@ -1215,7 +1274,7 @@ export function FileTargetImportPanel({
         default: return null
       }
     }
-    const rowKind = sourceFile ? incomingRowKind(sourceFile.name) : "row"
+    const rowKind = incomingRowKind(readAs?.type ?? null)
     const unmatchedListTitle = t(
       rowKind === "cue"
         ? "importExport.review.unmatchedListTitle"
@@ -1369,7 +1428,9 @@ export function FileTargetImportPanel({
               sign that every row after some point is one line off. */}
           {showOrderMatchWarning && matchResult.countMismatch && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t(rowKind === "cue" ? "importExport.review.countMismatchCues" : "importExport.review.countMismatchRows", {
+              {t(matchResult.countMismatch.paragraphs
+                ? "importExport.review.countMismatchParagraphs"
+                : rowKind === "cue" ? "importExport.review.countMismatchCues" : "importExport.review.countMismatchRows", {
                 rows: formatCount(matchResult.countMismatch.rows, locale),
                 lines: formatCount(matchResult.countMismatch.lines, locale),
               })}

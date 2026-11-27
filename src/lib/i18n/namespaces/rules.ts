@@ -411,8 +411,8 @@ export const rules = defineNamespace({
       "Extraction was cut off partway, so these are not all of the document's rules. Import the remaining sections separately to catch the rest.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
-    "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
-    "rules.importDialog.signInRequiredForBinary": "You must be signed in to import PDF or DOCX files.",
+    "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for DOCX.",
+    "rules.importDialog.signInRequiredForBinary": "You must be signed in to import DOCX files.",
     "rules.importDialog.couldNotParseFile": "Could not parse file.",
     "rules.importDialog.textFileTooLarge": "File too large ({size} KB). Maximum is 200 KB for text files.",
     "rules.importDialog.fileEmpty": "File appears to be empty.",
@@ -426,7 +426,7 @@ export const rules = defineNamespace({
     }),
     "rules.importDialog.title": "Import rules from document",
     "rules.importDialog.description":
-      "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
+      "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. Supports plain text and Markdown (max {textLimit}), DOCX (max {docxLimit}), and PDF. The text read from a document can be up to {textLimit}.",
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
@@ -1140,8 +1140,15 @@ export const rules = defineNamespace({
         description: "Primary button committing the accepted draft rules from the import-review screen.",
         placeholders: { count: "Number of accepted draft rules to add." },
       },
+      "rules.importDialog.description": {
+        description: "Intro text in the \"Import rules from document\" dialog. A plain-text or Markdown file is limited to the text cap, a DOCX file to its own upload cap, and a PDF has no file cap (it is read in the browser); the text read from any document must fit the text cap.",
+        placeholders: {
+          textLimit: "The text cap, e.g. \"200 KB\".",
+          docxLimit: "The DOCX file cap, e.g. \"2 MB\".",
+        },
+      },
       "rules.importDialog.binaryFileTooLarge": {
-        description: "Error shown when a dropped PDF/DOCX exceeds the 2 MB import cap.",
+        description: "Error shown when a dropped DOCX exceeds the 2 MB import cap. A PDF is read in the browser and has no such cap.",
         placeholders: { size: "The file's size in MB, one decimal place." },
       },
       "rules.importDialog.textFileTooLarge": {

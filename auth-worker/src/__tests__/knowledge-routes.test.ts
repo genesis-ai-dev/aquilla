@@ -479,19 +479,32 @@ describe("knowledge routes — validation", () => {
     })
     const res = await app.request(
       `/api/v2/projects/${PROJECT}/knowledge`,
-      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.pdf" }, body, duplex: "half" } as RequestInit,
+      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.md" }, body, duplex: "half" } as RequestInit,
       testEnvWith(new FakeBucket()),
     )
     expect(res.status).toBe(400)
     expect(pulled * chunk.length).toBeLessThan(MAX_KB_ORIGINAL_BYTES + 4 * chunk.length)
   })
 
+  // The Knowledge Base and the rule import share one DOCX limit, 2 × 1024 × 1024
+  // bytes ("2 MB"); the Knowledge Base's used to be 2,000,000 bytes ("1.9 MB").
   it(".docx body over 2 MB → 400", async () => {
     const jwt = await setup()
     stubIndexingFetch()
-    const big = new Uint8Array(2_000_001)
+    const big = new Uint8Array(2 * 1024 * 1024 + 1)
     const res = await uploadDoc(PROJECT, jwt, big, "big.docx", new FakeBucket())
     expect(res.status).toBe(400)
+    // Its own code, so the app words it instead of showing this message.
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("docx_too_large")
+  })
+
+  it(".docx of exactly 2 MB is not refused for its size", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    // Not a real .docx, so the extractor refuses it (422), past the size check.
+    const res = await uploadDoc(PROJECT, jwt, new Uint8Array(2 * 1024 * 1024), "edge.docx", new FakeBucket())
+    expect(res.status).toBe(422)
   })
 
   it("extraction yielding empty text (garbage .docx bytes) → 422", async () => {
@@ -519,6 +532,109 @@ describe("knowledge routes — validation", () => {
     const body = (await res.json()) as { error: { code: string; message: string } }
     expect(body.error.code).toBe("validation_failed")
     expect(body.error.message).toContain("word/document.xml")
+  })
+})
+
+// AQU-2551 review findings 1–3: the server no longer reads PDFs. The app reads
+// a PDF in the browser and uploads the original beside its text; the original
+// is stored untouched, the text is what gets indexed.
+describe("knowledge routes — PDFs read in the app (AQU-2551)", () => {
+  async function setup() {
+    await seedUser(1, "owner")
+    await seedUser(2, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 2, ROLE.PROJECT_LEAD)
+    return await jwtFor("lead")
+  }
+  const pdfBytes = (extra = 0) => {
+    const head = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n%%EOF\n")
+    const out = new Uint8Array(head.length + extra)
+    out.set(head)
+    return out
+  }
+  /** The app's own request: the form sets its multipart type. */
+  const postForm = (jwt: string, body: FormData, bucket: FakeBucket, extra?: Record<string, unknown>) =>
+    app.request(
+      `/api/v2/projects/${PROJECT}/knowledge`,
+      { method: "POST", headers: { Authorization: `Bearer ${jwt}`, "x-doc-name": "guide.pdf" }, body },
+      testEnvWith(bucket, extra),
+    )
+  const form = (bytes: Uint8Array, text?: string) => {
+    const f = new FormData()
+    f.append("file", new File([bytes], "guide.pdf", { type: "application/pdf" }))
+    if (text !== undefined) f.append("text", text)
+    return f
+  }
+
+  it("refuses a PDF sent without its text, with a code the app words", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+    const res = await uploadDoc(PROJECT, jwt, pdfBytes(), "guide.pdf", bucket)
+    expect(res.status).toBe(415)
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("pdf_text_required")
+    expect(bucket.store.size).toBe(0)
+  })
+
+  it("refuses a PDF form with no text field the same way", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const res = await postForm(jwt, form(pdfBytes()), new FakeBucket())
+    expect(res.status).toBe(415)
+  })
+
+  it("stores the original untouched and indexes the text the app read", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+    const original = pdfBytes(100)
+    const res = await postForm(jwt, form(original, "Use formal language.\nNever abbreviate."), bucket, { OPENROUTER_API_KEY: "k" })
+    expect(res.status).toBe(201)
+    const out = (await res.json()) as { doc: { id: string; r2Key: string; contentType: string; sizeBytes: number } }
+    expect(out.doc.contentType).toBe("application/pdf")
+    expect(out.doc.sizeBytes).toBe(original.length)
+    expect(bucket.store.get(out.doc.r2Key)).toEqual(original)
+    const row = await env.AQUILLA_PG.prepare("SELECT extracted_text FROM knowledge_docs WHERE id = ?")
+      .bind(out.doc.id)
+      .first<{ extracted_text: string }>()
+    expect(row!.extracted_text).toBe("Use formal language.\nNever abbreviate.")
+  })
+
+  it("keeps the server's text limit", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const res = await postForm(jwt, form(pdfBytes(), "a".repeat(2_000_010)), new FakeBucket(), { OPENROUTER_API_KEY: "k" })
+    expect(res.status).toBe(201)
+    const out = (await res.json()) as { doc: { id: string } }
+    const row = await env.AQUILLA_PG.prepare("SELECT length(extracted_text) AS n FROM knowledge_docs WHERE id = ?")
+      .bind(out.doc.id)
+      .first<{ n: number }>()
+    expect(Number(row!.n)).toBe(2_000_000)
+  })
+
+  it("refuses an empty text as before", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const res = await postForm(jwt, form(pdfBytes(), "   "), new FakeBucket())
+    expect(res.status).toBe(422)
+  })
+
+  it("refuses a file named .pdf that is not a PDF", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const res = await postForm(jwt, form(new TextEncoder().encode("<html>hi</html>"), "hi"), new FakeBucket())
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("validation_failed")
+  })
+
+  // The 2 MB cap bounded the server's own extraction, which PDFs no longer
+  // have; the original's 25 MB cap still holds.
+  it("takes a PDF over 2 MB, since the server no longer reads it", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    const res = await postForm(jwt, form(pdfBytes(3_000_000), "Big guide."), new FakeBucket(), { OPENROUTER_API_KEY: "k" })
+    expect(res.status).toBe(201)
   })
 })
 

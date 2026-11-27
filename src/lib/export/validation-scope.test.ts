@@ -185,3 +185,51 @@ describe("hidden cells (AQU-1423)", () => {
     expect(hasHiddenCells(WITH_HIDDEN)).toBe(true)
   })
 })
+
+// AQU-2551 review finding 9 (Nov 14): with a paragraph's first line hidden,
+// or left out by "validated only", the paragraph's other lines ran into the
+// paragraph before it in the New Word document and the HTML page, which lay
+// out paragraphs by the line that starts each one.
+describe("a dropped line's paragraph start (AQU-2551)", () => {
+  type ParaCell = TestCell & { paragraphStart?: boolean }
+  const para = (id: string, status: TestCell["status"], start: boolean, hidden = false): ParaCell =>
+    ({ id, status, translated: id, ...(start ? { paragraphStart: true } : {}), ...(hidden ? { hidden: true } : {}) })
+  const starts = (cells: ParaCell[]) => cells.map((c) => `${c.id}${c.paragraphStart ? "*" : ""}`)
+
+  it("passes to the next kept line when the first line is hidden", () => {
+    const cells = [para("p1", "validated", true), para("p2a", "validated", true, true), para("p2b", "validated", false)]
+    expect(starts(scopeCellsForExport(cells, "current"))).toEqual(["p1*", "p2b*"])
+  })
+
+  it("passes to the next kept line when the first line is left out by validated-only", () => {
+    const cells = [para("p1", "validated", true), para("p2a", "unvalidated", true), para("p2b", "validated", false), para("p2c", "validated", false)]
+    expect(starts(scopeCellsForExport(cells, "validated-only"))).toEqual(["p1*", "p2b*", "p2c"])
+  })
+
+  it("is not passed on past a line that starts its own paragraph, and the caller's cells are untouched", () => {
+    const cells = [para("p1", "unvalidated", true), para("p2", "validated", true), para("p2b", "validated", false)]
+    expect(starts(scopeCellsForExport(cells, "validated-only"))).toEqual(["p2*", "p2b"])
+    expect(cells[2].paragraphStart).toBeUndefined()
+  })
+})
+
+// AQU-2551 re-review finding 7 (Nov 14): the voice filter (and the chapter
+// filter) dropped lines before the carry ran, so exporting one speaker's lines
+// ran their paragraphs together. Every filter now drops through the one carry.
+describe("a line dropped by the voice or chapter filter (AQU-2551)", () => {
+  type ParaCell = TestCell & { paragraphStart?: boolean; voice?: string }
+  const para = (id: string, voice: string, start: boolean): ParaCell =>
+    ({ id, status: "validated", translated: id, voice, ...(start ? { paragraphStart: true } : {}) })
+  const starts = (cells: ParaCell[]) => cells.map((c) => `${c.id}${c.paragraphStart ? "*" : ""}`)
+  const cells = [para("p1", "Ana", true), para("p2a", "Ben", true), para("p2b", "Ana", false), para("p2c", "Ana", false)]
+  const ana = (c: ParaCell) => c.voice === "Ana"
+
+  it("passes its paragraph start to the next kept line under current", () => {
+    expect(starts(scopeCellsForExport(cells, "current", ana))).toEqual(["p1*", "p2b*", "p2c"])
+  })
+
+  it("passes it on under validated-only too, across a line the mode drops", () => {
+    const mixed = [cells[0], cells[1], { ...cells[2], status: "unvalidated" as const }, cells[3]]
+    expect(starts(scopeCellsForExport(mixed, "validated-only", ana))).toEqual(["p1*", "p2c*"])
+  })
+})

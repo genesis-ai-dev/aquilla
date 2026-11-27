@@ -170,6 +170,12 @@ export interface CellSummary {
   audioApproved?: boolean
   /** Media redesign slice 2: mirrors `CellData.laneStatus`. */
   laneStatus?: CellData["status"]
+  /** AQU-2544: mirrors `CellData.paragraphStart`, so a translation import
+   *  can pair paragraph by paragraph. Absent on a continuation line. */
+  paragraphStart?: boolean
+  /** AQU-2544: a PO entry's context (`metadata.po.msgctxt`), so a translation
+   *  import keeps two entries with the same msgid apart. */
+  msgctxt?: string
 }
 
 /**
@@ -1259,7 +1265,9 @@ export class CellStore {
       // chapter health builder's `isExcluded`, and batch drafting's target list —
       // can apply the same predicate without reaching back into the store's rows.
       hidden: view.hidden,
+      paragraphStart: view.paragraphStart,
       ...summaryCastName(view.metadata),
+      ...summaryMsgctxt(view.metadata),
     }
     const entry = {
       version,
@@ -4025,6 +4033,12 @@ function summaryCastName(metadata: CellData["metadata"]): { castName?: string } 
   const raw = metadata?.cast_name
   const name = typeof raw === "string" ? raw.trim() : ""
   return name ? { castName: name } : {}
+}
+
+function summaryMsgctxt(metadata: CellData["metadata"]): { msgctxt?: string } {
+  const po = metadata?.po
+  const raw = po && typeof po === "object" ? (po as { msgctxt?: unknown }).msgctxt : undefined
+  return typeof raw === "string" && raw ? { msgctxt: raw } : {}
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {

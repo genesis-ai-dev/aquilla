@@ -22,7 +22,8 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // all camera angles.
 
 import { ExtensionExports } from "@/components/tools/ExtensionExports"
-import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
+import { flushSync } from "react-dom"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -63,7 +64,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, chapterNumbersByLabel, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterLabelForCell, chapterNumbersByLabel, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -130,7 +131,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-episode" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-episode" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "docx-lines" | "pdf" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-episode" | "audio-by-line" | "audio-chapter"
 
@@ -161,6 +162,25 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     ext: ".docx",
     descriptionKey: "importExport.format.docx.description",
     lossy: false,
+  },
+  {
+    // AQU-2551 (question 54): a new Word document written from the lines, for
+    // a file with no uploaded .docx to write into (a PDF source, and any
+    // other). Offered wherever the round-trip Word export is not.
+    id: "docx-lines",
+    labelKey: "importExport.format.docxLines.label",
+    ext: ".docx",
+    descriptionKey: "importExport.format.docxLines.description",
+    lossy: true,
+  },
+  {
+    // AQU-2680 (question 54): the same lines as a PDF, from the browser's own
+    // print window ("Save as PDF"); offered beside "New Word document".
+    id: "pdf",
+    labelKey: "importExport.format.pdfPrint.label",
+    ext: ".pdf",
+    descriptionKey: "importExport.format.pdfPrint.description",
+    lossy: true,
   },
   {
     // AQU-152a: PPTX export with slide/shape/paragraph structure preserved.
@@ -619,6 +639,9 @@ export function ExportDialog({
   // says this file has none (a file migrated from Codex), there is no primary
   // download either, and the format list opens instead.
   const roundTripAvailable = activeFileHasOriginalSource !== false
+  // AQU-2551: Word is offered one way or the other: into the uploaded .docx
+  // when there is one, else as a new document from the lines.
+  const roundTripWord = activeFileType === "docx" && roundTripAvailable
   const nativeFormatCandidate = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
   const nativeFormatId =
     nativeFormatCandidate && ROUND_TRIP_EXPORT_FORMATS.has(nativeFormatCandidate) && !roundTripAvailable
@@ -807,10 +830,15 @@ export function ExportDialog({
       // the fold only lists the one this file was imported as. Remembering
       // InDesign from another file in the project must not make Export read a
       // Word package as an IDML archive.
+      // AQU-2551: and the two Word choices swap with the file, so a remembered
+      // one is only restored where it is the one this file offers.
+      // AQU-2680: the PDF goes with "New Word document".
+      const otherWord = roundTripWord ? ["docx-lines", "pdf"] : ["docx"]
       const rememberedFormat = remembered.foldFormat
       const roundTripOnly = rememberedFormat === "usfm" || rememberedFormat === "docx"
         || rememberedFormat === "pptx" || rememberedFormat === "idml" || rememberedFormat === "json"
       const rememberedIsOffered = !!rememberedFormat
+        && !otherWord.includes(rememberedFormat)
         && BASE_FORMAT_OPTIONS.some((f) => f.id === rememberedFormat)
         && !(roundTripOnly && (rememberedFormat !== activeFileType || !roundTripAvailable))
       if (rememberedIsOffered) {
@@ -819,7 +847,7 @@ export function ExportDialog({
       restoredRef.current = true
     }
     prevOpenRef.current = open
-  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile, activeFileType, roundTripAvailable])
+  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile, roundTripWord, activeFileType, roundTripAvailable])
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
   // AQU-437: Filename control state. Default changes with scope/format.
@@ -1116,7 +1144,7 @@ export function ExportDialog({
 
   // AQU-2183: html does project scope too, through its own orchestrator (a zip
   // of book pages plus an index), not through buildProjectZip's one-entry-per-file shape.
-  const fileOnlyFormats = ["audio-by-character", "audio-episode", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-episode", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "docx-lines", "pdf", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -1139,7 +1167,7 @@ export function ExportDialog({
    * original is plain text, so the worker cuts the chapter out of it. That is
    * a different mechanism with its own condition — see `canScopeToChapter`.
    */
-  const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const chapterScopeFormats = ["txt", "md", "html", "docx-lines", "pdf", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
     (chapterScopeFormats as readonly string[]).includes(fmt)
 
@@ -1167,7 +1195,8 @@ export function ExportDialog({
     const visible = formatOptions.filter((f) => {
       // AQU-2211: the round-trip formats also need the file's original upload.
       if (f.id === "usfm") return activeFileType === "usfm" && roundTripAvailable
-      if (f.id === "docx") return activeFileType === "docx" && roundTripAvailable // AQU-233: only for docx imports
+      if (f.id === "docx") return roundTripWord // AQU-233: only for docx imports
+      if (f.id === "docx-lines" || f.id === "pdf") return !roundTripWord // AQU-2551, AQU-2680: where the round trip is not
       if (f.id === "pptx") return activeFileType === "pptx" && roundTripAvailable // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" && roundTripAvailable // only for idml imports
       if (f.id === "json") return activeFileType === "json" && roundTripAvailable // AQU-525: only for json imports
@@ -1195,7 +1224,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, hasTimedCells, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable])
+  }, [activeFileType, formatOptions, hasSdbhFiles, hasTimedCells, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable, roundTripWord])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -1230,6 +1259,15 @@ export function ExportDialog({
     | { kind: "ok"; msg: string }
     | { kind: "ok-lossy"; msg: string; lossyVerseCount: number }
   >({ kind: "idle" })
+  // AQU-2680 browser pass: the status sits at the foot of a long, scrolling
+  // dialog, so whenever it is set it is brought into view, before the page
+  // paints (the PDF's print window opens right after). Progress ticks of a
+  // busy status don't scroll again, so a long export doesn't fight the person.
+  const statusRef = useRef<HTMLDivElement>(null)
+  const statusScrollKey = status.kind === "busy" ? status.kind : `${status.kind}:${"msg" in status ? status.msg : ""}`
+  useLayoutEffect(() => {
+    statusRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [statusScrollKey])
   // Inline-style fidelity report for the last export (parity run: users must
   // see when formatting could not be carried into edited translations).
   const [fidelityWarnings, setFidelityWarnings] = useState<ExportFidelityWarning[]>([])
@@ -1238,6 +1276,11 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
   const [repairingCopy, setRepairingCopy] = useState(false)
+  // AQU-2680 re-check finding 3: what the PDF export printed, so the Word
+  // file of the same lines is one click away beside the print message. Some
+  // apps' built-in browsers (Gmail, Slack, X, LinkedIn, Telegram on iPhone)
+  // have no print and don't say so; this is their way out.
+  const [pdfWordFallback, setPdfWordFallback] = useState<{ cells: CellData[]; name: string } | null>(null)
   // Translations the failed InDesign export found outside the file's style
   // runs. Non-zero offers the placement beside the error.
   const [idmlUnplacedCount, setIdmlUnplacedCount] = useState(0)
@@ -1376,12 +1419,12 @@ export function ExportDialog({
   }, [open])
 
   /**
-   * Apply the voice filter to a cell array.
-   * When voiceFilter is empty, all cells are returned.
+   * Does a cell pass the voice filter? An empty voiceFilter passes every cell.
+   * AQU-2551 re-review finding 7: a predicate, so the line it drops goes
+   * through scopeCellsForExport's paragraph-start carry.
    */
-  function applyVoiceFilter(cs: CellData[]): CellData[] {
-    if (!voiceFilter) return cs
-    return cs.filter((c) => getCellVoice(c) === voiceFilter)
+  function keepsVoice(c: CellData): boolean {
+    return !voiceFilter || getCellVoice(c) === voiceFilter
   }
 
   // AQU-465: Chapter scope — the middle ground between "current file" and
@@ -1521,7 +1564,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-episode" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-episode" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "docx-lines" && format !== "pdf" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1593,6 +1636,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
+    setPdfWordFallback(null)
     setIdmlUnplacedCount(0)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     let idmlTelemetryStartedAt: number | null = null
@@ -2199,7 +2243,7 @@ export function ExportDialog({
             })),
             title: projectName,
             validatedOnly,
-            lang: targetLanguage,
+            lang: targetLanguageCode ?? undefined,
           })
           const htmlName = buildExportStem(true)
           downloadBlob(htmlZip.blob, `${htmlName}.zip`)
@@ -2255,7 +2299,9 @@ export function ExportDialog({
         // them.
         const filteredCells = opts?.audioCues
           ? dropHiddenCells(audioCells ?? [])
-          : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
+          : scopeCellsForExport(cells, contentMode, voiceFilter || chapter
+            ? (c) => keepsVoice(c) && (!chapter || chapterLabelForCell(c) === chapter)
+            : undefined)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
@@ -2272,13 +2318,46 @@ export function ExportDialog({
           case "md":
             blob = exportMarkdownStructured(filteredCells)
             break
+          case "docx-lines": {
+            // AQU-2551: built from the same scoped lines as the text formats.
+            const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
+            // AQU-2680 browser pass: the lane's language code ("es"), never its name ("Spanish"); none when unknown.
+            blob = await exportDocxFromLines(filteredCells, { lang: targetLanguageCode ?? undefined })
+            break
+          }
+          case "pdf": {
+            // AQU-2680: the print window saves the PDF; where this browser
+            // cannot print, the Word file is saved instead, with how to make
+            // the PDF from it. A cancel in the print window saves nothing.
+            const { exportPdfOrWord } = await import("@/lib/export/pdf-or-word")
+            // AQU-2680 re-check finding 5: the message is up before the
+            // print window opens, as Chrome's holds the page until it closes.
+            const showPrintMessage = () => {
+              setStatus({ kind: "ok", msg: t("importExport.status.pdfChooseSaveAsPdf") })
+              setPdfWordFallback({ cells: filteredCells, name: `${baseName}.docx` })
+            }
+            const result = await exportPdfOrWord(filteredCells, {
+              title: baseName,
+              lang: targetLanguageCode ?? undefined,
+              print: { beforePrint: () => flushSync(showPrintMessage) },
+            })
+            setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
+            if (result.kind === "print") {
+              showPrintMessage()
+            } else {
+              setPdfWordFallback(null)
+              downloadBlob(result.blob, `${baseName}.docx`)
+              setStatus({ kind: "ok", msg: result.notice })
+            }
+            return
+          }
           case "html":
             // AQU-2182: scoped like the other text formats — hidden cells,
             // validated-only and the chapter range are already applied above.
             blob = exportHtml(filteredCells, {
               fileName: activeFileName,
               validatedOnly,
-              lang: targetLanguage,
+              lang: targetLanguageCode ?? undefined,
             })
             break
           case "tsv":
@@ -2395,6 +2474,7 @@ export function ExportDialog({
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
       setIdmlRecovery(null)
+      setPdfWordFallback(null)
       setIdmlUnplacedCount(0)
     }
     onOpenChange(next)
@@ -3479,6 +3559,7 @@ export function ExportDialog({
         {/* i18n-exempt "idle" is an export-status kind tag, not copy */}
         {status.kind !== "idle" && (
           <div
+            ref={statusRef}
             role="status"
             aria-live="polite"
             className={
@@ -3541,6 +3622,22 @@ export function ExportDialog({
                     disabled={!onRepairIdmlCopy || repairingCopy}
                   >
                     {t("importExport.dialog.repairByReimporting")}
+                  </Button>
+                </span>
+              )}
+              {status.kind === "ok" && pdfWordFallback && (
+                <span className="pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void (async () => {
+                        const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
+                        downloadBlob(await exportDocxFromLines(pdfWordFallback.cells, { lang: targetLanguageCode ?? undefined }), pdfWordFallback.name)
+                      })()
+                    }}
+                  >
+                    {t("importExport.dialog.pdfOrDownloadWord")}
                   </Button>
                 </span>
               )}

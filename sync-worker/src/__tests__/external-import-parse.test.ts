@@ -313,6 +313,21 @@ describe('artifact parse — preview (REST)', () => {
     expect(body.sampleCells[2].content).toBe('One, two')
   })
 
+  // AQU-2544, question 51: the Agent API import parses a .txt on the Sentence
+  // setting (no cell unit), where every line is its own paragraph, blank lines
+  // skipped. Before, the lines between blank lines were joined into cells of
+  // up to 200 characters.
+  it('parses a multi-line .txt one cell per line', async () => {
+    const lines = ['In the beginning God created.', 'And the earth was formless.', 'And God said, let there be light.']
+    const artifactId = await upload(env, leadToken, 'Genesis.txt', `Genesis\n\n${lines.join('\n')}\n`, 'text/plain')
+    const res = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as PreviewBody
+    expect(body.fileType).toBe('txt')
+    expect(body.totalCells).toBe(4)
+    expect(body.sampleCells.map((c) => c.content)).toEqual(['Genesis', ...lines])
+  })
+
   it('honors an explicit fileType override where sniffing would misclassify', async () => {
     // .properties content sniffs as plaintext (no commas/tabs/JSON markers).
     const artifactId = await upload(

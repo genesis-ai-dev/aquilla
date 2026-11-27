@@ -120,6 +120,7 @@ import type {
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { hasPdfHeader } from "../../shared/pdf-header"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -823,6 +824,15 @@ export async function importFile(
   return { refs, speakerPairs: imported.speakerPairs, ...(skipped.length ? { skipped } : {}) }
 }
 
+/** AQU-2551: a PDF whose name lost its extension ("report", "x.pdf.download")
+ *  is still a PDF, and must not take the unknown-file path to the AI sandbox.
+ *  Review finding 13 / re-review finding 9: its header ("%PDF-") is taken
+ *  where pdf.js takes it (shared/pdf-header); a text file that mentions
+ *  "%PDF-" mid-line is not a PDF. */
+async function pdfByContent(file: File): Promise<FileType | null> {
+  return hasPdfHeader(new Uint8Array(await file.slice(0, 1024).arrayBuffer())) ? "pdf" : null
+}
+
 /** Parse/classify exactly once so preview and commit use the same immutable
  * recipe and parsed units. Deterministic content sniffing precedes AI. */
 export async function prepareImportFile(
@@ -830,21 +840,22 @@ export async function prepareImportFile(
   ctx: PrepareImportContext,
 ): Promise<PreparedImportFile> {
   if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-  const extensionType = detectFileType(file.name)
+  const typeByName = detectFileType(file.name)
   // A film or recording is checked against its own 2 GB ceiling where it is
   // uploaded, in parts (emitMediaFile, AQU-1853). The 95 MB ceiling below is
   // the text source's: run first, it refused every film over 95 MB, so the
   // media ceiling could never be reached (AQU-2344).
-  if (extensionType && isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
+  if (typeByName && isMediaFileType(typeByName)) return { fileType: typeByName, results: [] }
   // Fail before parsing/decompression and before any server event. The same
   // ceiling is enforced again by the artifact route as a trust boundary.
   assertSourceUploadByteLength(file.size)
+  const extensionType = typeByName ?? await pdfByContent(file)
   if (extensionType) {
     // Opaque packages need their deterministic binary adapter. Textual
     // extensions are sniffed as content first so a USFM document named .txt,
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     try {
-      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
+      if (extensionType === "docx" || extensionType === "pdf" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
           file,
           extensionType,
@@ -914,6 +925,10 @@ export async function prepareImportFile(
       // discards its source-artifact and locator contract and can only produce
       // a non-round-trippable "custom" import.
       if (extensionType === "idml") throw error
+      // AQU-2551: a PDF the reader refuses (scanned, empty, locked, damaged)
+      // is told why. The sandbox cannot read a scan or open a locked file
+      // either, and would only make a slower, different guess at the rest.
+      if (extensionType === "pdf") throw error
       if (!ctx.identityToken) throw error
       return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
     }
@@ -2947,6 +2962,20 @@ export async function parseFile(
       const strings = await extractDocxStrings(buffer, { cellUnit: options?.cellUnit })
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
+    }
+    case "pdf": {
+      // AQU-2551: pdf.js loads only now, and parses in its own worker.
+      const buffer = await file.arrayBuffer()
+      const { readPdfImport } = await import("./import/pdf-import")
+      const read = await readPdfImport(buffer, { cellUnit: options?.cellUnit })
+      return [{
+        name: file.name,
+        strings: read.strings,
+        rawBytes: buffer,
+        rawSourceFormat: "pdf",
+        roundTripFidelity: "preserved-only",
+        ...(read.importNotices.length ? { importNotices: read.importNotices } : {}),
+      }]
     }
     case "pptx": {
       const buffer = await file.arrayBuffer()

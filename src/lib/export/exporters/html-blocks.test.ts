@@ -2,7 +2,10 @@
 // the book's structure survives — a line's poetry level, a note's text and
 // origin reference, the styling a character marker carried — and that nothing
 // reaches the page unescaped.
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
+import { en } from "@/lib/i18n/messages/en"
+import { registerCatalog } from "@/lib/i18n/messages"
+import { writeStoredLocale, LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import { blockClass, cellLines, createNoteCollector, escapeHtml, lineInlineHtml } from "./html-blocks"
 
 describe("cellLines", () => {
@@ -168,6 +171,36 @@ describe("createNoteCollector", () => {
     let last = ""
     for (let i = 0; i < 27; i++) last = notes.marker({ kind: "note", noteKind: "xref", ref: "", text: "x" })
     expect(last).toContain(">aa</a>")
+  })
+
+  // AQU-2680 re-check finding 2: the list's heading and its "back to text"
+  // label are the app's words, not fixed English, and each note reads in its
+  // own direction, so an Arabic or Hebrew note is right to left.
+  describe("in the app's language, each note in its own direction", () => {
+    afterEach(() => localStorage.removeItem(LOCALE_STORAGE_KEY))
+
+    it("words the heading and the back link through the app's messages", () => {
+      registerCatalog("fr", { ...en, "importExport.htmlPage.notes": "Remarques", "importExport.htmlPage.backToText": "Retour au texte" })
+      writeStoredLocale("fr")
+      const notes = createNoteCollector("s")
+      notes.marker({ kind: "note", noteKind: "footnote", ref: "", text: "une note" })
+      const list = notes.listHtml()
+      expect(list).toContain('<aside class="notes" aria-label="Remarques">')
+      expect(list).toContain('<h3 class="notes-title">Remarques</h3>')
+      expect(list).toContain('aria-label="Retour au texte"')
+      expect(list).not.toContain("Back to text")
+    })
+
+    it("sets right to left on an Arabic or Hebrew note, and leaves others as they were", () => {
+      const notes = createNoteCollector("s")
+      notes.marker({ kind: "note", noteKind: "footnote", ref: "", text: "حاشية." })
+      notes.marker({ kind: "note", noteKind: "footnote", ref: "1:2", text: "הערה." })
+      notes.marker({ kind: "note", noteKind: "footnote", ref: "", text: "a note" })
+      const list = notes.listHtml()
+      expect(list).toContain('<li class="note footnote" id="s-n1" dir="rtl">')
+      expect(list).toContain('<li class="note footnote" id="s-n2" dir="rtl">')
+      expect(list).toContain('<li class="note footnote" id="s-n3">')
+    })
   })
 
   it("a section with no notes renders no list", () => {

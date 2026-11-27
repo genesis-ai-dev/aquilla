@@ -49,7 +49,7 @@ export const error = defineNamespace({
     "error.upload.emptyFile": "That file is empty — pick one with content in it.",
     "error.upload.tooLarge": "That file is {size} MB — the limit is {limit} MB.",
     "error.parseDocument.failed":
-      "We couldn't read that file. It may be image-only, encrypted, or not a valid PDF or DOCX.",
+      "We couldn't read that file. It may be image-only, encrypted, or not a valid DOCX.",
     "error.changeset.notAuthorized": "You aren't authorized to view this approval.",
     "error.changeset.notFound": "This changeset couldn't be found.",
     "error.changeset.notApprovable": "This changeset can no longer be approved.",
@@ -383,7 +383,8 @@ export const error = defineNamespace({
       "error.parseDocument.failed": {
         description:
           "Shown in the rule-import dialog when the server can't extract text " +
-          "from an uploaded PDF or DOCX. Names the likely causes because the " +
+          "from an uploaded DOCX (PDFs are read in the browser and fail with " +
+          "their own messages). Names the likely causes because the " +
           "server's own reason is a raw diagnostic we deliberately don't show.",
       },
     },

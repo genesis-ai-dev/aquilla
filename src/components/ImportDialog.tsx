@@ -1996,6 +1996,7 @@ export function ImportDialog({
               getToken={getToken}
               applyOptimisticTargetEdits={translation.applyOptimisticTargetEdits}
               excludeFrontMatter={excludeFrontMatter}
+              cellUnit={cellUnit}
               initialFile={translationRun.file}
               onBackToFileChoice={backToTranslationChooser}
               fileForBook={translationFileForBook}

@@ -71,6 +71,9 @@ export type RoundTripFidelity = (typeof ROUND_TRIP_FIDELITIES)[number]
 export const SOURCE_ARTIFACT_FORMATS = {
   docx: { extension: "docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", defaultFidelity: "native" },
   pptx: { extension: "pptx", contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", defaultFidelity: "native" },
+  // AQU-2551: a PDF cannot be rebuilt from translated lines. The original is
+  // kept so it can be downloaded, and is never written back.
+  pdf: { extension: "pdf", contentType: "application/pdf", defaultFidelity: "preserved-only" },
   // Native fidelity remains gated on automated Adobe open/save/reopen
   // validation. The v2 engine preserves the exact source artifact today, but
   // the product must not claim native fidelity before that external gate.

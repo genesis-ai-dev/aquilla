@@ -19,7 +19,9 @@ import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { MAX_INPUT_BYTES } from "@/lib/rules/rule-extractor"
+import { MAX_DOCX_BYTES } from "../../shared/docx-limit"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
+import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
 
 // ── LLM ──────────────────────────────────────────────────────────────────────
 // Routed by system prompt so the two passes stay distinguishable no matter
@@ -135,6 +137,43 @@ describe("RuleImportDialog — AQU-196", () => {
 
     expect(await screen.findByText(/file too large/i)).toBeInTheDocument()
     expect(completeCalls).toEqual([])
+  })
+
+  // AQU-2551 (browser pass, finding 7g): the dialog said "PDF/DOCX (max
+  // 2 MB)", but only a DOCX has a file cap; a PDF of any size is read in the
+  // browser, and any document's text is capped by the extractor. The numbers
+  // come from the constants the dialog enforces.
+  it("states the limits it enforces: text files and any document's text by the extractor's cap, DOCX by its upload cap", async () => {
+    renderDialog()
+    await openDialog()
+    expect(MAX_INPUT_BYTES).toBe(200 * 1024)
+    expect(MAX_DOCX_BYTES).toBe(2 * 1024 * 1024)
+    expect(screen.getByText(
+      "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. "
+        + "Supports plain text and Markdown (max 200 KB), DOCX (max 2 MB), and PDF. The text read from a document can be up to 200 KB.",
+    )).toBeInTheDocument()
+  })
+
+  // AQU-2551 review findings 1–3: a PDF is read in the browser, so the 2 MB
+  // cap on what is uploaded to the server's reader does not apply to it; its
+  // text still goes through the extractor's own size check.
+  it("reads a PDF over 2 MB in the browser and sends its text to the extractor", async () => {
+    renderDialog()
+    await openDialog()
+
+    const pdf = new Uint8Array(buildPdf({ pages: [{ runs: [{ text: "Always capitalize divine pronouns.", x: 72, y: 700 }] }] }))
+    // trailing bytes past %%EOF: a big file pdf.js still reads
+    const padded = new Uint8Array(pdf.length + 2_200_000)
+    padded.set(pdf)
+    padded.fill(0x0a, pdf.length)
+    const file = new File([padded], "style-guide.pdf", { type: "application/pdf" })
+    const dropZone = screen
+      .getByRole("button", { name: /browse file/i })
+      .closest("div") as HTMLElement
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } })
+
+    await waitFor(() => expect(completeCalls).toContain("pass1"), { timeout: 10_000 })
+    expect(screen.queryByText(/too large/i)).not.toBeInTheDocument()
   })
 
   it("shows running progress across pass 2 rather than a bare spinner", async () => {

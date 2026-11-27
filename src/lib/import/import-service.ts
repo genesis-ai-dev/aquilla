@@ -22,6 +22,9 @@ export interface ImportPreviewNotice {
     /** AQU-2119: cue timestamp lines that produced no cue, so the import says
      *  so rather than dropping their words silently. */
     | "subtitle-cues-unreadable"
+    /** AQU-2551: a PDF's scanned (image-only) pages hold no text and are not
+     *  in the import; its text pages are. */
+    | "pdf-image-only-pages"
   severity: "warning"
   message: string
 }

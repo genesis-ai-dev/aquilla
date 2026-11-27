@@ -33,8 +33,10 @@ import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
-import { parseDocumentFile, MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { isPdfFile, parseDocumentFile } from "@/lib/frontier/parse-document"
+import { MAX_DOCX_BYTES } from "../../shared/docx-limit"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatFileSize } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 const ACCEPTED_TEXT_TYPES = [".txt", ".md"]
@@ -73,6 +75,7 @@ type Stage = "idle" | "extracting" | "review"
 
 export function RuleImportDialog({ completionSettings, onAdd, projectId, open: controlledOpen, onOpenChange }: Props) {
   const t = useT()
+  const { locale } = useI18n()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
@@ -178,15 +181,19 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId, open: c
     }
 
     if (isBinary) {
+      // AQU-2551: a PDF is read here in the browser, so the upload cap and the
+      // sign-in the server's reader needs apply only to a .docx. The text is
+      // size-checked by runExtraction either way.
+      const pdf = isPdfFile(file)
       // Client-side size cap before upload
-      if (file.size > MAX_PARSE_FILE_BYTES) {
+      if (!pdf && file.size > MAX_DOCX_BYTES) {
         setError(
           t("rules.importDialog.binaryFileTooLarge", { size: (file.size / 1024 / 1024).toFixed(1) }),
         )
         return
       }
-      const jwt = session?.jwt
-      if (!jwt) {
+      const jwt = session?.jwt ?? ""
+      if (!pdf && !jwt) {
         setError(t("rules.importDialog.signInRequiredForBinary"))
         return
       }
@@ -307,7 +314,10 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId, open: c
         {stage === "idle" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {t("rules.importDialog.description")}
+              {t("rules.importDialog.description", {
+                textLimit: formatFileSize(MAX_TEXT_BYTES, locale),
+                docxLimit: formatFileSize(MAX_DOCX_BYTES, locale),
+              })}
             </p>
 
             {/* Drop zone */}

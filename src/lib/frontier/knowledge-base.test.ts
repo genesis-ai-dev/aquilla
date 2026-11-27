@@ -5,9 +5,19 @@ import {
   isKnowledgeIndexStalled,
   KB_INDEX_STALE_MS,
   KnowledgeBaseApiError,
+  KnowledgeBaseReadError,
   listKnowledgeDocuments,
   uploadKnowledgeDocument,
 } from "./knowledge-base"
+import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
+import { readPdfText } from "@/lib/import/pdf-import"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
+import { MAX_DOCX_BYTES } from "../../../shared/docx-limit"
+
+vi.mock("@/lib/import/pdf-import", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/import/pdf-import")>()
+  return { ...actual, readPdfText: vi.fn(actual.readPdfText) }
+})
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -48,10 +58,103 @@ describe("Knowledge Base API client", () => {
     expect(new Headers(init.headers).get("x-doc-name")).toBe("style%20guide.md")
   })
 
+  // AQU-2551 review findings 1–3: the server no longer parses PDFs. A PDF is
+  // read here with the import's reader, and the upload carries the untouched
+  // original and its text.
+  it("reads a PDF in the browser and uploads the original with its text", async () => {
+    const doc = { id: "doc-3", name: "guide.pdf", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    const pdf = buildPdf({ pages: [{ runs: [{ text: "Use formal language.", x: 72, y: 700 }] }] })
+    const file = new File([pdf], "guide.pdf", { type: "application/pdf" })
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)).resolves.toEqual({ doc, textTruncated: false })
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(init.body).toBeInstanceOf(FormData)
+    const form = init.body as FormData
+    expect(form.get("text")).toBe("Use formal language.")
+    const sent = form.get("file") as File
+    expect(new Uint8Array(await sent.arrayBuffer())).toEqual(new Uint8Array(pdf))
+    expect(new Headers(init.headers).get("x-doc-name")).toBe("guide.pdf")
+  })
+
+  // A huge PDF's text is cut in the browser, one past the server's cap, so
+  // the form stays under its byte limit and the server still marks the
+  // document truncated instead of refusing it as too large.
+  it("sends only one character past the text cap for a huge PDF", async () => {
+    const doc = { id: "doc-5", name: "huge.pdf", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc, textTruncated: true }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    vi.mocked(readPdfText).mockResolvedValueOnce("a".repeat(MAX_KB_TEXT_CHARS + 5_000))
+    const file = new File([buildPdf({ pages: [{ runs: [{ text: "x", x: 72, y: 700 }] }] })], "huge.pdf")
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file))
+      .resolves.toEqual({ doc, textTruncated: true })
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(((init.body as FormData).get("text") as string).length).toBe(MAX_KB_TEXT_CHARS + 1)
+  })
+
+  it("refuses a PDF it cannot read before uploading, in the import's words", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const scanned = new File([buildPdf({ pages: [{ image: true }] })], "scan.pdf")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", scanned).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseReadError)
+    expect((thrown as Error).message).toBe("This PDF is a scanned image. It has no text to import.")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("turns the server's refusal of a PDF without its text into one plain sentence", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      response({ error: { code: "pdf_text_required", message: "PDFs are read in the app." } }, 415),
+    ))
+    const file = new File(["# notes"], "notes.md")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
+    expect((thrown as KnowledgeBaseApiError).serverMessage).toBe("Reload the page, then add this PDF again.")
+  })
+
+  // A DOCX over the server's limit used to go up and come back with the
+  // server's raw "file exceeds the 2000000-byte extraction limit".
+  it("refuses a Word file over the DOCX limit before uploading, in one plain sentence", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const big = new File([new Uint8Array(MAX_DOCX_BYTES + 1)], "Guide.DOCX")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", big).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseReadError)
+    expect((thrown as Error).message).toBe(
+      "This Word file is larger than 2 MB, so it can't be added. Split it or save a smaller copy.",
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("uploads a Word file of exactly the DOCX limit", async () => {
+    const doc = { id: "doc-5", name: "edge.docx", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    const edge = new File([new Uint8Array(MAX_DOCX_BYTES)], "edge.docx")
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", edge))
+      .resolves.toEqual({ doc, textTruncated: false })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("turns the server's refusal of a Word file over the limit into the same sentence", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      response({ error: { code: "docx_too_large", message: "file exceeds the 2097152-byte extraction limit" } }, 400),
+    ))
+    const file = new File(["bytes"], "guide.docx")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseApiError)
+    expect((thrown as KnowledgeBaseApiError).serverMessage).toBe(
+      "This Word file is larger than 2 MB, so it can't be added. Split it or save a smaller copy.",
+    )
+  })
+
   it("passes on that only the first part of the text was kept (AQU-2594)", async () => {
-    const doc = { id: "doc-3", name: "long.pdf", scope: "project" }
+    const doc = { id: "doc-4", name: "long.md", scope: "project" }
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ doc, textTruncated: true }, 201)))
-    const file = new File(["%PDF"], "long.pdf", { type: "application/pdf" })
+    const file = new File(["# long"], "long.md", { type: "text/markdown" })
 
     await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file))
       .resolves.toEqual({ doc, textTruncated: true })

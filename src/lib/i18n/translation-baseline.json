@@ -2042,6 +2042,7 @@
   "editor.timeline.cueSplit": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
   "editor.timeline.cueUndoHint": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
   "editor.timeline.deleteTakeFailed": ["ar","fr","id","ms","my","ru","th","zh-Hans","zh-Hant"],
+  "editor.timeline.filmTrack": ["fr","id"],
   "editor.timeline.hiddenTracks": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
   "editor.timeline.hiddenTracksAria": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
   "editor.timeline.hiddenTracksNote": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],

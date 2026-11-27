@@ -26,7 +26,15 @@ const MY_EVENT_ID = "E-mine"
 
 vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/events-emit")>()
-  return { ...actual, emitTargetCellCommit: vi.fn(async () => "E-mine") }
+  const { commitAndValidateDouble } = await import("@/test-utils/commit-and-validate-double")
+  const emitTargetCellCommit = vi.fn(async () => "E-mine")
+  return {
+    ...actual,
+    emitTargetCellCommit,
+    // Queued as promptly as the commit mock, so the commit's await settles
+    // before the test lands a projection, as it did before AQU-2655.
+    emitTargetCellCommitAndValidate: commitAndValidateDouble(emitTargetCellCommit, vi.fn(async () => "E-validate")),
+  }
 })
 
 // happy-dom has no layout engine, so LegendList may render no rows. Replace it

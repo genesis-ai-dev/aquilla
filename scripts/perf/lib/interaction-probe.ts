@@ -26,7 +26,7 @@
 
 export const INTERACTION_INIT_SCRIPT = `
 (() => {
-  const s = { longTasks: [], events: [], frames: [], react: { commits: 0, renders: {}, fibers: 0 } };
+  const s = { longTasks: [], events: [], frames: [], responses: [], react: { commits: 0, renders: {}, fibers: 0, log: [] } };
   window.__interactionProbe = s;
   const R = s.react;
   const fnName = (t) => {
@@ -39,6 +39,9 @@ export const INTERACTION_INIT_SCRIPT = `
     return null;
   };
   // tag 0 FunctionComponent, 11 ForwardRef, 14 MemoComponent, 15 SimpleMemoComponent.
+  // \`top\` is the first component the walk meets that rendered: the highest
+  // one in the tree, which is what scheduled (or inherited) this commit's work.
+  let top = null;
   const walk = (f) => {
     while (f) {
       const a = f.alternate;
@@ -46,6 +49,7 @@ export const INTERACTION_INIT_SCRIPT = `
         const n = fnName(f.type) || 'Anonymous';
         R.renders[n] = (R.renders[n] || 0) + 1;
         R.fibers++;
+        if (top === null) top = n;
       }
       if (f.child && (!a || f.child !== a.child)) walk(f.child);
       f = f.sibling;
@@ -55,7 +59,15 @@ export const INTERACTION_INIT_SCRIPT = `
     window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
       supportsFiber: true, renderers: new Map(), inject() { return 1; }, checkDCE() {},
       onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, onScheduleFiberRoot() {},
-      onCommitFiberRoot(_id, root) { try { R.commits++; walk(root.current); } catch (e) { R.error = String(e); } },
+      onCommitFiberRoot(_id, root) {
+        try {
+          const before = R.fibers;
+          top = null;
+          R.commits++;
+          walk(root.current);
+          R.log.push([Math.round(performance.now()), R.fibers - before, top]);
+        } catch (e) { R.error = String(e); }
+      },
     };
   }
   try {
@@ -68,6 +80,16 @@ export const INTERACTION_INIT_SCRIPT = `
       for (const e of list.getEntries()) s.events.push({ name: e.name, duration: e.duration, processing: e.processingEnd - e.processingStart });
     }).observe({ type: 'event', durationThreshold: 16, buffered: true });
   } catch {}
+  // When each API response finished, to line up against the commit log. Same-origin
+  // entries are the app's own static assets.
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        const u = new URL(e.name);
+        if (u.origin !== location.origin) s.responses.push([Math.round(e.responseEnd), u.pathname]);
+      }
+    }).observe({ type: 'resource' });
+  } catch {}
   // Input-to-paint: rAF runs before the frame is produced; the message task
   // posted from it runs after, which is the first moment the frame can be out.
   document.addEventListener('input', () => {
@@ -78,11 +100,11 @@ export const INTERACTION_INIT_SCRIPT = `
       c.port2.postMessage(0);
     });
   }, true);
-  s.reset = () => { s.longTasks.length = 0; s.events.length = 0; s.frames.length = 0; R.commits = 0; R.renders = {}; R.fibers = 0; };
+  s.reset = () => { s.responses.length = 0; s.longTasks.length = 0; s.events.length = 0; s.frames.length = 0; R.commits = 0; R.renders = {}; R.fibers = 0; R.log = []; };
 })();
 `
 
-export const READ_PROBE = "(() => { const s = window.__interactionProbe; return { longTasks: s.longTasks, events: s.events, frames: s.frames, react: s.react, longTaskUnsupported: !!s.longTaskUnsupported }; })()"
+export const READ_PROBE = "(() => { const s = window.__interactionProbe; return { longTasks: s.longTasks, events: s.events, frames: s.frames, responses: s.responses, react: s.react, longTaskUnsupported: !!s.longTaskUnsupported }; })()"
 export const RESET_PROBE = "window.__interactionProbe && window.__interactionProbe.reset()"
 
 /** Make the page believe the tab was hidden, the way a real tab switch does. */
@@ -122,7 +144,16 @@ export interface ProbeReading {
   longTasks: number[]
   events: Array<{ name: string; duration: number; processing: number }>
   frames: number[]
-  react: { commits: number; renders: Record<string, number>; fibers: number; error?: string }
+  /** [performance.now() ms the response finished, URL path] for every cross-origin request. */
+  responses: Array<[number, string]>
+  react: {
+    commits: number
+    renders: Record<string, number>
+    fibers: number
+    /** One entry per commit: [performance.now() ms, components rendered, topmost component rendered]. */
+    log: Array<[number, number, string | null]>
+    error?: string
+  }
   longTaskUnsupported: boolean
 }
 
@@ -139,6 +170,14 @@ export interface PhaseResult {
   componentRenders: number
   /** The components that rendered most, highest first. */
   topRenders: Array<[string, number]>
+  /**
+   * Every commit in order: [ms after the phase's first commit, components rendered, the
+   * topmost component that rendered]. Diff two runs' timelines to see which commits a
+   * timing-dependent count gained or lost.
+   */
+  commitLog: Array<[number, number, string | null]>
+  /** API responses on the same clock as `commitLog`: [ms after the phase's first commit, route]. */
+  responseLog: Array<[number, string]>
   longTaskCount: number
   longTaskTotalMs: number
   longestTaskMs: number
@@ -167,6 +206,7 @@ export function summarizePhase(
   requests: RequestTally,
   extra: Record<string, number> = {},
 ): PhaseResult {
+  const t0 = reading.react.log[0]?.[0] ?? 0
   const slowest = [...reading.events].sort((a, b) => b.duration - a.duration)[0]
   const repeatedRoutes: Record<string, number> = {}
   for (const [route, count] of Object.entries(requests.byRoute)) {
@@ -177,6 +217,8 @@ export function summarizePhase(
     reactCommits: reading.react.commits,
     componentRenders: reading.react.fibers,
     topRenders: Object.entries(reading.react.renders).sort((a, b) => b[1] - a[1]).slice(0, 25),
+    commitLog: reading.react.log.map(([t, fibers, top]) => [t - t0, fibers, top]),
+    responseLog: reading.responses.map(([t, pathname]) => [t - t0, routeKey("GET", pathname).slice(4)]),
     longTaskCount: reading.longTasks.length,
     longTaskTotalMs: Math.round(reading.longTasks.reduce((sum, ms) => sum + ms, 0)),
     longestTaskMs: Math.round(reading.longTasks.reduce((max, ms) => (ms > max ? ms : max), 0)),

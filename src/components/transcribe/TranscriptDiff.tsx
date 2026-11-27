@@ -6,7 +6,7 @@
 // changed are painted strongly; the rest of the word is tinted, so the eye
 // lands on the accent or the capital that moved.
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { diffWhileWriting, diffWriting, type DiffChunk, type DiffPiece } from "@/lib/transcript-cleanup/diff"
 import { cn } from "@/lib/utils"
@@ -84,22 +84,41 @@ function prefersReducedMotion(): boolean {
  * is not made to wait, and at once for a reader who asked for less motion.
  */
 export function TypedText({ text }: { text: string }) {
-  const [typed, setTyped] = useState(() => ({ text, shown: prefersReducedMotion() ? text.length : 0 }))
+  // The text whose typing has finished; anything else is still being typed.
+  const [typedText, setTypedText] = useState<string | null>(() => (prefersReducedMotion() ? text : null))
   // A different text restarts the typing (adjusted during render).
-  if (typed.text !== text) setTyped({ text, shown: prefersReducedMotion() ? text.length : 0 })
-  const shown = typed.text === text ? typed.shown : 0
-  const done = shown >= text.length
+  const [forText, setForText] = useState(text)
+  if (forText !== text) {
+    setForText(text)
+    setTypedText(prefersReducedMotion() ? text : null)
+  }
+  const done = typedText === text
+  // AQU-2655: each tick writes the letters straight into this span, not
+  // through React state. A state update per 30 ms tick was one React commit
+  // per tick — fifteen per row, most of the commits in a "transcribe all"
+  // pass. React commits when the typing starts and once when it is done (the
+  // cursor goes). While it types the span has no React children, so React
+  // never touches the letters the interval writes.
+  const lettersRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
-    if (done) return
+    const node = lettersRef.current
+    if (done || !node) return
     const step = Math.max(1, Math.ceil(text.length / (TYPE_MS / TYPE_TICK_MS)))
+    let shown = 0
+    node.textContent = ""
     const id = setInterval(() => {
-      setTyped((now) => (now.text === text ? { text, shown: Math.min(text.length, now.shown + step) } : now))
+      shown = Math.min(text.length, shown + step)
+      node.textContent = text.slice(0, shown)
+      if (shown >= text.length) {
+        clearInterval(id)
+        setTypedText(text)
+      }
     }, TYPE_TICK_MS)
     return () => clearInterval(id)
   }, [done, text])
   return (
     <span className="text-foreground/80" data-testid="transcribe-typed" data-typing={!done}>
-      {text.slice(0, shown)}
+      <span ref={lettersRef}>{done ? text : undefined}</span>
       {!done && <LoadingCursor plain />}
     </span>
   )

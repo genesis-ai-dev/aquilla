@@ -27,12 +27,16 @@ import { emitCellValidate, emitTargetCellCommit, type CellCommitInput } from "@/
 
 vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/events-emit")>()
+  const { commitAndValidateDouble } = await import("@/test-utils/commit-and-validate-double")
+  const emitTargetCellCommit = vi.fn(async (input: CellCommitInput) => input.id ?? `E-minted-${input.value}`)
+  const emitCellValidate = vi.fn(async () => "E-validate")
   return {
     ...actual,
     // Like the real emit: the enqueued event carries the caller's id when one
     // is supplied. Without one (the pre-fix editor) it mints its own.
-    emitTargetCellCommit: vi.fn(async (input: CellCommitInput) => input.id ?? `E-minted-${input.value}`),
-    emitCellValidate: vi.fn(async () => "E-validate"),
+    emitTargetCellCommit,
+    emitCellValidate,
+    emitTargetCellCommitAndValidate: commitAndValidateDouble(emitTargetCellCommit, emitCellValidate),
   }
 })
 

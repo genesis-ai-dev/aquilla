@@ -192,6 +192,11 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
 
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: mockFetchMemberScopes,
+  // The real Languages table (rendered once below) reads the scope view.
+  fetchMemberScopeView: async (jwt: string, projectId: string, userId: number) => ({
+    scopes: (await mockFetchMemberScopes(jwt, projectId, userId)) ?? [],
+    laneNames: {},
+  }),
   putMemberScopes: mockPutMemberScopes,
   fetchMemberLaneAssignments: mockFetchMemberLaneAssignments,
 }))

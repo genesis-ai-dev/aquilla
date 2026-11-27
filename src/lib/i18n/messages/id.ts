@@ -6294,6 +6294,7 @@ export const id: Catalog = {
   "workspace.sourceSelection.addToTermbase": "Tambahkan ke peristilahan",
   "workspace.statusBar.summary": "{total} sel · {translated} diterjemahkan {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} belum tervalidasi",
+  "workspace.statusBar.checking": "Memeriksa… {count} tersisa",
   "workspace.updateBanner.updateAvailable": "Pembaruan tersedia",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"{measured} rekaman terukur; {failed} tidak dapat diukur — rekam ulang untuk memperbaikinya."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"{measured} rekaman terukur."},"countVar":"measured"},

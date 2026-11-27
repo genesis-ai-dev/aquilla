@@ -6343,6 +6343,7 @@ export const ru: Catalog = {
   "workspace.sourceSelection.addToTermbase": "Добавить в терминологию",
   "workspace.statusBar.summary": "{total} ячеек · переведено {translated} {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} не подтверждено",
+  "workspace.statusBar.checking": "Проверка… осталось {count}",
   "workspace.updateBanner.updateAvailable": "Доступно обновление",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"Измерена {measured} запись; {failed} измерить не удалось — перезапишите их, чтобы исправить.","few":"Измерено {measured} записи; {failed} измерить не удалось — перезапишите их, чтобы исправить.","many":"Измерено {measured} записей; {failed} измерить не удалось — перезапишите их, чтобы исправить.","other":"Измерено {measured} записи; {failed} измерить не удалось — перезапишите их, чтобы исправить."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"Измерена {measured} запись.","few":"Измерено {measured} записи.","many":"Измерено {measured} записей.","other":"Измерено {measured} записи."},"countVar":"measured"},

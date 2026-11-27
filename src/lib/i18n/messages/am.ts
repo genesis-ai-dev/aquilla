@@ -7678,6 +7678,7 @@ export const am: Catalog = {
   "workspace.statusBar.bothSummary": "{total} መስመሮች · {done} ተጠናቋል {pct}",
   "workspace.statusBar.textLeftBadge": "የቀረ ጽሑፍ፦ {count}",
   "workspace.statusBar.audioLeftBadge": "የቀረ ድምጽ፦ {count}",
+  "workspace.statusBar.checking": "በመፈተሽ ላይ… {count} ቀርቷል",
   "workspace.updateBanner.updateAvailable": "ዝማኔ ይገኛል",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} ቅጂ ተለክቷል፤ {failed} መለካት አልቻለም — እነዚያን ለማስተካከል እንደገና ይቅዱ።","other":"{measured} ቅጂዎች ተለክተዋል፤ {failed} መለካት አልቻሉም — እነዚያን ለማስተካከል እንደገና ይቅዱ።"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} ቅጂ ተለክቷል።","other":"{measured} ቅጂዎች ተለክተዋል።"},"countVar":"measured"},

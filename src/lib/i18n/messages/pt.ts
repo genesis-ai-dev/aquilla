@@ -7378,6 +7378,7 @@ export const pt: Catalog = {
   "workspace.sourceSelection.addToTermbase": "Adicionar à terminologia",
   "workspace.statusBar.summary": "{total} células · {translated} traduzidas {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} não validadas",
+  "workspace.statusBar.checking": "Verificando… faltam {count}",
   "workspace.updateBanner.updateAvailable": "Atualização disponível",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} gravação medida; não foi possível medir {failed} — grave novamente para corrigi-las.","many":"{measured} gravações medidas; não foi possível medir {failed} — grave novamente para corrigi-las.","other":"{measured} gravações medidas; não foi possível medir {failed} — grave novamente para corrigi-las."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} gravação medida.","many":"{measured} gravações medidas.","other":"{measured} gravações medidas."},"countVar":"measured"},

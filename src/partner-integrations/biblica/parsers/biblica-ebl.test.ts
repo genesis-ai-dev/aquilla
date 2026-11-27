@@ -28,7 +28,6 @@ describe("EBL parser adapter", () => {
     // Nothing is filtered out for being scripture: a guide is written material
     // throughout, and the passages it quotes are part of the teaching.
     expect(strings.map((cell) => cell.original)).toEqual([
-      SAMPLE_EBL.summaryBanner,
       SAMPLE_EBL.timingBadge,
       SAMPLE_EBL.coverLine,
       ...SAMPLE_EBL.titleLines,
@@ -54,6 +53,7 @@ describe("EBL parser adapter", () => {
       SAMPLE_EBL.writeInPrompt,
       SAMPLE_EBL.glossaryHead,
       SAMPLE_EBL.glossaryBody,
+      SAMPLE_EBL.summaryBanner,
     ])
     expect(strings.map((cell) => cell.original)).not.toContain(SAMPLE_EBL.tableNumber)
     expect(strings.map((cell) => cell.original)).not.toContain(SAMPLE_EBL.writeInRule)
@@ -134,13 +134,13 @@ describe("EBL parser adapter", () => {
     const { result: { strings } } = await extractFrom({ body: [] })
 
     expect(strings.map((cell) => cell.original))
-      .toEqual([SAMPLE_EBL.summaryBanner, SAMPLE_EBL.timingBadge])
+      .toEqual([SAMPLE_EBL.timingBadge, SAMPLE_EBL.summaryBanner])
     expect(strings.every((cell) => cell.milestone === undefined)).toBe(true)
     expect(strings.every((cell) => cell.section === undefined)).toBe(true)
     expect(strings[0]?.metadata?.biblica).toEqual({
       version: 1,
       edition: "ebl",
-      paragraphStyle: "ParagraphStyle/07_Lessons%3atest summary header",
+      paragraphStyle: "ParagraphStyle/07_Lessons%3ams1",
     })
   })
 

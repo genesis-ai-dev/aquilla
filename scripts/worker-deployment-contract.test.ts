@@ -817,11 +817,14 @@ describe("worker deployment environment contract", () => {
     for (const name of ["build", "build:compile", "build:codex", "build:honeycomb", "build:context"]) {
       expect(scripts[name], name).toContain("pnpm run typecheck && ")
     }
-    for (const name of ["ci.yml", "release-verify.yml"]) {
-      const workflow = readRepoFile(".github", "workflows", name)
-      expect(workflow, name).toContain("run: pnpm run typecheck --noEmit")
-      expect(workflow, name).not.toMatch(/run: npx tsc -b/)
-    }
+    const ci = readRepoFile(".github", "workflows", "ci.yml")
+    expect(ci, "ci.yml").toContain("run: pnpm run typecheck --noEmit")
+    expect(ci, "ci.yml").not.toMatch(/run: npx tsc -b/)
+    // release-verify is the build since 2026-11-27, and the `build` script
+    // (checked above) type-checks through `pnpm run typecheck`.
+    const verify = readRepoFile(".github", "workflows", "release-verify.yml")
+    expect(verify, "release-verify.yml").toContain("run: pnpm run build")
+    expect(verify, "release-verify.yml").not.toMatch(/run: npx tsc -b/)
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

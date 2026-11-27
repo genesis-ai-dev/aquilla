@@ -43,6 +43,17 @@ describe("fileSummariesToProgress", () => {
     expect(map.size).toBe(2)
   })
 
+  it("carries a known draft count, including zero, and leaves an unknown one absent", () => {
+    const known = fileSummariesToProgress([
+      makeSummary({ fileId: "gen", aiDraftedCount: 0 }),
+      makeSummary({ fileId: "exo", aiDraftedCount: 4 }),
+      makeSummary({ fileId: "lev", aiDraftedCount: null }),
+    ])
+    expect(known.get("gen")?.aiDrafted).toBe(0)
+    expect(known.get("exo")?.aiDrafted).toBe(4)
+    expect("aiDrafted" in known.get("lev")!).toBe(false)
+  })
+
   it("returns an empty map for no files", () => {
     expect(fileSummariesToProgress([]).size).toBe(0)
   })
@@ -132,6 +143,14 @@ describe("mergeFileProgress", () => {
     const live = new Map([["gen", { translated: 0, validated: 0, total: 20 }]])
     expect(mergeFileProgress(base, live).get("gen")).toEqual({
       translated: 0, validated: 0, total: 20, recorded: 10, audioValidated: 9,
+    })
+  })
+
+  it("keeps the snapshot's draft count when the live entry has none", () => {
+    const base = new Map([["gen", { translated: 7, validated: 3, total: 10, aiDrafted: 4 }]])
+    const live = new Map([["gen", { translated: 9, validated: 3, total: 10 }]])
+    expect(mergeFileProgress(base, live).get("gen")).toEqual({
+      translated: 9, validated: 3, total: 10, aiDrafted: 4,
     })
   })
 

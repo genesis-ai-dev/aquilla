@@ -28,6 +28,7 @@ import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
+import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
@@ -202,6 +203,10 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
         }
         description={t("org.membersPage.orgPage.description")}
         inset={false}
+        // AQU-2324: People & access is where a grant is given; this page keeps
+        // its bulk invite, matrix and org-role controls, which it has no
+        // equivalent for yet.
+        actions={<ManageAccessLink orgId={orgId} open={{ people: "everyone" }} />}
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as MembersTab)}>

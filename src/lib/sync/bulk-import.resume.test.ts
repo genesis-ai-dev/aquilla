@@ -3,7 +3,7 @@
  * re-sending only the chunks that never landed.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./bulk-import"
+import { bulkUploadSource, BULK_IMPORT_CHUNK, importChunkStarts, type BulkImportCell } from "./bulk-import"
 import {
   listResumableImportSessions,
   resetImportSessionConnectionForTests,
@@ -74,6 +74,37 @@ async function wipe(): Promise<void> {
     request.onblocked = () => resolve()
   })
 }
+
+describe("importChunkStarts", () => {
+  it("fills a request up to the cell count, then up to the byte budget", () => {
+    expect(importChunkStarts(makeCells(5), [], { maxCells: 2, maxBytes: 1_000_000 })).toEqual([0, 2, 4])
+
+    const heavy = "x".repeat(80)
+    const cells = [0, 1, 2].map((i) => ({
+      id: `evt-${i}`,
+      cellId: `cell-${i}`,
+      anchorCellId: i === 0 ? null : `cell-${i - 1}`,
+      value: heavy,
+    }))
+    const starts = importChunkStarts(cells, [], { maxCells: 1500, maxBytes: 100 })
+    expect(starts).toEqual([0, 1, 2])
+
+    // A cell bigger than the budget still travels, alone, rather than being dropped.
+    expect(importChunkStarts(cells.slice(0, 1), [], { maxCells: 10, maxBytes: 10 })).toEqual([0])
+  })
+
+  it("counts the paired translation toward the same request", () => {
+    const cells = makeCells(2)
+    const targets = cells.map((cell) => ({
+      id: `target-${cell.id}`,
+      cellId: cell.cellId,
+      parentId: cell.id,
+      value: "",
+      valueHtml: "y".repeat(80),
+    }))
+    expect(importChunkStarts(cells, targets, { maxCells: 1500, maxBytes: 100 })).toEqual([0, 1])
+  })
+})
 
 describe("bulkUploadSource with a resumable session", () => {
   beforeEach(wipe)
@@ -191,6 +222,37 @@ describe("bulkUploadSource with a resumable session", () => {
       fetchImpl: attempt2.fetchImpl,
     })
     expect(sourceUpload.uploadSourceOriginal).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends an oversized cell batch as several requests under the body cap", async () => {
+    const heavy = "x".repeat(17 * 1024 * 1024)
+    const cells = [0, 1].map((i) => ({
+      id: `evt-${i}`,
+      cellId: `cell-${i}`,
+      anchorCellId: i === 0 ? null : "cell-0",
+      value: "verse",
+      valueHtml: heavy,
+    }))
+    const { bodies, fetchImpl } = recordingFetch()
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "book.idml" },
+      cells,
+      targets: cells.map((cell) => ({
+        id: `target-${cell.id}`,
+        cellId: cell.cellId,
+        parentId: cell.id,
+        value: "",
+        valueHtml: heavy,
+      })),
+      getToken: async () => "tok",
+      fetchImpl,
+    })
+    const chunks = bodies.filter((body) => !body.complete)
+    expect(chunks).toHaveLength(2)
+    expect(chunks.every((body) => body.cells.length === 1)).toBe(true)
+    expect(chunks.every((body) => JSON.stringify(body).length < 64 * 1024 * 1024)).toBe(true)
   })
 
   it("sends every chunk when there is no session (unchanged one-shot path)", async () => {

@@ -474,8 +474,8 @@ export default function App() {
           <AiModelConsentDialog />
           <AiModelDownloadChip />
           <AudioBulkProgressBanner />
-          {/* AQU-2654: batch drafting keeps running after the user leaves the
-              editor — its progress, completion and failure follow them. */}
+          {/* Batch drafting keeps running after the user leaves the editor.
+              Its progress, completion and failure are a bottom-right toast. */}
           <CompletionBatchStatusHost />
           <GlobalAudioShortcuts />
           <VersionBadge />

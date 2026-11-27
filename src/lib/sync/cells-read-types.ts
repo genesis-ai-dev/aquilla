@@ -44,6 +44,13 @@ export interface FileSummary {
   /** Target cells with content (TRIM(value) != ''): the "translated" count,
    *  distinct from approvedCount (validated). Matches the chapter-dot signal. */
   filledCount: number
+  /**
+   * Untouched machine drafts (`files.ai_drafted_count`, structural cells
+   * removed when the project excludes them). Present only when the project
+   * has one target language — that counter sums every language, so a project
+   * with several sends null and the client must not treat the absence as zero.
+   */
+  aiDraftedCount?: number | null
   /** AQU-2111: lines with a take of their own, and lines whose weakest chosen
    *  take meets the project's AUDIO validation requirement — the figures an
    *  audio-only file's progress actually lives on. Optional on the wire: a

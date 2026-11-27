@@ -49,8 +49,8 @@ export interface UnreleasedPr extends FileClassification {
   files?: string[]
 }
 
-/** How a walk verdict is read: `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
-export type WalkPolicy = "fail-only" | "strict"
+/** How a walk verdict is read: `advisory` (the default) holds on none, `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
+export type WalkPolicy = "advisory" | "fail-only" | "strict"
 export const WALK_POLICIES: WalkPolicy[]
 export const DEFAULT_WALK_POLICY: WalkPolicy
 

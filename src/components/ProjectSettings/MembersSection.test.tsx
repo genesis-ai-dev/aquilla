@@ -51,6 +51,9 @@ const GATING_MEMBERS: ProjectMember[] = [
 
 let mockMembers: ProjectMember[] = DEFAULT_MEMBERS
 let mockSessionUsername = "alice"
+// AQU-2324: the orgs the caller is a member of. Empty by default (as before):
+// no org crumb, and no "Manage access" door.
+let mockOrgs: { id: number; name: string }[] = []
 
 const mockAddMany = vi.fn().mockResolvedValue([])
 const mockRemove = vi.fn()
@@ -91,7 +94,7 @@ vi.mock("@/context/OrgContext", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/context/OrgContext")>()
   return {
     ...original,
-    useActiveOrgOptional: () => ({ activeOrgId: 1 }),
+    useActiveOrgOptional: () => ({ activeOrgId: 1, orgs: mockOrgs }),
   }
 })
 
@@ -318,5 +321,39 @@ describe("MembersSection — caller-role gating (AQU-853)", () => {
     expect(
       screen.getByText(/can't change a member whose role is at or above your own/i),
     ).toBeTruthy()
+  })
+})
+
+// AQU-2324: the pane keeps Add, the invite link and Remove (the access page
+// cannot yet do all of them for a Project lead or a guest), and adds one door
+// to this project on the Places lens for whoever can manage members here.
+describe("MembersSection — Manage access door (AQU-2324)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMembers = GATING_MEMBERS
+    mockOrgs = [{ id: 1, name: "Biblica" }]
+  })
+
+  it("opens this project on the Places lens, beside the controls it keeps", () => {
+    mockSessionUsername = "alice" // maintainer
+    renderSection()
+    expect(screen.getByRole("link", { name: "Manage access" })).toHaveAttribute(
+      "href",
+      "/orgs/1/access?place=project:proj-1",
+    )
+    expect(screen.getByRole("button", { name: /add a member/i })).toBeEnabled()
+  })
+
+  it("is not offered below Project lead, who can change nothing here", () => {
+    mockSessionUsername = "dave" // contributor
+    renderSection()
+    expect(screen.queryByRole("link", { name: "Manage access" })).not.toBeInTheDocument()
+  })
+
+  it("is not offered to a guest of the project's organization", () => {
+    mockSessionUsername = "alice"
+    mockOrgs = []
+    renderSection()
+    expect(screen.queryByRole("link", { name: "Manage access" })).not.toBeInTheDocument()
   })
 })

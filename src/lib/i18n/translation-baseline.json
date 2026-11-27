@@ -2169,8 +2169,6 @@
   "editor.wordsThatFit.replace": ["ar","fr","id","ms","my","ru","th","zh-Hans","zh-Hant"],
   "editor.write.refusedDetail": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
   "editor.write.refusedTitle": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
-  "error.airtable.addFields": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
-  "error.airtable.analyze": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
   "error.airtable.missingScopes": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
   "error.airtable.noTables": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],
   "error.airtable.tokenRejected": ["ar","es","fr","hi","id","ms","my","pt","ru","th","zh-Hans","zh-Hant"],

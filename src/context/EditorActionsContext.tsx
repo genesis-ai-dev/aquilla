@@ -17,6 +17,19 @@
 import { createContext, useContext, type ReactNode } from "react"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 
+/** AQU-2426: what the Text view needs to offer Split into lines…. */
+export interface SplitLinesActions {
+  /** May this person split lines here (create lines, attach source audio). */
+  canSplit: boolean
+  /** Why this person may not transcribe here, or null. */
+  block: import("@/lib/audio/transcribe-access").TranscribeBlock | null
+  /** Open Split into lines… on this line, on At pauses or At sentences. The
+   *  row's own cell, with its recordings: store cells carry none. */
+  onSplitIntoLines(cellId: string, mode: "pauses" | "sentences", cell?: import("@/hooks/useCells").CellData): void
+  /** Split this line at its pauses straight away, with a toast and Undo. */
+  onSplitAtPauses(cellId: string, cell?: import("@/hooks/useCells").CellData): void
+}
+
 export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
@@ -205,6 +218,12 @@ export interface EditorActionsContextValue {
    * confirmation; nothing is written until it is confirmed.
    */
   onSplitAtQuotes?: (cellId: string) => void
+  /**
+   * AQU-2426: splitting a line of source audio into lines, and the "Not split
+   * into lines yet" notice on a whole recording over about a minute. Absent:
+   * no recording on this file can be split here.
+   */
+  splitLines?: SplitLinesActions
   /**
    * AQU-1422: park this cell, or bring it back. The reversible sibling of
    * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no

@@ -5,11 +5,17 @@
 // Space, next/previous line, Play all's run into the next chapter and a
 // chapter picked while playing all asked `hasAnyPlayableAudio`, which looked
 // only at the main track's chosen take and said no.
+//
+// The merge with the film bundle (Nov 19): the bundle split that question in
+// two — `linesPlaybackStopsAt` (what a person asks for, the film counted) and
+// `linesHaveAnythingOfTheirOwnToPlay` (Play all's own move into the next
+// chapter, the film not counted). This rule lives in the second now.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   getQueueState,
-  hasAnyPlayableAudio,
+  linesHaveAnythingOfTheirOwnToPlay,
+  queuePlaybackAsk,
   setQueueLayerTrackSlots,
   setQueueTargetSlots,
   setQueueTimingMode,
@@ -17,7 +23,7 @@ import {
   stopQueue,
   type PlayContext,
 } from "./play-queue"
-import { planChapterPick } from "@/lib/timeline/chapter-pick"
+import { nextChapterForPlayAll, planChapterPick } from "@/lib/timeline/chapter-pick"
 import type { TimelineChapter } from "@/lib/timeline/sequence-timeline"
 import type { CellData } from "@/hooks/useCells"
 
@@ -121,7 +127,7 @@ afterEach(() => {
 describe("a chapter recorded only on an added track, following the recordings (AQU-2495)", () => {
   it("has something to play — the transport plays it", async () => {
     const cells = RUTH_2()
-    expect(hasAnyPlayableAudio(cells)).toBe(true)
+    expect(linesHaveAnythingOfTheirOwnToPlay(cells)).toBe(true)
     startQueue(ctxFor(cells), 0)
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1" })
@@ -130,7 +136,7 @@ describe("a chapter recorded only on an added track, following the recordings (A
   it("…and the same when the added track was made a layer", async () => {
     setQueueLayerTrackSlots([TRACK])
     const cells = RUTH_2()
-    expect(hasAnyPlayableAudio(cells)).toBe(true)
+    expect(linesHaveAnythingOfTheirOwnToPlay(cells)).toBe(true)
     startQueue(ctxFor(cells), 0)
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1" })
@@ -140,8 +146,8 @@ describe("a chapter recorded only on an added track, following the recordings (A
     setQueueTimingMode("dubbing")
     setQueueTargetSlots(["recording"])
     const cells = RUTH_2()
-    expect(hasAnyPlayableAudio(cells, { freeTiming: true, tracks: { layerSlots: [TRACK], layerTrackSlots: [] } })).toBe(true)
-    expect(hasAnyPlayableAudio(cells, { freeTiming: false, tracks: { layerSlots: [TRACK], layerTrackSlots: [] } })).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay(cells, { freeTiming: true, tracks: { layerSlots: [TRACK], layerTrackSlots: [] } })).toBe(true)
+    expect(linesHaveAnythingOfTheirOwnToPlay(cells, { freeTiming: false, tracks: { layerSlots: [TRACK], layerTrackSlots: [] } })).toBe(false)
   })
 
   it("a chapter picked while playing carries playback on into it", () => {
@@ -150,18 +156,34 @@ describe("a chapter recorded only on an added track, following the recordings (A
       { key: "RUT 1", cellIds: ["r1v1"] },
       { key: "RUT 2", cellIds: ["r2v1", "r2v2"] },
     ]
-    expect(planChapterPick({ chapters, lines, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing" }))
+    expect(planChapterPick({ chapters, lines, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: queuePlaybackAsk() }))
       .toEqual({ kind: "play", chapter: chapters[1] })
   })
 
+  // The merge with the film bundle (Nov 19): Play all's own move into the
+  // next chapter asks `linesHaveAnythingOfTheirOwnToPlay`. Asking only the
+  // main track there, Play all stopped again at a chapter recorded only on
+  // added tracks.
+  it("Play all runs on into a chapter recorded only on an added track", () => {
+    const lines = [mainLine("r1v1"), ...RUTH_2()]
+    const chapters: TimelineChapter[] = [
+      { key: "RUT 1", cellIds: ["r1v1"] },
+      { key: "RUT 2", cellIds: ["r2v1", "r2v2"] },
+    ]
+    expect(nextChapterForPlayAll({ chapters, lines, playedKey: "RUT 1" })).toEqual(chapters[1])
+    // Following the source, the added track's takes are not played: Play all ends.
+    setQueueTimingMode("dubbing")
+    expect(nextChapterForPlayAll({ chapters, lines, playedKey: "RUT 1" })).toBeNull()
+  })
+
   it("still nothing to play: no take on any track, a track that is gone, or only hidden lines", () => {
-    expect(hasAnyPlayableAudio([line("a", null), line("b", null)])).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay([line("a", null), line("b", null)])).toBe(false)
     // The track was deleted: its takes are not laid in, and would not sound.
     setQueueTargetSlots(["recording"])
-    expect(hasAnyPlayableAudio(RUTH_2())).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay(RUTH_2())).toBe(false)
     setQueueTargetSlots(["recording", TRACK])
     const hidden = RUTH_2().map((c) => ({ ...c, hidden: true }) as CellData)
-    expect(hasAnyPlayableAudio(hidden)).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay(hidden)).toBe(false)
     startQueue(ctxFor(hidden), 0)
     expect(getQueueState().kind).toBe("idle")
   })
@@ -169,7 +191,7 @@ describe("a chapter recorded only on an added track, following the recordings (A
   it("following the source, the queue plays a line by its main take only — unchanged", async () => {
     setQueueTimingMode("dubbing")
     const cells = RUTH_2()
-    expect(hasAnyPlayableAudio(cells)).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay(cells)).toBe(false)
     startQueue(ctxFor(cells), 0)
     await settle()
     expect(getQueueState().kind).toBe("idle")

@@ -22,6 +22,22 @@ function parseSbvTimecode(line: string): { start: number; end: number } | null {
   return { start, end }
 }
 
+/** How many cue blocks have a time line that can't be read, so their wording
+ *  is left out by `extractSbvStrings`: the count a caller reports, as Upload
+ *  files does for VTT and SRT (import map X-D-silent-cue-drop). A block with a
+ *  good time and no words loses nothing, so it isn't counted. */
+export function countSbvUnreadableTimes(content: string): number {
+  return content
+    .split(/\r\n|\r|\n/)
+    .reduce<string[][]>((blocks, line) => {
+      if (line.trim() === "") blocks.push([])
+      else blocks[blocks.length - 1].push(line.trim())
+      return blocks
+    }, [[]])
+    .filter((block) => block.length > 0 && parseSbvTimecode(block[0]) === null)
+    .length
+}
+
 export function extractSbvStrings(content: string): TranslatableString[] {
   const lines = content.split(/\r\n|\r|\n/)
   const results: TranslatableString[] = []

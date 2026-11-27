@@ -37,7 +37,7 @@ import { isHiddenCell } from "@/lib/cells/hidden"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { targetChipGeom } from "./lane-timing"
-import { playedProgramme, slotHasNothingToPlay, type BuildProgrammeOptions } from "./programme"
+import { filmOverRun, playedProgramme, slotHasNothingToPlay, type BuildProgrammeOptions, type ProgrammeFilm } from "./programme"
 import { isDefaultTrackSlot, RECORDING_SLOT } from "./track-slots"
 import { setVirtualClockJumps, type ClockJump } from "./virtual-clock"
 
@@ -168,6 +168,10 @@ export interface SkipSilentLinesScope {
    *  them are layers — what the queue lays every line out with, so a line
    *  only a take on another track sounds in counts as heard. */
   tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  /** AQU-2253 (Sam, Nov 9): following the recordings, the linked film the
+   *  workspace tells the queue about (`setProgrammeFilm`): a line it plays
+   *  behind has it to play, so the setting changes nothing there. */
+  film?: ProgrammeFilm | null
 }
 
 /**
@@ -178,14 +182,21 @@ export interface SkipSilentLinesScope {
  * following the source, a line on the built-in clock with no take. With a
  * take or original audio on every line, or a film driving the file, there is
  * nothing to skip, and the timeline's ⋯ leaves the row out.
+ *
+ * AQU-2253 (Sam, Nov 9): following the recordings, a line a linked film plays
+ * behind is not one of them: the film is its source. So with a film running
+ * behind every line the row is left out too; a film shorter than the lines
+ * leaves it in for the lines past its end with nothing of their own.
  */
 export function skipSilentLinesCanChange(scope: SkipSilentLinesScope): boolean {
   if (scope.timing === "audioFirst") {
     return scope.runs.some((cells) => {
       const played = playedProgramme(cells, scope.tracks)
-      return (
-        played != null &&
-        played.programme.slots.some((slot) => slotHasNothingToPlay(slot, played.hiddenCellIds, played.underLayers))
+      if (played == null) return false
+      // AQU-2253 (Sam, Nov 9): …and that no linked film plays behind.
+      const { coverSec } = filmOverRun(scope.film, cells.map((c) => c.id))
+      return played.programme.slots.some((slot) =>
+        slotHasNothingToPlay(slot, played.hiddenCellIds, played.underLayers, coverSec),
       )
     })
   }

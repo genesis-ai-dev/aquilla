@@ -404,8 +404,11 @@ describe("fileMayFollowTiming (AQU-2492)", () => {
     expect(fileMayFollowTiming(plain, undefined, { nothingToFollow: true }, "dubbing")).toBe(false)
   })
 
-  it("under this resolver, a film-timed file may not follow its recordings", () => {
-    expect(fileMayFollowTiming(film, undefined, {}, "audioFirst")).toBe(false)
-    expect(fileMayFollowTiming(plain, undefined, { hasAudioCues: true }, "audioFirst")).toBe(false)
+  // The merge with the film bundle (Nov 19): its resolver (AQU-2227, "nothing
+  // ever locks the timing") puts the file's own choice first, so a film-timed
+  // file may follow its recordings too.
+  it("under this resolver, a film-timed file may follow its recordings", () => {
+    expect(fileMayFollowTiming(film, undefined, {}, "audioFirst")).toBe(true)
+    expect(fileMayFollowTiming(plain, undefined, { hasAudioCues: true }, "audioFirst")).toBe(true)
   })
 })

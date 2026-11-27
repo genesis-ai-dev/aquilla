@@ -74,8 +74,9 @@ test("an ASR request that never answers never blocks editing, saving, navigation
   const held: Route[] = []
   await alice.route(ASR_ROUTE, (route) => { held.push(route) })
 
-  // A media import is what starts automatic transcription (AQU-646).
-  await ws.startMediaImport(MEDIA_FIXTURE, MEDIA_NAME)
+  // A media import that the person asks to transcribe starts transcription
+  // (AQU-646; since AQU-2426 the import asks first).
+  await ws.startMediaImport(MEDIA_FIXTURE, MEDIA_NAME, "transcribe")
   await expect
     .poll(() => held.length, { timeout: 60_000 })
     .toBeGreaterThan(0)
@@ -129,14 +130,15 @@ test("an ASR request that fails keeps the failure in the job: no modal, document
     await route.fulfill({ status: 500, json: { error: "transcription backend exploded" } })
   })
 
-  await ws.startMediaImport(MEDIA_FIXTURE, MEDIA_NAME)
+  await ws.startMediaImport(MEDIA_FIXTURE, MEDIA_NAME, "transcribe")
   await expect
     .poll(() => asrCalls, { timeout: 60_000 })
     .toBeGreaterThan(0)
 
   // The failure is reported, and it names the file whose job failed rather
-  // than escalating to a modal over the workspace.
-  await expect(alice.getByText(/Couldn't transcribe "tone-segments\.mp3"/))
+  // than escalating to a modal over the workspace. Since AQU-2426 a failed
+  // import transcription also says the recording stays one line.
+  await expect(alice.getByText(/Couldn't transcribe tone-segments\.mp3, so it stays one line/))
     .toBeVisible({ timeout: 60_000 })
   await expect(ws.modalDialogs()).toHaveCount(0)
 

@@ -31,7 +31,9 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
-import { hasAnyPlayableAudio, startQueue } from "@/lib/audio/play-queue"
+import { linesPlaybackStopsAt, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
+import { filmOverRun, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -104,6 +106,17 @@ interface Props {
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean
   /**
+   * What Play, Play all and Space play on this file (the workspace's
+   * `playbackCells`). Sam, Nov 12: on a file with a linked film, "Play
+   * selected" plays its lines as a run of these, so the film follows it.
+   */
+  playbackLines?: CellData[]
+  /** The file follows its recordings, and the added tracks laid in with its
+   *  lines: what the strip is handed (`freeTiming`, `programmeTracks`), so
+   *  the "Play selected" count is the queue's answer for this file. */
+  freeTiming?: boolean
+  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  /**
    * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
    * the text actions (AI translate, validate text, harmonize) and the voices
    * generated FROM text ("Voice together", "Generate voice") leave the bar,
@@ -160,7 +173,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, playbackLines, freeTiming = false, programmeTracks, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
   const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
@@ -393,12 +406,58 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // with no audio and carries on, so this is a count for the button's badge and
   // the has-anything-to-play test — not a filter on what is handed to the queue
   // (dropping the silent lines would be the same run, one highlight short).
-  // AQU-2495 (review, Nov 9): each line counted the way the queue plays it,
-  // so following the recordings a line recorded only on an added track counts.
-  const playableSelectedCount = useMemo(
-    () => playbackRange.filter((c) => hasAnyPlayableAudio([c])).length,
-    [playbackRange],
+  //
+  // Sam, Nov 12 (question 44), and its review: the run "Play selected" starts
+  // (`selectionRun`, below) and the chosen lines it stops at, as the queue
+  // decides them (play-queue's `linesPlaybackStopsAt`), so "Play selected 3"
+  // plays 3. On a file with a linked film a line nobody has recorded counts:
+  // the film is its to play; a line laid out past the film's end does not.
+  // The workspace's word about the film is read here so the count follows it.
+  // The check of the q44 fixes (Nov 12): so are "Skip lines with nothing to
+  // play" and the timing and tracks the bar is handed, and the stops are
+  // worked out again only when one of them, or the lines, change.
+  const film = useProgrammeFilm()
+  const skipSilent = useSkipSilentLinesPref()
+  const ask = useMemo(
+    () => ({ freeTiming, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent }),
+    [freeTiming, programmeTracks, film, skipSilent],
   )
+  // The second check (Nov 13), NOTE 2: the lines Play plays are laid out only
+  // when it can be asked, a film behind them and something chosen in the
+  // Media view; not again for every click.
+  const anyChosen = audioMode === true && playbackRange.length > 0
+  const filmCovers = useMemo(
+    () => playbackLines != null && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0,
+    [playbackLines, film],
+  )
+  const fileStops = useMemo(
+    () => (anyChosen && filmCovers && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
+    [anyChosen, filmCovers, playbackLines, ask],
+  )
+  // On a film file it is a run of the lines Play plays when every chosen line
+  // on the timeline is among them (the check of the q44 fixes, Nov 12,
+  // SHOULD B: none may be left out). A selection reaching past them (a book's other chapter) is a
+  // run of the chosen lines on their own, as on a file with no film: the
+  // queue keeps the film out of such a run (N9).
+  const selectionRun = useMemo(() => {
+    if (!anyChosen) return { cells: playbackRange, only: null, stopCount: 0 }
+    if (playbackLines && fileStops && film) {
+      // The second check (Nov 13), NOTE 3: asked only of the chosen rows on
+      // the timeline (the film's word names every line it draws, in every
+      // chapter). A row it does not draw, a chapter heading while "Count
+      // headings" is off or an unrecorded hidden line, cannot play anyway.
+      // Membership by a Set (N11). Where the run starts is the queue's to
+      // say: its first chosen stop, in the order it plays them.
+      const inList = new Set(playbackLines.map((c) => c.id))
+      const onTimeline = playbackRange.filter((c) => film.cellIds.has(c.id)).map((c) => c.id)
+      if (onTimeline.length > 0 && onTimeline.every((id) => inList.has(id))) {
+        const only = new Set(onTimeline)
+        return { cells: playbackLines, only, stopCount: onTimeline.filter((id) => fileStops.has(id)).length }
+      }
+    }
+    return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
+  }, [anyChosen, playbackRange, playbackLines, fileStops, film, ask])
+  const playableSelectedCount = selectionRun.stopCount
 
   /**
    * AQU-2123: play the chosen lines back to back, hands-free, and STOP after
@@ -416,10 +475,19 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
    * (`progOwnsProgressClock`). This is the same contract a single line's own
    * play button already uses; a range is just a longer deliberate subset.
    */
+  //
+  // Sam, Nov 12 (question 44): on a file with a linked film behind the lines
+  // Play plays, the chosen lines are played as a run of those lines
+  // (`PlayContext.only`): on the file's clock, so the film follows it, shown
+  // and heard, stepping over the lines not chosen and stopping at the end of
+  // the last one. Anywhere else, as before.
   const onPlaySelected = useCallback(() => {
     if (!session?.jwt) return
-    startQueue({ cells: playbackRange, projectId: project.id, session, snapshot: true }, 0, true)
-  }, [playbackRange, project.id, session])
+    const { cells, only } = selectionRun
+    startQueue(only
+      ? { cells, projectId: project.id, session, only }
+      : { cells, projectId: project.id, session, snapshot: true }, 0, true)
+  }, [selectionRun, project.id, session])
 
   // AQU-1722: a line's name the way the reader sees it — its reference, else
   // the table's # column, else nothing. The same rule the partial-validate

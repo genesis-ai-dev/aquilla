@@ -11,25 +11,15 @@ import {
 // Nothing in the suite renders ProjectWorkspace, so without these the gate that
 // decides whether the pane exists at all would ship with no coverage.
 describe("shouldShowVideoPane", () => {
-  it("shows the pane in the media lens when a video is linked", () => {
-    expect(
-      shouldShowVideoPane({ timelineStacked: true, coreMediaUrl: "https://cdn/v.webm", timingMode: "dubbing" }),
-    ).toBe(true)
-  })
-
-  it("stays hidden in Free timing — the footage cannot follow a re-flowed track", () => {
-    expect(
-      shouldShowVideoPane({ timelineStacked: true, coreMediaUrl: "https://cdn/v.webm", timingMode: "audioFirst" }),
-    ).toBe(false)
+  it("shows the pane in the media lens when a video is linked, in both timings (AQU-2253)", () => {
+    // The gate no longer asks which timing the file follows: following the
+    // recordings, the film runs on its own clock beside the re-flowed takes.
+    expect(shouldShowVideoPane({ timelineStacked: true, coreMediaUrl: "https://cdn/v.webm" })).toBe(true)
   })
 
   it("stays hidden with no video linked, and outside the media lens", () => {
-    expect(
-      shouldShowVideoPane({ timelineStacked: true, coreMediaUrl: null, timingMode: "dubbing" }),
-    ).toBe(false)
-    expect(
-      shouldShowVideoPane({ timelineStacked: false, coreMediaUrl: "https://cdn/v.webm", timingMode: "dubbing" }),
-    ).toBe(false)
+    expect(shouldShowVideoPane({ timelineStacked: true, coreMediaUrl: null })).toBe(false)
+    expect(shouldShowVideoPane({ timelineStacked: false, coreMediaUrl: "https://cdn/v.webm" })).toBe(false)
   })
 })
 

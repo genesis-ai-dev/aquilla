@@ -10,8 +10,11 @@
 // neighboring edges when snapping is on — preview and commit run through the
 // same seconds-domain transform, so what you see is what lands.
 
-import { useRef, useState } from "react"
-import { X } from "lucide-react"
+import { useRef, useState, type ReactNode } from "react"
+import { Ellipsis, Rows3, X } from "lucide-react"
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { TRACK_HOVER_FILL_CLASS } from "@/lib/timeline/track-colors"
 import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
@@ -147,6 +150,18 @@ export interface TimelineCardProps {
   /** AQU-646: offered only on a line a person added that is still empty —
    *  the workspace decides, this just draws the control. */
   onRemove?(cellId: string): void
+  /**
+   * AQU-2426: a SOURCE recording clip's own menu — a ⋯ on hover (as on a
+   * take) and the same menu on a right-click: what the clip is, then Split
+   * into lines…. Absent on every other card.
+   *
+   * AQU-2426 (review, Nov 9): `splitDisabledReason` greys Split into lines…
+   * and says why under it: a recording added by web address is streamed, not
+   * stored, so it can't be split here.
+   */
+  recordingMenu?: { details: string; name: string; onSplitIntoLines(): void; splitDisabledReason?: string | null }
+  /** AQU-2426: drawn inside the clip after its name and times ("Not split into lines yet"). */
+  notice?: ReactNode
 }
 
 export function TimelineCard({
@@ -167,6 +182,8 @@ export function TimelineCard({
   onRetime,
   onSeek,
   onRemove,
+  recordingMenu,
+  notice,
 }: TimelineCardProps) {
   const t = useT()
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
@@ -357,7 +374,8 @@ export function TimelineCard({
       ? (cell.metadata.cast_name as string)
       : null
 
-  return (
+  const menuOnClip = Boolean(recordingMenu && isDialogue)
+  const card = (
     <div
       data-testid={`tl-card-${cell.id}`}
       role="button"
@@ -392,10 +410,15 @@ export function TimelineCard({
       // this stops the custom one. That is the intended outcome, not an
       // oversight — noted here because "nothing happened" is otherwise a
       // reasonable thing to file a bug about.
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      }}
+      // AQU-2426: a source recording clip has a menu of its own; its trigger
+      // owns `onContextMenu` then and stops the event itself, so the track's
+      // menu still never opens over the clip.
+      {...(menuOnClip ? {} : {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault()
+          e.stopPropagation()
+        },
+      })}
       onPointerDown={(e) => {
         // …and must not start a retime drag either, or ⌘-clicking a subtitle
         // card would nudge its span.
@@ -502,6 +525,27 @@ export function TimelineCard({
           </button>
         </AppTooltip>
       )}
+      {menuOnClip && (
+        // As on a take: nothing at rest, shown on the clip's hover; it opens
+        // the same menu a right-click does.
+        <button
+          type="button"
+          aria-label={t("editor.splitLines.clipMenuLabel")}
+          aria-haspopup="menu"
+          data-testid={`tl-card-${cell.id}-more`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            const r = e.currentTarget.getBoundingClientRect()
+            e.currentTarget.dispatchEvent(new MouseEvent("contextmenu", {
+              bubbles: true, cancelable: true, button: 2, clientX: r.left + r.width / 2, clientY: r.bottom,
+            }))
+          }}
+          className="absolute right-1 top-1 z-20 flex h-4 w-4 items-center justify-center rounded text-foreground/80 opacity-0 transition-opacity hover:bg-background group-hover:opacity-90 focus-visible:opacity-100"
+        >
+          <Ellipsis className="h-3 w-3" />
+        </button>
+      )}
       {showsGrips && (
         <span
           aria-hidden
@@ -546,6 +590,7 @@ export function TimelineCard({
             : `${fmtClock(startSec, true)}–${fmtClock(endSec, true)}`}
         </span>
         )}
+        {notice}
       </div>
       )}
       {showsGrips && (
@@ -558,5 +603,31 @@ export function TimelineCard({
         </span>
       )}
     </div>
+  )
+  if (!menuOnClip || !recordingMenu) return card
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={card} />
+      <ContextMenuContent className="w-56" data-testid={`tl-card-${cell.id}-menu`}>
+        <div className="flex flex-col gap-0.5 px-2 py-1.5 text-xs text-muted-foreground">
+          <span>{recordingMenu.details}</span>
+          <span className="truncate">{recordingMenu.name}</span>
+        </div>
+        <ContextMenuSeparator />
+        <ContextMenuItem data-testid={`tl-card-${cell.id}-split-lines`}
+          disabled={Boolean(recordingMenu.splitDisabledReason)}
+          onClick={() => { if (!recordingMenu.splitDisabledReason) recordingMenu.onSplitIntoLines() }}>
+          <Rows3 className="mr-2 h-3.5 w-3.5 shrink-0" />
+          <span className="flex min-w-0 flex-col">
+            <span>{t("editor.splitLines.menuItem")}</span>
+            {recordingMenu.splitDisabledReason ? (
+              <span data-testid={`tl-card-${cell.id}-split-lines-reason`} className="text-xs text-muted-foreground">
+                {recordingMenu.splitDisabledReason}
+              </span>
+            ) : null}
+          </span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

@@ -706,6 +706,23 @@ describe("reconcileSourceImport", () => {
   })
 })
 
+// Import map X-D-film-refusal-text (Nov 2): the server's refusal of a film
+// address read "Upload failed (HTTP 400): invalid linked picture publication".
+describe("importRefusalMessage", () => {
+  it("says a refused film in a plain sentence", async () => {
+    const { importRefusalMessage } = await import("./bulk-import")
+    expect(importRefusalMessage("Import publication failed", 400, "invalid linked picture publication")).toBe(
+      "This film couldn't be saved with the file. Only a YouTube video's link, or a film uploaded with this file, can be.")
+  })
+
+  it("keeps any other refusal's status and the server's own words", async () => {
+    const { importRefusalMessage } = await import("./bulk-import")
+    expect(importRefusalMessage("Upload failed", 413, '{"error":"cell text exceeds size limit"}'))
+      .toBe('Upload failed (HTTP 413): {"error":"cell text exceeds size limit"}')
+    expect(importRefusalMessage("Upload failed", 500, "")).toBe("Upload failed (HTTP 500)")
+  })
+})
+
 describe("bulkUploadSource — revision import (AQU-2459)", () => {
   afterEach(() => {
     vi.restoreAllMocks()

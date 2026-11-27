@@ -167,7 +167,7 @@ describe("transcribeChunk", () => {
       text: "Hello. Bye.", granularity: "word" as const,
       chunks: [{ text: "Hello.", start: 0.5, end: 1 }, { text: "Bye.", start: 4, end: 4.5 }],
     }))
-    const transcribeRow = vi.fn(async (_cell: CellData, _words?: TranscriptionResult) => 1)
+    const transcribeRow = vi.fn(async (_cell: CellData, _words?: TranscriptionResult) => ({ kind: "done" as const, words: 1 }))
     await transcribeChunk(chunkOf(), { session, projectId: "p1", recognise, transcribeRow })
     expect(recognise).toHaveBeenCalledTimes(1)
     expect(transcribeRow.mock.calls.map(([cell, words]) => [cell.id, words?.text]))
@@ -177,7 +177,7 @@ describe("transcribeChunk", () => {
   it("transcribes the minute's rows one by one when the timings are too coarse, and says so", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const recognise = vi.fn(async () => ({ text: "Hello. Bye.", granularity: "segment" as const, chunks: [{ text: "Hello. Bye.", start: 0, end: 6 }] }))
-    const transcribeRow = vi.fn(async (_cell: CellData, _words?: TranscriptionResult) => 1)
+    const transcribeRow = vi.fn(async (_cell: CellData, _words?: TranscriptionResult) => ({ kind: "done" as const, words: 1 }))
     await transcribeChunk(chunkOf(), { session, projectId: "p1", recognise, transcribeRow })
     expect(transcribeRow.mock.calls.map(([cell, words]) => [cell.id, words])).toEqual([["a", undefined], ["b", undefined]])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("one by one"))
@@ -187,13 +187,51 @@ describe("transcribeChunk", () => {
   it("marks the minute's rows failed when it cannot be recognised", async () => {
     const { setTranscribeStatus } = await import("./transcribe-status")
     vi.mocked(setTranscribeStatus).mockClear()
-    const transcribeRow = vi.fn(async () => 1)
+    const transcribeRow = vi.fn(async () => ({ kind: "done" as const, words: 1 }))
     await transcribeChunk(chunkOf(), {
       session, projectId: "p1", transcribeRow,
       recognise: async () => { throw new Error("Hosted transcription failed (503). Try again.") },
     })
     expect(transcribeRow).not.toHaveBeenCalled()
     expect(vi.mocked(setTranscribeStatus).mock.calls.filter(([, s]) => s.kind === "error")).toHaveLength(2)
+  })
+})
+
+describe("transcribeChunk says how each row ended (AQU-2375)", () => {
+  const session = { jwt: "jwt", username: "maint" } as FrontierSession
+
+  it("hands back each row's own outcome", async () => {
+    const recognise = vi.fn(async () => ({
+      text: "Hello. Bye.", granularity: "word" as const,
+      chunks: [{ text: "Hello.", start: 0.5, end: 1 }, { text: "Bye.", start: 4, end: 4.5 }],
+    }))
+    const transcribeRow = vi.fn(async (cell: CellData) => cell.id === "a"
+      ? { kind: "done" as const, words: 1 }
+      : { kind: "failed" as const, message: "could not store" })
+    const byRow = await transcribeChunk(chunkOf(), { session, projectId: "p1", recognise, transcribeRow })
+    expect(Object.fromEntries(byRow)).toEqual({
+      a: { kind: "done", words: 1 },
+      b: { kind: "failed", message: "could not store" },
+    })
+  })
+
+  it("fails every row of a minute the service refused, with its reason", async () => {
+    const byRow = await transcribeChunk(chunkOf(), {
+      session, projectId: "p1", transcribeRow: vi.fn(),
+      recognise: async () => { throw new Error("Hosted transcription failed (503). Try again.") },
+    })
+    expect([...byRow.values()]).toEqual([
+      { kind: "failed", message: "Hosted transcription failed (503). Try again." },
+      { kind: "failed", message: "Hosted transcription failed (503). Try again." },
+    ])
+  })
+
+  it("leaves a cancelled minute's rows skipped, not failed", async () => {
+    const byRow = await transcribeChunk(chunkOf(), {
+      session, projectId: "p1", transcribeRow: vi.fn(), isCancelled: () => true,
+      recognise: async () => { throw new Error("transcription cancelled") },
+    })
+    expect([...byRow.values()]).toEqual([{ kind: "skipped" }, { kind: "skipped" }])
   })
 })
 

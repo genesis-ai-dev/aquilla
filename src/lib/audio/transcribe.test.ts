@@ -10,13 +10,15 @@ import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
-import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
+import { transcribeCell, transcribeCellOutcome, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { releaseSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { clearOptimisticShadows, getOptimisticShadows, subscribeAudioAttachments } from "./audio-attachments-bus"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { InsufficientRoleError } from "@/lib/sync/events-emit"
+import { ROLE } from "@/lib/frontier/roles"
 
 // fetchCellAudio is the network path; mock it, keep the real URL parse/build.
 const fetchCellAudio = vi.fn()
@@ -26,7 +28,8 @@ vi.mock("./upload", async (importOriginal) => {
 })
 // The timings emit hits the outbox — irrelevant here; stub it.
 const emitCellAudioAttach = vi.fn(async (_input: unknown) => "evt-1")
-vi.mock("@/lib/sync/events-emit", () => ({
+vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
+  InsufficientRoleError: (await importOriginal<typeof import("@/lib/sync/events-emit")>()).InsufficientRoleError,
   emitCellAudioAttach: (input: unknown) => emitCellAudioAttach(input),
 }))
 
@@ -118,6 +121,66 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     const status = getTranscribeStatus(FULL_ID)
     expect(status.kind).toBe("error")
     expect(status.kind === "error" && status.message).toMatch(/boom/)
+  })
+})
+
+// ── AQU-2375: a batch must tell a failed row from an empty one ─────────────
+//
+// `transcribeCell` answers 0 for both, so a batch counting rows could only
+// guess. `transcribeCellOutcome` says which.
+
+describe("transcribeCellOutcome", () => {
+  it("says done, with the word count, when the transcript landed", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+    expect(await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" }))
+      .toEqual({ kind: "done", words: 2 })
+  })
+
+  it("says failed, with why, when the recording could not be read", async () => {
+    fetchCellAudio.mockRejectedValue(new Error("boom: R2 unreachable"))
+    __setTranscribeAudioForTests(fakeTranscribe(["x"]))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" })
+    expect(outcome.kind).toBe("failed")
+    expect(outcome.kind === "failed" && outcome.message).toMatch(/boom/)
+  })
+
+  it("says failed for a row it cannot even start (signed out, nothing cached)", async () => {
+    __setTranscribeAudioForTests(fakeTranscribe(["x"]))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session: null, projectId: "proj-1" })
+    expect(outcome.kind).toBe("failed")
+  })
+
+  // Sam, Nov 12 (question 44): a row transcribed but whose save was then
+  // refused counted as done, so the one closing message said it landed. It is
+  // a failed row now, with the refusal as its reason, so the run's message
+  // counts it as not transcribed and its Retry offers it again.
+  it("says failed, with why, when the transcript could not be saved", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+    emitCellAudioAttach.mockRejectedValueOnce(new Error("Reviewers cannot perform this action"))
+    expect(await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" }))
+      .toEqual({ kind: "failed", message: "Reviewers cannot perform this action" })
+    const status = getTranscribeStatus(FULL_ID)
+    expect(status.kind === "error" && status.message).toBe("Reviewers cannot perform this action")
+  })
+
+  // The review (Nov 12), SHOULD 3: a save the role gate refused says so in
+  // the app's plain role sentence, as Change voice does (AQU-2522), never the
+  // gate's own "role 300 below required 400 for cell.audio.attach".
+  it("a save the role gate refused says why in plain words", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+    emitCellAudioAttach.mockRejectedValueOnce(new InsufficientRoleError("cell.audio.attach", ROLE.REVIEWER, ROLE.CONTRIBUTOR))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" })
+    expect(outcome).toEqual({ kind: "failed", message: "Reviewers cannot perform this action — you need at least Contributor access." })
+    const status = getTranscribeStatus(FULL_ID)
+    expect(status.kind === "error" && status.message).toBe("Reviewers cannot perform this action — you need at least Contributor access.")
+  })
+
+  it("says skipped for a row with no recording", async () => {
+    expect(await transcribeCellOutcome({ cell: { ...makeCell(), selectedAudioId: undefined }, session, projectId: "proj-1" }))
+      .toEqual({ kind: "skipped" })
   })
 })
 

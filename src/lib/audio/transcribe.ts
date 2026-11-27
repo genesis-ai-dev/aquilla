@@ -19,7 +19,8 @@ import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { decodeSharedClipPcm } from "./shared-clip-decode"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, InsufficientRoleError } from "@/lib/sync/events-emit"
+import { denialMessage } from "@/lib/permissions/denial"
 import { injectOptimisticAudioWords } from "@/lib/audio/audio-attachments-bus"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
@@ -468,6 +469,22 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
 }
 
 /**
+ * AQU-2375: how one row's transcription ended, so a batch can count what
+ * landed and what did not. The per-cell status store cannot: an imported
+ * recording's rows share ONE source-clip audioId, so its status is per clip.
+ *
+ *   done     — the transcript (or a take's word timings) was stored; `words`
+ *              may be 0 for a stretch with no speech in it.
+ *   failed   — nothing was stored, for the reason in `message`.
+ *   skipped  — nothing to do: no recording on the row, or the on-device
+ *              model's consent was declined.
+ */
+export type TranscribeRowOutcome =
+  | { kind: "done"; words: number }
+  | { kind: "failed"; message: string }
+  | { kind: "skipped" }
+
+/**
  * Transcribe a single cell's selected audio. Drives the per-cell
  * transcribe-status store (so CellTranscribeBadge shows progress), then
  * re-emits a cell.audio.attach with the word-level timings so they land in
@@ -475,11 +492,19 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  *
  * Returns the word count on success, or 0 if the cell has no audio / consent
  * was denied. Never throws — errors are stored in transcribe-status.
+ * A batch that needs to tell a failure from an empty row uses
+ * `transcribeCellOutcome`.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
+  const outcome = await transcribeCellOutcome(args)
+  return outcome.kind === "done" ? outcome.words : 0
+}
+
+/** `transcribeCell`, saying how the row ended (AQU-2375). Never throws. */
+export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<TranscribeRowOutcome> {
   const { cell, session, projectId, language, slot: slotArg, targetLang, askAgain, prerecognised } = args
   const audioId = cell.selectedAudioId
-  if (!audioId) return 0
+  if (!audioId) return { kind: "skipped" }
 
   // Early guards write an error status instead of returning silently — the
   // Recording tab renders these via CellTranscribeBadge, and a bare `return 0`
@@ -487,14 +512,16 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
   if (!attachmentUrl) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.noDownloadableAudio") })
-    return 0
+    const message = t("audio.error.noDownloadableAudio")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
   if (!frontier) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.notTranscribableLocation") })
-    return 0
+    const message = t("audio.error.notTranscribableLocation")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   // AQU-646 / SUB-29: is this the SOURCE CLIP shared by the file's rows, or
@@ -514,8 +541,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   // sign-in guard moves below the cache probe.
   const cached = clipHeld ? null : await audioCacheGet(frontier.audioId, frontier.ext)
   if (!clipHeld && !cached && !session?.jwt) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
-    return 0
+    const message = t("audio.error.signInToTranscribe")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
@@ -621,6 +649,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // them. start/end must be char offsets into the cell's plain text — the
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
+    // Sam, Nov 12 (question 44): why the save was refused, when it was. A row
+    // whose transcript could not be saved has not been transcribed for anyone
+    // to see: it fails, and a run's Retry offers it again.
+    let saveRefused = null as { message: string } | null
     const transcriptText = result.text.trim()
     let storedTimings: WordTiming[] = []
     if (result.chunks.length > 0 || (isSourceSegment && transcriptText)) {
@@ -633,9 +665,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         : aligned
       storedTimings = timings
       // Signed-out transcribes (cache hit) have no session — the emit queues
-      // to the local outbox and can throw a role-gate error, so swallow it:
-      // transcription itself succeeded, and the timings re-emit on a manual
-      // re-transcribe. author falls back to "local".
+      // to the local outbox and can throw a role-gate error. That is caught:
+      // the row fails with the error (`saveRefused`), and transcribing it
+      // again, or a run's Retry, re-emits it. author falls back to "local".
       //
       // AQU-783: AWAIT the attach so the event is durably in the outbox before
       // transcribeCell resolves. The per-cell / timeline / batch completion
@@ -708,26 +740,35 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         }, eventId)
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
+        // The review (Nov 12): a role refusal in the app's plain role
+        // sentence, as Change voice says it (AQU-2522), not the gate's text.
+        saveRefused = {
+          message: err instanceof InsufficientRoleError
+            ? denialMessage(t, err.required, err.roleLevel)
+            : err instanceof Error ? err.message : String(err),
+        }
       })
     }
 
     args.onTranscribed?.({ heard: raw.text.trim(), transcript: transcriptText, model: raw.model ?? "unknown", timings: storedTimings })
 
+    if (saveRefused) {
+      setTranscribeStatus(audioId, { kind: "error", message: saveRefused.message })
+      return { kind: "failed", message: saveRefused.message }
+    }
     setTranscribeStatus(audioId, {
       kind: "done",
       wordCount,
       durationMs: Date.now() - t0,
     })
-    return wordCount
+    return { kind: "done", words: wordCount }
   } catch (e) {
     if (e instanceof AiModelConsentDeniedError) {
       setTranscribeStatus(audioId, { kind: "idle" })
-      return 0
+      return { kind: "skipped" }
     }
-    setTranscribeStatus(audioId, {
-      kind: "error",
-      message: e instanceof Error ? e.message : String(e),
-    })
-    return 0
+    const message = e instanceof Error ? e.message : String(e)
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 }

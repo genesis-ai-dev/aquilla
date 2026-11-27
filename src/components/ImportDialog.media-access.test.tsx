@@ -55,6 +55,9 @@ describe("Upload files: audio and video need every language", () => {
     const input = open(null)
     expect(screen.queryByTestId("upload-media-disabled")).toBeNull()
     fireEvent.change(input, { target: { files: [new File(["audio"], "sermon.mp3", { type: "audio/mpeg" })] } })
+    // AQU-2426: a recording with no wording asks whole or transcribed first.
+    await screen.findByTestId("recording-import-choice")
+    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
   })
 
@@ -71,6 +74,8 @@ describe("Upload files: audio and video need every language", () => {
   it("imports a video with no reason (a Maintainer once the answer is in)", async () => {
     const input = open(null)
     fireEvent.change(input, { target: { files: [new File(["video"], "clip.mp4", { type: "video/mp4" })] } })
+    await screen.findByTestId("recording-import-choice")
+    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
   })
 })

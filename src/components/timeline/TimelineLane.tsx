@@ -20,7 +20,7 @@ import { useRowMetrics } from "./useRowMetrics"
 import { SlotTooltipScope, TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
-import { TimelineCard } from "./TimelineCard"
+import { TimelineCard, type TimelineCardProps } from "./TimelineCard"
 import { EmptyLineMarker } from "./EmptyLineMarker"
 import { emptyLineMarkers } from "@/lib/timeline/line-markers"
 import type { SelectMods } from "./selection"
@@ -80,6 +80,8 @@ export interface TimelineLaneProps {
    *  direct child of the lane's root, so the lane is its containing block
    *  (that one is sticky, and stays within the lane it is in). */
   emptyPrompt?: ReactNode
+  /** AQU-2426: per-card extras on the Source audio row (its menu, its notice). */
+  cardExtras?: (cell: CellData) => Pick<TimelineCardProps, "recordingMenu" | "notice"> | null
 }
 
 export function TimelineLane({
@@ -105,6 +107,7 @@ export function TimelineLane({
   onRemove,
   linkOverlay,
   emptyPrompt,
+  cardExtras,
 }: TimelineLaneProps) {
   const t = useT()
   const originPx = useTimelineOriginPx()
@@ -285,6 +288,7 @@ export function TimelineLane({
           onRetime={onRetime}
           onSeek={onSeek}
           onRemove={onRemove && canRemove?.(c) ? onRemove : undefined}
+          {...(cardExtras?.(c) ?? {})}
         />
         )
       })}

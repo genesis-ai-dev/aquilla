@@ -21,12 +21,11 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
-import { formatByteLimit } from "./i18n/format"
-import { normalizeLocale } from "./i18n/locales"
-import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import type { SpeakerAssignment } from "./import/cast-from-speakers"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
+import { importedMediaType } from "./import/media-picture"
+import { mediaFileTooLargeMessage } from "./audio/media-limit"
 import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
@@ -592,6 +591,14 @@ export interface ImportContext {
     cues: readonly TranslatableString[]
     artifact?: TargetImportArtifact
   }
+  /**
+   * AQU-2426 (Sam, Nov 3 and 5): with no wording, how the recording comes in.
+   * Nothing brought in is cut into lines or transcribed on its own: it comes in
+   * WHOLE, as one Source audio line, unless the person chose Import and
+   * transcribe…, which then finds the lines from its words once it is in
+   * (the workspace consumes the seed this leaves). Default "whole".
+   */
+  mediaMode?: "whole" | "transcribe"
 }
 
 type PrepareImportContext = Pick<
@@ -823,15 +830,19 @@ export async function prepareImportFile(
   ctx: PrepareImportContext,
 ): Promise<PreparedImportFile> {
   if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
+  const extensionType = detectFileType(file.name)
+  // A film or recording is checked against its own 2 GB ceiling where it is
+  // uploaded, in parts (emitMediaFile, AQU-1853). The 95 MB ceiling below is
+  // the text source's: run first, it refused every film over 95 MB, so the
+  // media ceiling could never be reached (AQU-2344).
+  if (extensionType && isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
   // Fail before parsing/decompression and before any server event. The same
   // ceiling is enforced again by the artifact route as a trust boundary.
   assertSourceUploadByteLength(file.size)
-  const extensionType = detectFileType(file.name)
   if (extensionType) {
-    // Opaque packages/media need their deterministic binary adapter. Textual
+    // Opaque packages need their deterministic binary adapter. Textual
     // extensions are sniffed as content first so a USFM document named .txt,
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
-    if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
       if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
@@ -2069,6 +2080,21 @@ export function mediaSegmentSpecsFromSpeech(
     : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
 }
 
+/**
+ * AQU-2426: a recording brought in whole — one line over its measured length
+ * (untimed if even that can't be read; the editor flags it). The line's
+ * attachment plays the whole clip, so it has no trim.
+ */
+export async function wholeRecordingSpecs(
+  file: Blob,
+): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
+  // AQU-2426 (review, Nov 9): what a browser records has no duration header,
+  // so the probe alone left it a line with no length — nothing offered to
+  // split it. Its length is measured by decoding instead.
+  const durationMs = await probeMediaDurationMs(file).catch(() => measureByDecodingMs(file))
+  return { durationMs, specs: mediaSegmentSpecsFromSpeech([], durationMs) }
+}
+
 /** Import source media as timed segments, preserving the uploaded clip once. */
 export async function emitMediaFile(
   file: File,
@@ -2089,25 +2115,24 @@ export function createMediaFileCommit(
   const videoEventId = uuidv7()
   const videoId = ctx.mediaPictureUrl ? youTubeVideoId(ctx.mediaPictureUrl) : null
   const pictureUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined
+  let storedType: FileType = fileType
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
     // AQU-1853: large media rides the multipart upload path, so the gate is
     // the whole-object ceiling, not the single-request one.
-    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
-      // AQU-1975: interpolate the ceiling rather than naming it in the copy —
-      // the string outlived the 95 MB cap it used to quote.
-      const locale = normalizeLocale(readStoredLocale())
-      throw new Error(t("importExport.errors.mediaFileTooLarge", {
-        fileName: file.name, limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, locale),
-      }))
-    }
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(file.name))
+    // A file named like a video but holding no picture (a browser recording
+    // is a sound-only .webm) comes in as audio, with no film (import map D#2).
+    storedType = await importedMediaType(file, fileType)
     ctx.signal?.throwIfAborted()
     const suppliedDuration = ctx.mediaTextSource
       ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
+    // AQU-2426: with no wording the recording comes in whole, one line over
+    // its full length; nothing decodes it to look for pauses.
     const { durationMs, specs } = ctx.mediaTextSource
       ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
-      : await computeMediaSegmentSpecs(file)
+      : await wholeRecordingSpecs(file)
 
     const cells: BulkImportCell[] = specs.map((s, i) => ({
       id: uuidv7(),
@@ -2126,10 +2151,10 @@ export function createMediaFileCommit(
       file: {
         id: uuidv7(),
         name: file.name,
-        fileType,
+        fileType: storedType,
         role: "source",
-        kind: importedFileKind(fileType),
-        importFormat: fileType,
+        kind: importedFileKind(storedType),
+        importFormat: storedType,
         parserVersion: "workspace-import-v1",
         sourceLanguage: ctx.sourceLanguage,
         targetLanguage: ctx.targetLanguage,
@@ -2195,7 +2220,7 @@ export function createMediaFileCommit(
       await publishStagedImport({
         projectId: ctx.projectId,
         fileId,
-        ...(pictureUrl || fileType === "video"
+        ...(pictureUrl || storedType === "video"
           ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
         publishEventId, videoEventId,
         attachments: specs.map((s) => ({
@@ -2217,10 +2242,12 @@ export function createMediaFileCommit(
         signal: ctx.signal,
       })
 
-      // AQU-646: seed the post-import auto-transcribe — the workspace's
-      // import-completion handler consumes this (the cell store won't have these
-      // cells, let alone their attachments, until an unawaitable revalidate).
-      if (!ctx.mediaTextSource) recordMediaImportSeed({
+      // AQU-2426: only when the person chose Import and transcribe…, seed the
+      // run that finds the lines from the words — the workspace's
+      // import-completion handler consumes this (the cell store won't have
+      // these cells, let alone their attachments, until an unawaitable
+      // revalidate). A recording imported whole is left as it is.
+      if (!ctx.mediaTextSource && ctx.mediaMode === "transcribe") recordMediaImportSeed({
         fileId,
         cells: buildMediaSeedCells({
           fileId,
@@ -2234,12 +2261,12 @@ export function createMediaFileCommit(
       result = {
         id: fileId,
         name: file.name,
-        type: fileType,
+        type: storedType,
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
         orderedBy: "time",
         hasOriginalSource: true,
-        ...(pictureUrl || fileType === "video"
+        ...(pictureUrl || storedType === "video"
           ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
       }
       return result
@@ -2294,6 +2321,22 @@ export async function probeDurationMsSafe(blob: Blob, timeoutMs = 15_000): Promi
   } catch {
     return undefined
   }
+}
+
+/** The most a recording may weigh to be decoded only to measure it: the whole
+ *  file is held in memory, decoded. A long film never is. */
+export const DECODE_TO_MEASURE_LIMIT_BYTES = 16 * 1024 * 1024
+
+/**
+ * AQU-2426 (review, Nov 9): a recording's length when its header has none
+ * (what a browser records: a MediaRecorder .webm), by decoding it. For the
+ * import's own measuring, after `probeMediaDurationMs` has failed. Undefined
+ * when it is too big to decode whole or can't be decoded: the recording then
+ * comes in unmeasured, as before.
+ */
+export async function measureByDecodingMs(file: Blob): Promise<number | undefined> {
+  if (file.size > DECODE_TO_MEASURE_LIMIT_BYTES) return undefined
+  return decodeDurationMs(file).catch(() => undefined)
 }
 
 /** Exact duration by decoding the samples. Throws when the platform can't. */

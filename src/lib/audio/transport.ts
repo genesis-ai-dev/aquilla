@@ -49,6 +49,9 @@ export interface VirtualTransportInput {
   soundingCellId: string | null
   rate: number
   volume: number
+  /** AQU-2711 x AQU-2253 (review, Nov 25): where the clock starts
+   *  (`startVirtualClock`'s start); the bar covers this..`durationSec`. */
+  startSec?: number
 }
 
 /** The video's side of the story, as the stores already publish it. */
@@ -88,13 +91,24 @@ export interface VideoTransportInput {
  *
  * So this is now the single rule, and ProjectWorkspace's `videoIsTransport`
  * is this function. There is nowhere left for a copy to drift.
+ *
+ * A fourth since AQU-2253: not when the file follows its recordings. The pane
+ * is on screen in both timings, and following the recordings the programme
+ * owns playback and the picture follows it.
  */
 export function videoOwnsFile(
   coreMediaUrl: string | null | undefined,
   anyCellClockIsFileTime: boolean,
   paneOnScreen: boolean,
+  /**
+   * AQU-2253: the file follows its recordings. The film is on screen there
+   * now, but only the queue's programme can play takes laid end to end, so the
+   * programme is the transport and the picture follows its clock: the
+   * playhead's second is the film's second.
+   */
+  followsRecordings = false,
 ): boolean {
-  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime && paneOnScreen
+  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime && paneOnScreen && !followsRecordings
 }
 
 /**
@@ -135,6 +149,22 @@ export function virtualOwnsFile(
 }
 
 /**
+ * AQU-2711 x AQU-2253 (review, Nov 25): how far along the bar is, over its
+ * span (`startSec`..`duration`; from 0 when there is no start), 0..1.
+ */
+export function progressSpanFraction(progress: { currentTime: number; duration: number; startSec?: number }): number {
+  const start = progress.startSec ?? 0
+  const span = progress.duration - start
+  return span > 0 ? Math.min(1, Math.max(0, (progress.currentTime - start) / span)) : 0
+}
+
+/** The second a press at `fraction` of the bar means, over the same span. */
+export function progressSpanSec(progress: { duration: number; startSec?: number }, fraction: number): number {
+  const start = progress.startSec ?? 0
+  return start + fraction * Math.max(0, progress.duration - start)
+}
+
+/**
  * Fold the two engines into one answer.
  *
  * The queue WINS whenever it is genuinely running this file's cells, even on a
@@ -170,6 +200,7 @@ export function selectTransportForFile(
       progress: {
         currentTime: virtual.currentSec ?? 0,
         duration,
+        ...(virtual.startSec ? { startSec: virtual.startSec } : {}),
         rate: virtual.rate,
         volume: virtual.volume,
         // Neither of the two non-queue transports can ever be on the

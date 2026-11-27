@@ -97,9 +97,6 @@ export interface SourceRegionLaneProps {
   /** The timeline's horizontal scroll, so `gapLabel` can stay at the visible
    *  left edge of a chip that runs the whole length of the film. */
   scrollLeftPx?: number
-  /** Draw no dashed placeholder at all: on that same file in Free timing the
-   *  video is hidden and nothing sounds there, so the row is left empty. */
-  hideGaps?: boolean
 }
 
 function SourceRegionLaneImpl({
@@ -119,7 +116,6 @@ function SourceRegionLaneImpl({
   snapEnabled = false,
   gapLabel,
   scrollLeftPx = 0,
-  hideGaps = false,
 }: SourceRegionLaneProps) {
   const t = useT()
   const originPx = useTimelineOriginPx()
@@ -166,7 +162,7 @@ function SourceRegionLaneImpl({
     }
   }
   const { chipH } = useRowMetrics()
-  const visibleGaps = hideGaps ? [] : map.regions.filter(
+  const visibleGaps = map.regions.filter(
     (r) =>
       r.kind === "gap" &&
       r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC &&

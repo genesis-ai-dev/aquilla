@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest"
 import { buildTimelineLayout } from "./layout"
-import { buildProgramme, slotHasOwnSound, withoutHiddenTakes, type BuildProgrammeOptions } from "./programme"
+import { buildProgramme, linesUnderLayers, whatSlotPlays, withoutHiddenTakes, type BuildProgrammeOptions } from "./programme"
 import { targetOffsetMsFor } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
@@ -381,12 +381,15 @@ describe("the programme's takes on added tracks (AQU-2252)", () => {
   })
 
   it("a line whose only take is on an added track has something of its own to play, whatever the track", () => {
-    const cells = [bookLine("l1", { durationMs: 2000 }), bookLine("l2", undefined, { durationMs: 3000 }), bookLine("l3")]
+    // (A take shorter than the 2 s stand-in, so as a layer it does not run on
+    // over l3, which would then be held under it.)
+    const cells = [bookLine("l1", { durationMs: 2000 }), bookLine("l2", undefined, { durationMs: 1500 }), bookLine("l3")]
     for (const opts of [STAND_IN, AS_LAYER]) {
       const prog = buildProgramme(cells, opts)
-      expect(slotHasOwnSound(prog.byCellId.get("l1")!)).toBe(true)
-      expect(slotHasOwnSound(prog.byCellId.get("l2")!)).toBe(true)
-      expect(slotHasOwnSound(prog.byCellId.get("l3")!)).toBe(false)
+      const plays = (id: string) => whatSlotPlays(prog.byCellId.get(id)!, new Set(), linesUnderLayers(prog))
+      expect(plays("l1")).toBe("sound")
+      expect(plays("l2")).toBe("sound")
+      expect(plays("l3")).toBe("nothing")
     }
   })
 })

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { InfoLabel } from "@/components/ui/info-label"
-import { filmFrameRateOf, useFilmFrameRates, type FilmFrameRate } from "@/hooks/useFilmFrameRate"
+import { filmFrameRateOf, useFileFrameRate, useFilmFrameRates, type FilmFrameRate } from "@/hooks/useFilmFrameRate"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   convertFramesAsHundredths,
@@ -67,12 +67,13 @@ export function resolveFramesAsHundredths(
  * the film's rate or the frame numbers' until the person says otherwise, and
  * back to that when a different file is picked — and the cues with it
  * applied, which is what the import should write. `filmUrl` is the linked
- * film of the file the cues go into; it is read only once the check fires.
+ * film of the file the cues go into; `filmFile` is a film being imported with
+ * them, read from the file itself. Either is read only once the check fires.
  * Pair it with `FramesAsHundredthsNotice` so every path says the same thing.
  */
 export function useFramesAsHundredths<T extends TranslatableString>(
   cues: readonly T[] | null | undefined,
-  { filmUrl }: { filmUrl?: string | null } = {},
+  { filmUrl, filmFile }: { filmUrl?: string | null; filmFile?: Blob | null } = {},
 ): {
   finding: FramesAsHundredths | null
   state: FramesAsHundredthsState | null
@@ -81,10 +82,12 @@ export function useFramesAsHundredths<T extends TranslatableString>(
   cues: readonly T[]
 } {
   const finding = useMemo(() => (cues?.length ? detectFramesAsHundredths(cues) : null), [cues])
-  const filmRates = useFilmFrameRates(finding ? [filmUrl] : [])
+  const filmRates = useFilmFrameRates(finding && !filmFile ? [filmUrl] : [])
+  const fileRate = useFileFrameRate(finding ? filmFile : null)
+  const film: FilmFrameRate = filmFile ? fileRate : filmFrameRateOf(filmRates, filmUrl)
   const [picked, setPicked] = useState<{ cues: unknown; pick: FramesAsHundredthsPick } | null>(null)
   const state = finding
-    ? resolveFramesAsHundredths(finding, picked && picked.cues === cues ? picked.pick : null, filmFrameRateOf(filmRates, filmUrl))
+    ? resolveFramesAsHundredths(finding, picked && picked.cues === cues ? picked.pick : null, film)
     : null
   const choice: FramesAsHundredthsChoice = state?.choice ?? "keep"
   const fixed = useMemo(

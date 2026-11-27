@@ -4453,7 +4453,10 @@ export function TimelineEditor({
   useEffect(() => {
     if (windowKey === windowShownRef.current) return
     windowShownRef.current = windowKey
-    if (windowKey == null || queueActive || videoPlaying) return
+    // Running, not merely active (evidence pass, Nov 27): a file opens with
+    // the queue paused on its first line, and that must not keep a milestone
+    // opened later (a book's chapter 2) at 0:00, left of its window.
+    if (windowKey == null || queueRunning || videoPlaying) return
     const head = clock.displaySec()
     if (head >= windowStartSec && head <= durationSec) return
     // The canvas's left edge is the window's start.

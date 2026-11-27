@@ -1259,6 +1259,32 @@ describe("TimelineEditor", () => {
         expect(onSeekToTime).toHaveBeenCalledTimes(2)
         expect(onSeekToTime).toHaveBeenLastCalledWith(762)
       })
+      // Evidence pass, Nov 27: a file opens with the queue paused on its first
+      // line (nobody pressed Play). Opening chapter 2 of a book left the
+      // playhead and the film at 0:00, left of the window, because a paused
+      // queue counted as "something plays".
+      it("seeks to the window's start with the queue paused (not playing) on a line before it", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        const onSeekToTime = vi.fn()
+        mockQueueState = { kind: "paused", cellIndex: 0, cellId: "s3" }
+        try {
+          render(film({ timingMode: "audioFirst", milestoneWindow: { key: "f:m2", startSec: 750 }, onSeekToTime }))
+          expect(onSeekToTime).toHaveBeenCalledWith(750)
+        } finally {
+          mockQueueState = { kind: "idle" }
+        }
+      })
+      it("leaves the playhead to a queue that is playing", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        const onSeekToTime = vi.fn()
+        mockQueueState = { kind: "playing", cellIndex: 0, cellId: "s3" }
+        try {
+          render(film({ timingMode: "audioFirst", milestoneWindow: { key: "f:m2", startSec: 750 }, onSeekToTime }))
+          expect(onSeekToTime).not.toHaveBeenCalled()
+        } finally {
+          mockQueueState = { kind: "idle" }
+        }
+      })
       it("the whole file (no window) leaves the playhead alone and runs to the film's end", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
         const onSeekToTime = vi.fn()

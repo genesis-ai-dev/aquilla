@@ -3,7 +3,6 @@ import {
   ALL_ORGS_PARAM,
   editorReturnFromLocation,
   isProjectEditorPath,
-  membersPath,
   archivedPath,
   orgHomePath,
   orgKeyFromParam,
@@ -69,9 +68,7 @@ describe("orgPath / swapOrgInPath", () => {
 })
 
 describe("convenience paths", () => {
-  it("builds members / settings / project settings URLs", () => {
-    expect(membersPath(3)).toBe("/orgs/3/members")
-    expect(membersPath(3, "matrix")).toBe("/orgs/3/members/matrix")
+  it("builds archived / settings / project settings URLs", () => {
     expect(archivedPath(3)).toBe("/orgs/3/archived")
     expect(archivedPath(3, "files")).toBe("/orgs/3/archived/files")
     expect(orgSettingsPath(3, "identity")).toBe("/orgs/3/settings/identity")

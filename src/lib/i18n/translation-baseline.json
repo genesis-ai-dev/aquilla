@@ -2769,6 +2769,7 @@
   "importExport.proposals.skippedUnchanged": ["ar","fr","id","ms","my","ru","th","zh-Hans","zh-Hant"],
   "importExport.proposals.staged": ["ar","fr","id","ms","my","ru","th","zh-Hans","zh-Hant"],
   "importExport.proposals.tooMany": ["ar","fr","id","ms","my","ru","th","zh-Hans","zh-Hant"],
+  "importExport.recordingChoice.import": ["ms"],
   "importExport.reimport.added": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
   "importExport.reimport.analysis": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],
   "importExport.reimport.blankCopy": ["am","ar","bn","es","fr","ha","hi","id","ms","my","pa","pt","ru","sw","th","ur","zh-Hans","zh-Hant"],

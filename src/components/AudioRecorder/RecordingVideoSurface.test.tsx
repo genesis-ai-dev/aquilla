@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { RecordingVideoSurface, seekTargetSec } from "./RecordingVideoSurface"
+import { filmStartForLine, RecordingVideoSurface, seekTargetSec } from "./RecordingVideoSurface"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { resetRecordingFilmAudibleCacheForTests } from "@/lib/store/recording-film-audible-pref"
 
@@ -264,6 +264,19 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
     it("never returns a negative, which currentTime would throw on", () => {
       expect(seekTargetSec(-5)).toBe(0)
       expect(seekTargetSec(12.5)).toBe(12.5)
+    })
+  })
+
+  // Sam, Nov 27: with Split into milestones on, a line with no times yet in
+  // the open milestone shows the film where the milestone's window starts.
+  describe("filmStartForLine", () => {
+    it("a timed line is its own time, whatever the window", () => {
+      expect(filmStartForLine(12.5, 750)).toBe(12.5)
+    })
+    it("an untimed line takes the window's start, and with no window stays put", () => {
+      expect(filmStartForLine(null, 750)).toBe(750)
+      expect(filmStartForLine(undefined, 0)).toBeNull()
+      expect(filmStartForLine(null)).toBeNull()
     })
   })
 })

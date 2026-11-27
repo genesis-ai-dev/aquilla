@@ -1,5 +1,6 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useLatchedLines } from "@/hooks/useLatchedLines"
+import { useMilestoneWindowStart } from "@/hooks/useMilestoneWindowStart"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -237,7 +238,7 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost as CloneVoiceModalHostImpl } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  setQueueTargetSlots, setQueueLayerTrackSlots, setQueueProgrammeOrigin, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
@@ -401,7 +402,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
-import { applyPendingVolumes, applyTrackVolumes, nextPendingVolume, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
+import { applyFilmSoundDb, applyPendingVolumes, applyTrackVolumes, FILM_SOUND_TRACK_ID, nextPendingVolume, pendingVolumesForPatches, settledPendingVolumes, withFilmSoundRow, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
 import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
@@ -16347,9 +16348,28 @@ export function ProjectWorkspace() {
   useEffect(() => {
     applyTrackVolumes(timelineTracks)
   }, [timelineTracks])
+  // Sam, Nov 27: the film's own volume (its row's slider), stored on the Source
+  // audio row's id even where no such row is drawn (track-volume.ts). Read
+  // through the stand-in row so a write drawn before the read shows it holds
+  // there too. Once per change; 0 dB on a file with no film.
+  const filmReadTracks = useMemo(
+    () => (activeFile?.coreMediaUrl ? withFilmSoundRow(serverTimelineTracks, activeFile.trackOverrides) : serverTimelineTracks),
+    [serverTimelineTracks, activeFile?.coreMediaUrl, activeFile?.trackOverrides],
+  )
+  const filmVolumeDb = useMemo(() => {
+    if (!activeFile?.coreMediaUrl) return 0
+    const tracks = pendingTrackPaint?.volumes && pendingTrackPaint.fileId === activeFile.id
+      ? applyPendingVolumes(filmReadTracks, pendingTrackPaint.volumes)
+      : filmReadTracks
+    return tracks.find((tr) => tr.id === FILM_SOUND_TRACK_ID)?.volumeDb ?? 0
+  }, [filmReadTracks, pendingTrackPaint, activeFile?.coreMediaUrl, activeFile?.id])
+  useEffect(() => {
+    applyFilmSoundDb(filmVolumeDb)
+  }, [filmVolumeDb])
+  useEffect(() => () => applyFilmSoundDb(0), [])
   useEffect(() => {
     if (!pendingTrackPaint?.volumes || pendingTrackPaint.fileId !== activeFileId) return
-    const settled = settledPendingVolumes(pendingTrackPaint.volumes, serverTimelineTracks)
+    const settled = settledPendingVolumes(pendingTrackPaint.volumes, filmReadTracks)
     if (settled.length === 0) return
     setPendingTrackPaint((current) => {
       if (!current?.volumes || current.fileId !== activeFileId) return current
@@ -16357,7 +16377,7 @@ export function ProjectWorkspace() {
       for (const id of settled) next.delete(id)
       return trackPaintOf(current.fileId, current.colors, next)
     })
-  }, [serverTimelineTracks, pendingTrackPaint, activeFileId])
+  }, [filmReadTracks, pendingTrackPaint, activeFileId])
 
   // ── AQU-2664 (boards 71–73): the Even out window and its ways in ─────────
   // The cells that carry this file's takes: the cue sibling's, merged, on a
@@ -17090,9 +17110,10 @@ export function ProjectWorkspace() {
   // film, a film that could not be loaded.
   // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, Play
   // ends at the milestone's last line and the film does not run on: the
-  // milestone is laid out from 0:00, so the film's rest would play over an
-  // empty timeline. (Its picture is not yet at the milestone's place in the
-  // film: the programme clock starts at 0:00 for any list of lines.)
+  // film's rest would play over an empty timeline. (Sam, Nov 27: the
+  // milestone is a window onto the film's clock, laid out from where it
+  // starts, so the picture is at the milestone's place in the film;
+  // `milestoneWindowStart` below.)
   const filmBehind = useMemo(
     () => linkedFilmBehindLines({
       kind: filmKind,
@@ -17392,8 +17413,10 @@ export function ProjectWorkspace() {
   // Finding 10 (same review): kept per FILE — the built-in rows have the same
   // ids in every file, and this workspace stays open across files.
   const trackNotesRef = useRef(new TrackWriteNotes())
-  const serverTracksRef = useRef(serverTimelineTracks)
-  serverTracksRef.current = serverTimelineTracks
+  // Through the film's stand-in row (Nov 27): the film's volume write reads
+  // its "before" and its landing there when no Source audio row is drawn.
+  const serverTracksRef = useRef(filmReadTracks)
+  serverTracksRef.current = filmReadTracks
   const readTrackSettled = useCallback((trackId: string): TrackFields | null => {
     const tr = serverTracksRef.current.find((x) => x.id === trackId)
     return tr ? trackFieldsOf(tr) : null
@@ -18872,9 +18895,37 @@ export function ProjectWorkspace() {
           // Undo and Redo saves what the timeline holds (beforeHistoryMove).
           const revertColors = paintTrackColorsRef.current(colors)
           const revertPlaces = paintTrackPlacesRef.current(changes)
+          // Evidence pass, Nov 27: a volume Undo or Redo is drawn like the
+          // fader's own write, so a drag not read back yet does not stay on the
+          // fader (it never settled once the read went back to the old level).
+          const volumeFileId = activeFileIdRef.current
+          const volumeWriteId = ++trackVolumeWriteId.current
+          const volumeIds = changes.flatMap((c) => (c.patch && "volumeDb" in c.patch ? [c.trackId] : []))
+          if (volumeFileId && volumeIds.length > 0) {
+            setPendingTrackPaint((current) => {
+              const mine = current?.fileId === volumeFileId ? current : null
+              const volumes = pendingVolumesForPatches(
+                mine?.volumes ?? new Map(),
+                changes,
+                (trackId) => serverTracksRef.current.find((tr) => tr.id === trackId)?.volumeDb ?? 0,
+                volumeWriteId,
+              )
+              return volumes ? trackPaintOf(volumeFileId, mine?.colors ?? null, volumes) : current
+            })
+          }
+          const revertVolumes = () => {
+            if (!volumeFileId || volumeIds.length === 0) return
+            setPendingTrackPaint((current) => {
+              if (!current?.volumes || current.fileId !== volumeFileId) return current
+              let volumes = current.volumes
+              for (const trackId of volumeIds) volumes = withoutPendingVolume(volumes, trackId, volumeWriteId)
+              return trackPaintOf(volumeFileId, current.colors, volumes)
+            })
+          }
           return applyTrackPatches(changes as never, "Couldn't undo the track change:", () => {
             revertColors()
             revertPlaces()
+            revertVolumes()
           })
         },
         restoreTakes: async (takes) => {
@@ -18959,9 +19010,66 @@ export function ProjectWorkspace() {
   // Keyed on the answer (a renamed track is a new tracks array), so the play
   // strip doesn't lay the file out again for a rename.
   const programmeTracksKey = JSON.stringify(programmeTrackSlots(serverTimelineTracks))
-  const programmeTracks = useMemo(
+  const fileProgrammeTracks = useMemo(
     () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
     [programmeTracksKey],
+  )
+  // Sam, Nov 27: with Split into milestones on, the timeline is a window onto
+  // the film's own clock, starting where the milestone starts in the whole
+  // file (hooks/useMilestoneWindowStart). Following the recordings the
+  // milestone is laid out from there (`originSec`), so the ruler, the queue's
+  // clock, the bar and a linked film following it all read film time. The
+  // split off: 0:00, no change.
+  const wholePlaybackCells = useMemo(
+    () => recordingsLines(timelineLines, audioCueCells, timingMode === "audioFirst"),
+    [timelineLines, audioCueCells, timingMode],
+  )
+  const milestonePartShown = showsPartOfFile(timelineCells, timelineLines)
+  const milestoneWindowAt = useMilestoneWindowStart({
+    fileId: activeFileId ?? null,
+    partShown: milestonePartShown,
+    milestoneKey: timelineMilestoneKey,
+    followsRecordings: timingMode === "audioFirst",
+    tracks: fileProgrammeTracks,
+    shown: playbackCells,
+    whole: wholePlaybackCells,
+  })
+  const milestoneWindowStart = milestoneWindowAt?.startSec ?? null
+  // The milestone that start is for: one render after turning to another
+  // milestone following the recordings it is still the last one's.
+  const milestoneWindowFor = milestoneWindowAt?.milestoneKey ?? null
+  // Following the recordings the milestone is laid out from its window's
+  // start; everything handed these tracks lays it out the same way.
+  const programmeOriginSec = timingMode === "audioFirst" && milestonePartShown ? (milestoneWindowStart ?? 0) : 0
+  // Given, 0 too, whenever a milestone is the window following the
+  // recordings: Play selected reads it as "inside a milestone".
+  const programmeInWindow = timingMode === "audioFirst" && milestonePartShown
+  const programmeTracks = useMemo(
+    () => (programmeInWindow ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
+    [fileProgrammeTracks, programmeOriginSec, programmeInWindow],
+  )
+  // A layout effect: it runs before any of the timeline's own effects, so the
+  // queue already lays the milestone out from its start when the timeline
+  // brings the playhead there on opening it (a plain effect ran after the
+  // timeline's seek, which then landed in the last milestone's layout).
+  useLayoutEffect(() => {
+    setQueueProgrammeOrigin(programmeOriginSec)
+  }, [programmeOriginSec])
+  useEffect(() => () => setQueueProgrammeOrigin(0), [])
+  // The recorder shows the film at the window's start for a line with no
+  // times, when the line is the open milestone's (opened elsewhere, the
+  // recorder walks the whole cue file, and this window is not its place).
+  const recorderFilmWindowSec = useMemo(() => {
+    if (!milestonePartShown || milestoneWindowStart == null || recordingCellId == null) return 0
+    const inMilestone = playbackCells.some((c) => c.id === recordingCellId) || timelineCells.some((c) => c.id === recordingCellId)
+    return inMilestone ? milestoneWindowStart : 0
+  }, [milestonePartShown, milestoneWindowStart, recordingCellId, playbackCells, timelineCells])
+  // The timeline scrolls over the milestone's stretch only (TimelineEditor).
+  const timelineMilestoneWindow = useMemo(
+    () => (milestonePartShown && milestoneWindowStart != null
+      ? { key: `${activeFileId ?? ""}:${milestoneWindowFor ?? ""}`, startSec: milestoneWindowStart }
+      : null),
+    [milestonePartShown, milestoneWindowStart, activeFileId, milestoneWindowFor],
   )
   // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
   // into its lines' pieces, laid out by the programme the timeline draws and
@@ -18993,7 +19101,7 @@ export function ProjectWorkspace() {
     const cells = audioCueSibling && where.fileId === audioCueSibling.id
       ? (audioCueCells ?? [])
       : where.fileId === activeFileId ? audioMergedCells : []
-    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], programmeTracks).flatMap(({ cellId, audioId }) => {
+    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], fileProgrammeTracks).flatMap(({ cellId, audioId }) => {
       const att = cells.find((c) => c.id === cellId)?.attachments?.[audioId]
       if (!att) return []
       const targetOffsetMs = att.targetOffsetMs ?? null
@@ -21704,6 +21812,8 @@ export function ProjectWorkspace() {
                     // volume level (Contributor); its other settings stay
                     // with maintainers.
                     onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
+                    filmVolumeDb={filmVolumeDb}
+                    milestoneWindow={timelineMilestoneWindow}
                     // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
                     // window, for anyone who may even takes out.
                     evenOut={timelineEvenOut}
@@ -22610,6 +22720,8 @@ export function ProjectWorkspace() {
           // better"): this pane resolves the film from the FILE and never
           // consults the mode, so an audio-first file keeps its picture.
           filmFileId={activeFileId}
+          // Sam, Nov 27: the open milestone's window, for a line with no times yet.
+          filmWindowStartSec={recorderFilmWindowSec}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

@@ -680,3 +680,26 @@ describe("playStartLineId", () => {
     expect(playStartLineId(s2, [], true, cuesForText)).toBe("s2")
   })
 })
+
+// Sam, Nov 27: with Split into milestones on, a milestone's lines are laid
+// out from where they sit in the whole file (`originSec`), so the timeline,
+// the transport and the film all read the film's own clock.
+describe("buildProgramme — a milestone laid out from its place in the file", () => {
+  it("starts the first line at the origin and the rest follow as before", () => {
+    const lines = [verse("v3", 750, 756, { durationMs: 11_000 }), verse("v4", 756, 760, { durationMs: 7_000 })]
+    const from0 = buildProgramme(lines)
+    const prog = buildProgramme(lines, { originSec: 752.5 })
+    expect(prog.slots.map((s) => [s.cellId, s.startSec, s.slotLenSec])).toEqual([
+      ["v3", 752.5, 11],
+      ["v4", 763.5, 7],
+    ])
+    expect(prog.totalSec).toBe(from0.totalSec + 752.5)
+    // What plays is the same: only where it sits moves.
+    expect(prog.slots.map((s) => s.sourceWindow)).toEqual(from0.slots.map((s) => s.sourceWindow))
+  })
+
+  it("no origin is 0:00, as it always was", () => {
+    const lines = [verse("v1", 0, 6, { durationMs: 11_000 })]
+    expect(buildProgramme(lines, { originSec: 0 }).slots[0].startSec).toBe(0)
+  })
+})

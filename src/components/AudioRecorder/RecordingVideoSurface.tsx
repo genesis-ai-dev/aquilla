@@ -73,6 +73,19 @@ const FOLLOW_TOLERANCE_SEC = 0.25
  * absence of information. Negative and non-finite values are rejected rather
  * than clamped silently — writing either to `currentTime` throws.
  */
+/**
+ * Sam, Nov 27: where the film starts for a line in the recorder. A timed line:
+ * its own time (the film's clock). A line with no times yet, with Split into
+ * milestones on: where the open milestone's window starts
+ * (`windowStartSec`, the timeline's own), so the picture is at the
+ * milestone's place in the film, never at 0:00. Otherwise null (leave the
+ * picture where it is).
+ */
+export function filmStartForLine(lineStartSec: number | null | undefined, windowStartSec = 0): number | null {
+  if (lineStartSec != null && Number.isFinite(lineStartSec)) return lineStartSec
+  return windowStartSec > 0 ? windowStartSec : null
+}
+
 export function seekTargetSec(startSec: number | null | undefined): number | null {
   if (startSec == null || !Number.isFinite(startSec)) return null
   return Math.max(0, startSec)

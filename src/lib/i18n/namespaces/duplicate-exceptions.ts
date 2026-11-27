@@ -466,6 +466,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
+  "importExport.recordingChoice.import":
+    "Commit button in the last import step for a recording with no subtitle " +
+    "file, sitting beside 'Import and transcribe…' and paired with it: it must " +
+    "take the same verb form as that sibling (Russian 'Импортировать', Hindi " +
+    "'आयात करें'). nav.workspaceActions.import is the workspace toolbar entry " +
+    "that opens the import screen, which several locales render as a noun " +
+    "('Импорт', 'আমদানি'). A toolbar destination vs a dialog's finishing verb.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +

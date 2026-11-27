@@ -5379,7 +5379,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -5388,7 +5387,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10752,7 +10752,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -10761,7 +10760,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -16109,7 +16109,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -21495,7 +21494,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -21504,7 +21502,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -28155,7 +28154,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -28164,7 +28162,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -34817,7 +34816,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -34826,7 +34824,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -41547,7 +41546,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -41556,7 +41554,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -48328,7 +48327,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -48337,7 +48335,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -55021,7 +55020,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -55030,7 +55028,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -63662,7 +63661,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -63671,7 +63669,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -72307,7 +72306,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -72316,7 +72314,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -81349,7 +81348,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -81358,7 +81356,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -90051,7 +90050,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -90060,7 +90058,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -99112,7 +99111,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -99121,7 +99119,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -108169,7 +108168,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -108178,7 +108176,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -117261,7 +117260,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -117270,7 +117268,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -126340,7 +126339,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -126349,7 +126347,8 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -135411,7 +135410,6 @@
     "importExport.recordingChoice.captionsNotReadMany": "f6805641b3d29833",
     "importExport.recordingChoice.inAll": "df42d2448eea5dfd",
     "importExport.recordingChoice.list": "4150aebe65c7e5b3",
-    "importExport.recordingChoice.importWhole": "82fbd02f34b36118",
     "importExport.recordingChoice.importTranscribe": "c0b01befdd891fd4",
     "importExport.recordingChoice.whyNot": "cb39b22e5becca99",
     "importExport.recordingChoice.costTitle": "3b50fc5c17c47715",
@@ -135420,6 +135418,7 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "importExport.recordingChoice.import": "2cff9baabf56ca00"
   }
 }

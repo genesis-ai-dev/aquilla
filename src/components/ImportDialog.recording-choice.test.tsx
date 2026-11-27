@@ -1,7 +1,7 @@
 /**
  * AQU-2426 (Sam, Nov 3 and 5): nothing brought in is cut into lines or
  * transcribed on its own. A recording dropped with no subtitle file ends on a
- * last step — Import whole recording, or Import and transcribe… with its cost
+ * last step — Import (whole), or Import and transcribe… with its cost
  * shown first — and Cancel imports nothing. Board 58, part 1.
  */
 
@@ -56,12 +56,12 @@ describe("the import's last step for a recording with no subtitle file (AQU-2426
     mockImportFile.mockResolvedValue({ refs: [], speakerPairs: [] })
   })
 
-  it("Import whole recording brings it in whole", async () => {
+  it("Import brings it in whole", async () => {
     renderDialog()
     await dropRecordings("Session 4.mp3")
     expect(screen.getByText("No subtitle file came with this recording. Bring it in whole, or transcribe it to find its lines.")).toBeInTheDocument()
     expect(mockImportFile).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "Import" }))
     await waitFor(() => expect(mockImportFile).toHaveBeenCalledOnce())
     expect(mockImportFile.mock.calls[0][1]).toMatchObject({ mediaMode: "whole" })
   })
@@ -84,7 +84,7 @@ describe("the import's last step for a recording with no subtitle file (AQU-2426
     await dropRecordings("Session 4.mp3", "Session 5.mp3")
     expect(screen.getByText("Import 2 recordings")).toBeInTheDocument()
     expect(screen.getByText("In all")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Import whole recordings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Import" }))
     await waitFor(() => expect(mockImportFile).toHaveBeenCalledTimes(2))
     for (const call of mockImportFile.mock.calls) expect(call[1]).toMatchObject({ mediaMode: "whole" })
   })

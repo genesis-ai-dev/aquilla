@@ -4647,7 +4647,7 @@ export const zh_Hans: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"其中 {count} 个超过 {maxSize}，所以没有检查其中是否内嵌字幕。如果有，请把它们作为字幕文件一起导入。"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "合计",
   "importExport.recordingChoice.list": "要导入的录音",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"整段导入录音"},"countVar":"count"},
+  "importExport.recordingChoice.import": "导入",
   "importExport.recordingChoice.importTranscribe": "导入并转录…",
   "importExport.recordingChoice.whyNot": "为什么不能在这里转录",
   "importExport.recordingChoice.costTitle": "导入并转录 {name}",

@@ -4641,7 +4641,7 @@ export const ar: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"zero":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها.","one":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها.","two":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها.","few":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها.","many":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها.","other":"يتجاوز حجم {count} من هذه الملفات {maxSize}، لذا لم تُفحص بحثًا عن ترجمات نصية مضمّنة. إن كانت فيها، فاستوردها كملفات ترجمة نصية معها."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "الإجمالي",
   "importExport.recordingChoice.list": "التسجيلات المراد استيرادها",
-  "importExport.recordingChoice.importWhole": {"forms":{"zero":"استيراد التسجيلات كاملة","one":"استيراد التسجيل كاملًا","two":"استيراد التسجيلين كاملين","few":"استيراد التسجيلات كاملة","many":"استيراد التسجيلات كاملة","other":"استيراد التسجيلات كاملة"},"countVar":"count"},
+  "importExport.recordingChoice.import": "استيراد",
   "importExport.recordingChoice.importTranscribe": "الاستيراد والتفريغ…",
   "importExport.recordingChoice.whyNot": "لماذا لا يمكنك التفريغ هنا",
   "importExport.recordingChoice.costTitle": "استيراد {name} وتفريغه",

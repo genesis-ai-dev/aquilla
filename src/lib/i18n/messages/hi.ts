@@ -5318,7 +5318,7 @@ export const hi: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"इनमें से {count} फ़ाइलें {maxSize} से बड़ी हैं, इसलिए उनके अंदर कैप्शन नहीं जाँचे गए। अगर उनमें कैप्शन हैं, तो उन्हें उनके साथ उपशीर्षक फ़ाइलों के रूप में आयात करें।","other":"इनमें से {count} फ़ाइलें {maxSize} से बड़ी हैं, इसलिए उनके अंदर कैप्शन नहीं जाँचे गए। अगर उनमें कैप्शन हैं, तो उन्हें उनके साथ उपशीर्षक फ़ाइलों के रूप में आयात करें।"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "कुल",
   "importExport.recordingChoice.list": "आयात की जाने वाली रिकॉर्डिंग",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"पूरी रिकॉर्डिंग आयात करें","other":"पूरी रिकॉर्डिंग आयात करें"},"countVar":"count"},
+  "importExport.recordingChoice.import": "आयात करें",
   "importExport.recordingChoice.importTranscribe": "आयात करें और लिप्यंतरण करें…",
   "importExport.recordingChoice.whyNot": "आप यहाँ लिप्यंतरण क्यों नहीं कर सकते",
   "importExport.recordingChoice.costTitle": "{name} आयात करें और लिप्यंतरण करें",

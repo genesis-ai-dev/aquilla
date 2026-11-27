@@ -4763,7 +4763,7 @@ export const ru: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} из этих файлов больше {maxSize}, поэтому встроенные субтитры в нём не проверялись. Если они есть, импортируйте их вместе с ним как файл субтитров.","few":"{count} из этих файлов больше {maxSize}, поэтому встроенные субтитры в них не проверялись. Если они есть, импортируйте их вместе с ними как файлы субтитров.","many":"{count} из этих файлов больше {maxSize}, поэтому встроенные субтитры в них не проверялись. Если они есть, импортируйте их вместе с ними как файлы субтитров.","other":"{count} из этих файлов больше {maxSize}, поэтому встроенные субтитры в них не проверялись. Если они есть, импортируйте их вместе с ними как файлы субтитров."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Всего",
   "importExport.recordingChoice.list": "Записи для импорта",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Импортировать запись целиком","few":"Импортировать записи целиком","many":"Импортировать записи целиком","other":"Импортировать записи целиком"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Импортировать",
   "importExport.recordingChoice.importTranscribe": "Импортировать и расшифровать…",
   "importExport.recordingChoice.whyNot": "Почему здесь нельзя расшифровать",
   "importExport.recordingChoice.costTitle": "Импорт и расшифровка {name}",

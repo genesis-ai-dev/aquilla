@@ -12,11 +12,12 @@
 // −∞ (stored "-inf") is silence in both: a gain of 0.
 // Mute and solo are NOT here: they are personal (audibility.ts).
 
+import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { setTrackGainDb } from "./mixer"
 import { slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
-import { overrideVolumeDb, type PersistedTrackOverrides, type TimelineTrack } from "@/lib/timeline/tracks"
-import { toStoredVolume } from "./track-volume-store"
+import { overrideVolumeDb, TRACK_KIND_LABELS, type PersistedTrackOverrides, type TimelineTrack } from "@/lib/timeline/tracks"
+import { fromStoredVolume, toStoredVolume } from "./track-volume-store"
 
 // The fader's scale, its typing and its readout live in fader-scale.ts; what
 // it holds and how that is stored, in track-volume-store.ts.
@@ -36,6 +37,81 @@ export function applyTrackVolumes(tracks: readonly TimelineTrack[]): void {
     if (tr.kind !== "audio" && tr.kind !== "target-audio") continue
     for (const slot of slotsForTrack(tr.id)) setTrackGainDb(slot, tr.volumeDb ?? 0)
   }
+}
+
+// ── The film's own sound (Sam, Nov 27) ──────────────────────────────────────
+//
+// The film's row carries a volume slider beside its M | S, like every other
+// track. The film's sound is the "source" switch (the film's row on a linked
+// film, the Source audio row in an imported film's folder), so its volume is
+// ONE value, stored where a track's is: on the Source audio row's id (a
+// built-in id, so the server takes a volume-only patch on it on every file),
+// even on a file that draws no Source audio row. It plays in two places:
+//   • the mixer's "source" stage, where an imported film's Source audio plays;
+//   • the film's own <video> element (MediaVideoPane), as its volume: the
+//     bar's volume times this level. An element cannot go over 1, so above
+//     0 dB it plays at full; −∞ mutes it, which iPhone and iPad honour (they
+//     ignore an element's volume).
+// It is playback only: the film's sound is never in an export.
+
+/** Where the film's volume is stored: the Source audio row's id. */
+export const FILM_SOUND_TRACK_ID = "source-audio"
+/** The mixer stage (and the audibility switch) the film's sound plays on. */
+export const FILM_SOUND_MIXER_KEY = "source"
+
+/** The film's stored volume, dB (0 when none). */
+export function filmSoundDb(overrides: PersistedTrackOverrides | null | undefined): number {
+  return overrideVolumeDb(overrides?.[FILM_SOUND_TRACK_ID]?.volumeDb) ?? 0
+}
+
+/**
+ * The tracks as a read for the film's volume: the drawn ones, plus a stand-in
+ * Source audio row when the file draws none (a linked film with no recording
+ * of its own). For reads only — "what was it before", "has my write landed" —
+ * never drawn.
+ */
+export function withFilmSoundRow(tracks: readonly TimelineTrack[], overrides: PersistedTrackOverrides | null | undefined): TimelineTrack[] {
+  if (tracks.some((t) => t.id === FILM_SOUND_TRACK_ID)) return tracks as TimelineTrack[]
+  const db = filmSoundDb(overrides)
+  return [...tracks, {
+    id: FILM_SOUND_TRACK_ID,
+    kind: "source-audio",
+    name: TRACK_KIND_LABELS["source-audio"],
+    order: -1,
+    ...(db ? { volumeDb: db } : {}),
+  }]
+}
+
+let filmDb = 0
+const filmListeners = new Set<() => void>()
+const subscribeFilm = (l: () => void) => {
+  filmListeners.add(l)
+  return () => { filmListeners.delete(l) }
+}
+
+/** The film's volume, dB, to the mixer's source stage and the film's element.
+ *  Called when the stored value changes and on every drawn frame of a drag. */
+export function applyFilmSoundDb(db: number): void {
+  setTrackGainDb(FILM_SOUND_MIXER_KEY, db)
+  if (Object.is(filmDb, db)) return
+  filmDb = db
+  for (const l of [...filmListeners]) l()
+}
+
+export function getFilmSoundDb(): number {
+  return filmDb
+}
+
+/** The film's volume for the film's element (MediaVideoPane). */
+export function useFilmSoundDb(): number {
+  return useSyncExternalStore(subscribeFilm, getFilmSoundDb, () => 0)
+}
+
+/** The film element's volume: the bar's (0…1) times the film's level. */
+export function filmElementVolume(base: number, db: number): number {
+  if (db === -Infinity) return 0
+  const v = base * Math.pow(10, db / 20)
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : Math.max(0, Math.min(1, base))
 }
 
 /** The stored volume of the track a slot belongs to, dB (0 when none). */
@@ -124,6 +200,30 @@ export function settledPendingVolumes(pending: ReadonlyMap<string, PendingVolume
     if (!tr || read === p.db || (read !== p.readBefore && !(p.mine ?? []).includes(read))) out.push(id)
   }
   return out
+}
+
+/**
+ * Evidence pass, Nov 27: an Undo or Redo of a track's volume, drawn like a new
+ * write (`nextPendingVolume`) on top of the pending volumes, so a fader whose
+ * drag has not been read back yet shows the level the Undo wrote, and settles
+ * when the read shows it. `patch.volumeDb` is the stored form (null = 0 dB,
+ * "-inf" = silence). Null when no patch changes a volume.
+ */
+export function pendingVolumesForPatches(
+  pending: ReadonlyMap<string, PendingVolume>,
+  changes: ReadonlyArray<{ trackId: string; patch: { volumeDb?: unknown } | Record<string, unknown> | null }>,
+  readNow: (trackId: string) => number,
+  id: number,
+): Map<string, PendingVolume> | null {
+  let next: Map<string, PendingVolume> | null = null
+  for (const c of changes) {
+    if (!c.patch || !("volumeDb" in c.patch)) continue
+    const db = c.patch.volumeDb == null ? 0 : fromStoredVolume(c.patch.volumeDb)
+    if (db === undefined) continue
+    next ??= new Map(pending)
+    next.set(c.trackId, nextPendingVolume(next.get(c.trackId), db, readNow(c.trackId), id))
+  }
+  return next
 }
 
 /** A refused write takes back only itself, never a newer one on the same track. */

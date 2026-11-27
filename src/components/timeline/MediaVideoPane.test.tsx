@@ -82,6 +82,8 @@ vi.mock("youtube-video-element", () => {
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
 import { createVideoSeekStore } from "./video-seek-store"
 import { DOCK_HOST_MOVING } from "./media-dock-layout"
+import { applyFilmSoundDb } from "@/lib/audio/track-volume"
+import { getVideoController } from "@/lib/timeline/video-controller"
 import { __resetPlaybackSourceForTests, playbackSourceKey } from "@/lib/audio/playback-source"
 import {
   getVideoBuffering,
@@ -499,6 +501,48 @@ describe("MediaVideoPane", () => {
         mockQueue = { ...mockQueue, progress: { ...mockQueue.progress, volume: 0.4 } }
         render(following({ followsRecordings: false }))
         expect(media().volume).toBe(1)
+        expect(media().muted).toBe(false)
+      })
+    })
+
+    // Sam, Nov 27: the film's row has a volume slider like every track's. Its
+    // level reaches the film's own element, on top of the bar's volume, in
+    // both timings, and live while the slider is dragged.
+    describe("the film row's volume reaches the film's own sound", () => {
+      afterEach(() => act(() => applyFilmSoundDb(0)))
+      const media = () => screen.getByTestId("video-pane-media") as HTMLVideoElement
+      const half = Math.pow(10, -6 / 20)
+
+      it("following the source: the film plays at its row's level", () => {
+        render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} />)
+        expect(media().volume).toBe(1)
+        act(() => applyFilmSoundDb(-6))
+        expect(media().volume).toBeCloseTo(half, 5)
+      })
+
+      it("the bar's volume and the row's level multiply, and the bar's stays the bar's", () => {
+        render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} />)
+        act(() => applyFilmSoundDb(-6))
+        act(() => getVideoController()?.setVolume(0.5))
+        expect(media().volume).toBeCloseTo(0.5 * half, 5)
+        // The bar still reads its own 0.5, not the film's level folded in.
+        fireEvent.volumeChange(media())
+        act(() => applyFilmSoundDb(0))
+        expect(media().volume).toBeCloseTo(0.5, 5)
+      })
+
+      it("following the recordings: the queue's volume times the row's level", () => {
+        sounding("s2", { progress: { currentTime: 6, duration: 27, rate: 1, volume: 0.4, programmeClock: true } })
+        render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+        act(() => applyFilmSoundDb(-6))
+        expect(media().volume).toBeCloseTo(0.4 * half, 5)
+      })
+
+      it("at −∞ the film is muted, which iPhone and iPad honour", () => {
+        render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} />)
+        act(() => applyFilmSoundDb(-Infinity))
+        expect(media().muted).toBe(true)
+        act(() => applyFilmSoundDb(0))
         expect(media().muted).toBe(false)
       })
     })

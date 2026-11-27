@@ -200,7 +200,7 @@ Lost words
   // AQU-2426: original media with no captions asks whole or transcribed; the
   // recording is never cut or transcribed without that choice.
   it.each([
-    ["Import whole recording", "whole"],
+    ["Import", "whole"],
     ["Transcribe and import", "transcribe"],
   ] as const)("original media with no captions: %s, with the YouTube picture", async (button, mode) => {
     const onImported = vi.fn()
@@ -309,7 +309,7 @@ Lost words
     view.rerender(<YouTubeImportPanel ctx={{ projectId: "p1", author: "dev", getToken: vi.fn(async () => "token") }}
       onImported={onImported} mediaDisabledReason={REASON} />)
     // With no captions inside, the branch's whole-or-transcribed choice opens.
-    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "Import" }))
     expect(await screen.findByRole("alert")).toHaveTextContent(REASON)
     expect(createMediaFileCommit).not.toHaveBeenCalled()
     expect(onImported).not.toHaveBeenCalled()

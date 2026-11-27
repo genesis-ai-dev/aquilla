@@ -239,6 +239,39 @@ export function recorderLinesFor<T extends { id: string }>(
   return whole ?? plain
 }
 
+/**
+ * Sam, Nov 27: with Split into milestones on, the timeline is a WINDOW onto
+ * the film's own clock, and this is where it starts: the earliest start among
+ * the milestone's lines (`shown`), each placed by `spanOf` (following the
+ * source: the line's own times; following the recordings: its slot in the
+ * whole file's layout). A milestone whose lines have no times yet starts where
+ * the lines before it in the file ended, so the window never jumps backwards;
+ * with nothing placed before it either, 0:00. The whole file on the timeline
+ * (the split off, or one milestone holding everything) starts at 0:00, so
+ * nothing changes there. Computed once per milestone change.
+ */
+export function milestoneWindowStartSec<T extends { id: string }>(
+  shown: readonly T[],
+  whole: readonly T[],
+  spanOf: (line: T) => { start: number; end: number } | null,
+): number {
+  if (shown === whole || shown.length === 0) return 0
+  let start = Infinity
+  for (const line of shown) {
+    const span = spanOf(line)
+    if (span && Number.isFinite(span.start)) start = Math.min(start, span.start)
+  }
+  if (Number.isFinite(start)) return Math.max(0, start)
+  const ids = new Set(shown.map((line) => line.id))
+  let end = 0
+  for (const line of whole) {
+    if (ids.has(line.id)) break
+    const span = spanOf(line)
+    if (span && Number.isFinite(span.end)) end = Math.max(end, span.end)
+  }
+  return end
+}
+
 /** The lines of one chapter (the whole list when null), in order. */
 export function scopeCells<T extends CellData>(cells: readonly T[], scope: TimelineChapter | null): T[] {
   if (!scope) return cells as T[]

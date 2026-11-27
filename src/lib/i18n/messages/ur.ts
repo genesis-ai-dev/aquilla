@@ -5406,7 +5406,7 @@ export const ur: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"ان میں سے {count} فائلیں {maxSize} سے بڑی ہیں، اس لیے ان کے اندر کیپشن نہیں جانچے گئے۔ اگر ان میں کیپشن ہیں تو انہیں ان کے ساتھ سب ٹائٹل فائلوں کے طور پر درآمد کریں۔","other":"ان میں سے {count} فائلیں {maxSize} سے بڑی ہیں، اس لیے ان کے اندر کیپشن نہیں جانچے گئے۔ اگر ان میں کیپشن ہیں تو انہیں ان کے ساتھ سب ٹائٹل فائلوں کے طور پر درآمد کریں۔"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "کل",
   "importExport.recordingChoice.list": "درآمد کی جانے والی ریکارڈنگز",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"پوری ریکارڈنگ درآمد کریں","other":"پوری ریکارڈنگز درآمد کریں"},"countVar":"count"},
+  "importExport.recordingChoice.import": "درآمد کریں",
   "importExport.recordingChoice.importTranscribe": "درآمد اور نقل نویسی کریں…",
   "importExport.recordingChoice.whyNot": "آپ یہاں نقل نویسی کیوں نہیں کر سکتے",
   "importExport.recordingChoice.costTitle": "{name} درآمد اور نقل نویسی کریں",

@@ -5411,7 +5411,7 @@ export const ha: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} daga cikin waɗannan sun fi {maxSize}, don haka ba a duba taken da ke cikinsu ba. Idan suna da su, ku shigo da su a matsayin fayilolin rubutun allo tare da su.","other":"{count} daga cikin waɗannan sun fi {maxSize}, don haka ba a duba taken da ke cikinsu ba. Idan suna da su, ku shigo da su a matsayin fayilolin rubutun allo tare da su."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Gaba ɗaya",
   "importExport.recordingChoice.list": "Rikodin da za a shigo da su",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Ku shigo da rikodin gaba ɗaya","other":"Ku shigo da rikodin gaba ɗayansu"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Ku shigo da shi",
   "importExport.recordingChoice.importTranscribe": "Ku shigo kuma ku rubuta sauti…",
   "importExport.recordingChoice.whyNot": "Dalilin da ba za ku iya rubuta sauti a nan ba",
   "importExport.recordingChoice.costTitle": "Ku shigo da {name} kuma ku rubuta sautinsa",

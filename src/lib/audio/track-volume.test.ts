@@ -7,11 +7,18 @@ import {
   settledPendingVolumes,
   withoutPendingVolume,
   nextPendingVolume,
+  pendingVolumesForPatches,
   type PendingVolume,
   formatOwnVolume,
   trackVolumeForSlot,
   trackVolumeOverrides,
   withTrackVolumes,
+  FILM_SOUND_TRACK_ID,
+  applyFilmSoundDb,
+  filmElementVolume,
+  filmSoundDb,
+  getFilmSoundDb,
+  withFilmSoundRow,
 } from "./track-volume"
 import { __resetMixerForTests, trackGainDbOf } from "./mixer"
 import { applyClipLevelPcm, hasClipLevel, levelFields } from "@/lib/export/clip-level"
@@ -147,5 +154,76 @@ describe("a volume written here, before the read shows it", () => {
     const pending = new Map([["trk-music", w(-6, 0, 2)]])
     expect(withoutPendingVolume(pending, "trk-music", 1).get("trk-music")?.db).toBe(-6)
     expect(withoutPendingVolume(pending, "trk-music", 2).has("trk-music")).toBe(false)
+  })
+})
+
+// Sam, Nov 27: the film's row gets a volume slider like every other track's.
+// The film's sound is the "source" switch (its M | S), so its volume is stored
+// on the Source audio row's id and plays on the "source" mixer stage and on
+// the film's own <video> element.
+describe("the film's own sound", () => {
+  it("is stored on the Source audio row's id, read even when that row is not drawn", () => {
+    expect(FILM_SOUND_TRACK_ID).toBe("source-audio")
+    expect(filmSoundDb(null)).toBe(0)
+    expect(filmSoundDb({ "source-audio": { volumeDb: -6 } })).toBe(-6)
+    expect(filmSoundDb({ "source-audio": { volumeDb: "-inf" } })).toBe(-Infinity)
+  })
+
+  it("a stand-in row for reads only, when the file draws no Source audio row", () => {
+    const drawn = [track("source-subtitles", "source-subtitles"), track("target-audio", "target-audio")]
+    const read = withFilmSoundRow(drawn, { "source-audio": { volumeDb: -3 } })
+    expect(read.find((t) => t.id === "source-audio")).toMatchObject({ kind: "source-audio", volumeDb: -3 })
+    expect(read.slice(0, 2)).toEqual(drawn)
+    // A drawn Source audio row is the read as it is.
+    const withRow = [track("source-audio", "source-audio", -1)]
+    expect(withFilmSoundRow(withRow, { "source-audio": { volumeDb: -3 } })).toBe(withRow)
+  })
+
+  it("plays on the mixer's source stage and reaches the film's element", () => {
+    applyFilmSoundDb(-6)
+    expect(trackGainDbOf("source")).toBe(-6)
+    expect(getFilmSoundDb()).toBe(-6)
+    applyFilmSoundDb(0)
+    expect(getFilmSoundDb()).toBe(0)
+  })
+
+  it("the element's volume is the bar's times the film's level, never over 1", () => {
+    expect(filmElementVolume(1, 0)).toBe(1)
+    expect(filmElementVolume(0.8, -6)).toBeCloseTo(0.8 * Math.pow(10, -6 / 20), 6)
+    expect(filmElementVolume(1, 6)).toBe(1)
+    expect(filmElementVolume(0.5, -Infinity)).toBe(0)
+  })
+})
+
+// Evidence pass, Nov 27: an Undo (or Redo) of a volume change wrote the right
+// level, but the fader kept showing the dragged one: the drag's own pending
+// value was never read back before the Undo's write took the read back to the
+// value before it, so it never settled. An Undo's volume write is drawn the
+// same way a drag's is.
+describe("pendingVolumesForPatches", () => {
+  it("draws an Undo's volume over the drag still waiting to be read back", () => {
+    const drag = new Map<string, PendingVolume>([["source-audio", nextPendingVolume(undefined, -28.9, -14.9, 1)]])
+    const next = pendingVolumesForPatches(drag, [{ trackId: "source-audio", patch: { volumeDb: -14.9 } }], () => -28.9, 2)
+    expect(next).not.toBeNull()
+    expect(next!.get("source-audio")!.db).toBe(-14.9)
+    // Drawn on the track the fader reads.
+    expect(applyPendingVolumes([track("source-audio", "source-audio", -28.9)], next!)[0].volumeDb).toBe(-14.9)
+    // And it settles once the read shows it.
+    expect(settledPendingVolumes(next!, [track("source-audio", "source-audio", -14.9)])).toEqual(["source-audio"])
+  })
+
+  it("reads the stored forms: null is 0 dB, \"-inf\" is silence", () => {
+    const next = pendingVolumesForPatches(new Map(), [
+      { trackId: "a", patch: { volumeDb: null } },
+      { trackId: "b", patch: { volumeDb: "-inf" } },
+    ], () => -6, 7)!
+    expect(next.get("a")!.db).toBe(0)
+    expect(next.get("b")!.db).toBe(-Infinity)
+    expect(next.get("a")!.readBefore).toBe(-6)
+  })
+
+  it("leaves the pending volumes alone when no patch is a volume", () => {
+    const pending = new Map<string, PendingVolume>([["a", nextPendingVolume(undefined, -3, 0, 1)]])
+    expect(pendingVolumesForPatches(pending, [{ trackId: "a", patch: { color: "red" } }, { trackId: "b", patch: null }], () => 0, 2)).toBeNull()
   })
 })

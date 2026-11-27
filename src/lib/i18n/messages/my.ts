@@ -4631,7 +4631,7 @@ export const my: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"ဤဖိုင်များထဲမှ {count} ခုသည် {maxSize} ထက် ကျော်သဖြင့် ၎င်းတို့အတွင်းရှိ စာတန်းများကို မစစ်ဆေးခဲ့ပါ။ ရှိပါက ၎င်းတို့နှင့်အတူ စာတန်းထိုးဖိုင်များအဖြစ် တင်သွင်းပါ။"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "စုစုပေါင်း",
   "importExport.recordingChoice.list": "တင်သွင်းမည့် အသံသွင်းချက်များ",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"အသံသွင်းချက်ကို တစ်ခုလုံး တင်သွင်းရန်"},"countVar":"count"},
+  "importExport.recordingChoice.import": "တင်သွင်းရန်",
   "importExport.recordingChoice.importTranscribe": "တင်သွင်းပြီး စာသားပြောင်းရန်…",
   "importExport.recordingChoice.whyNot": "ဤနေရာတွင် စာသားမပြောင်းနိုင်ရသည့် အကြောင်း",
   "importExport.recordingChoice.costTitle": "{name} ကို တင်သွင်းပြီး စာသားပြောင်းရန်",

@@ -5407,7 +5407,7 @@ export const pa: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"ਇਨ੍ਹਾਂ ਵਿੱਚੋਂ {count} {maxSize} ਤੋਂ ਵੱਡੀਆਂ ਹਨ, ਇਸ ਲਈ ਇਨ੍ਹਾਂ ਦੇ ਅੰਦਰ ਕੈਪਸ਼ਨ ਨਹੀਂ ਜਾਂਚੇ ਗਏ. ਜੇ ਇਨ੍ਹਾਂ ਵਿੱਚ ਕੈਪਸ਼ਨ ਹਨ, ਤਾਂ ਉਨ੍ਹਾਂ ਨੂੰ ਇਨ੍ਹਾਂ ਦੇ ਨਾਲ ਉਪਸਿਰਲੇਖ ਫ਼ਾਈਲਾਂ ਵਜੋਂ ਇੰਪੋਰਟ ਕਰੋ.","other":"ਇਨ੍ਹਾਂ ਵਿੱਚੋਂ {count} {maxSize} ਤੋਂ ਵੱਡੀਆਂ ਹਨ, ਇਸ ਲਈ ਇਨ੍ਹਾਂ ਦੇ ਅੰਦਰ ਕੈਪਸ਼ਨ ਨਹੀਂ ਜਾਂਚੇ ਗਏ. ਜੇ ਇਨ੍ਹਾਂ ਵਿੱਚ ਕੈਪਸ਼ਨ ਹਨ, ਤਾਂ ਉਨ੍ਹਾਂ ਨੂੰ ਇਨ੍ਹਾਂ ਦੇ ਨਾਲ ਉਪਸਿਰਲੇਖ ਫ਼ਾਈਲਾਂ ਵਜੋਂ ਇੰਪੋਰਟ ਕਰੋ."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "ਕੁੱਲ",
   "importExport.recordingChoice.list": "ਇੰਪੋਰਟ ਕਰਨ ਲਈ ਰਿਕਾਰਡਿੰਗਾਂ",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"ਪੂਰੀ ਰਿਕਾਰਡਿੰਗ ਇੰਪੋਰਟ ਕਰੋ","other":"ਪੂਰੀਆਂ ਰਿਕਾਰਡਿੰਗਾਂ ਇੰਪੋਰਟ ਕਰੋ"},"countVar":"count"},
+  "importExport.recordingChoice.import": "ਇੰਪੋਰਟ ਕਰੋ",
   "importExport.recordingChoice.importTranscribe": "ਇੰਪੋਰਟ ਅਤੇ ਲਿਪੀਅੰਤਰ ਕਰੋ…",
   "importExport.recordingChoice.whyNot": "ਤੁਸੀਂ ਇੱਥੇ ਲਿਪੀਅੰਤਰ ਕਿਉਂ ਨਹੀਂ ਕਰ ਸਕਦੇ",
   "importExport.recordingChoice.costTitle": "{name} ਇੰਪੋਰਟ ਅਤੇ ਲਿਪੀਅੰਤਰ ਕਰੋ",

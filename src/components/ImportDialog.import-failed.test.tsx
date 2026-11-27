@@ -76,7 +76,7 @@ async function dropMp3() {
   expect(inputs.length).toBeGreaterThan(0)
   fireEvent.change(inputs[0], { target: { files: [file] } })
   // AQU-2426: a recording with no subtitle file ends on whole or transcribed.
-  fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Import" }))
 }
 
 describe("ImportDialog — IMPORT_FAILED instrumentation (silent-mp3-failure fix)", () => {

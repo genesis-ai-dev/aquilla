@@ -132,6 +132,14 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
   // from anywhere (this write coming back, another person, an Undo) takes
   // over from it.
   const [drawn, setDrawn] = useState<{ over: number; v: number } | null>(null)
+  // Evidence pass, Nov 27: and once the saved value moves, what was drawn is
+  // done with, so an Undo that takes the saved value back to where a drag
+  // began shows that value, not the drag drawn over it.
+  const [savedSeen, setSavedSeen] = useState(db)
+  if (!Object.is(savedSeen, db)) {
+    setSavedSeen(db)
+    if (drawn) setDrawn(null)
+  }
   const local = drawn && drawn.over === db ? drawn.v : null
   const setLocal = (v: number) => setDrawn({ over: db, v })
   const [dragging, setDragging] = useState(false)

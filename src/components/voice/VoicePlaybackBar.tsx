@@ -29,7 +29,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { filmOverRun, layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { filmOverRun, layOutProgramme, playedProgramme, type ProgrammeTrackOptions } from "@/lib/timeline/programme"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { fmtClock } from "@/components/timeline/format"
 import type { CellData } from "@/hooks/useCells"
@@ -67,7 +67,7 @@ interface Props {
   /** AQU-2252: the file's added tracks and which are layers
    *  (`programmeTrackSlots`), so the length shown before anything plays is
    *  the one the timeline lays out. Absent, every added track sets lengths. */
-  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  programmeTracks?: ProgrammeTrackOptions
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
   /** AQU-1591: the active target-language lane. The bar plays this lane's takes

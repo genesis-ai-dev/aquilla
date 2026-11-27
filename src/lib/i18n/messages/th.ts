@@ -4632,7 +4632,7 @@ export const th: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"{count} ไฟล์ในนี้ใหญ่เกิน {maxSize} จึงไม่ได้ตรวจหาคำบรรยายที่ฝังอยู่ หากมี ให้นำเข้าเป็นไฟล์คำบรรยายมาพร้อมกัน"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "รวมทั้งหมด",
   "importExport.recordingChoice.list": "ไฟล์บันทึกเสียงที่จะนำเข้า",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"นำเข้าไฟล์บันทึกเสียงทั้งไฟล์"},"countVar":"count"},
+  "importExport.recordingChoice.import": "นำเข้า",
   "importExport.recordingChoice.importTranscribe": "นำเข้าและถอดเสียง…",
   "importExport.recordingChoice.whyNot": "เหตุใดคุณจึงถอดเสียงที่นี่ไม่ได้",
   "importExport.recordingChoice.costTitle": "นำเข้าและถอดเสียง {name}",

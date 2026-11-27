@@ -40,8 +40,10 @@ export function TimelineScrollingRuler(
   return (
     <TimelineRuler
       {...props}
-      viewStartSec={pxToSec(snap.left, props.pxPerSec) - overscanSec}
-      viewEndSec={pxToSec(snap.left + spanPx, props.pxPerSec) + overscanSec}
+      // Sam, Nov 27: the scroll is from the canvas's left edge, which a
+      // milestone's window puts at its start (`originSec`).
+      viewStartSec={(props.originSec ?? 0) + pxToSec(snap.left, props.pxPerSec) - overscanSec}
+      viewEndSec={(props.originSec ?? 0) + pxToSec(snap.left + spanPx, props.pxPerSec) + overscanSec}
     />
   )
 }

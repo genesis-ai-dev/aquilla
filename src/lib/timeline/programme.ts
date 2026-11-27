@@ -395,7 +395,20 @@ export interface BuildProgrammeOptions {
    * which is the default; absent, none is a layer.
    */
   layerTrackSlots?: readonly string[]
+  /**
+   * Sam, Nov 27: where the first line starts on the programme clock (0 when
+   * absent). With Split into milestones on, a milestone's lines are laid out
+   * from where its first line sits in the whole file's layout
+   * (sequence-timeline `milestoneWindowStartSec`), so the timeline, the
+   * transport and a linked film all read the film's own clock. The first
+   * line is never pulled back before it.
+   */
+  originSec?: number
 }
+
+/** The options a programme's callers hand on: the tracks laid in, and the
+ *  milestone's origin. */
+export type ProgrammeTrackOptions = Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots" | "originSec">
 
 function trimStartSecOf(att: { trimStartMs?: number } | undefined): number {
   return att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0
@@ -627,7 +640,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
   if (cells.length === 0) return EMPTY
   const slots: ProgrammeSlot[] = []
   const byCellId = new Map<string, ProgrammeSlot>()
-  let cursor = 0
+  const originSec = opts?.originSec != null && Number.isFinite(opts.originSec) && opts.originSec > 0 ? opts.originSec : 0
+  let cursor = originSec
   // AQU-2252: how far the furthest take on another track reaches — a layer
   // may run on past the last line, and the file plays it out to its end.
   let reachSec = 0
@@ -655,7 +669,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     // pulled, from where this line would start: to the start of the take
     // before it on its track (`pullFloorSec`).
     const prev = slots.length > 0 ? slots[slots.length - 1] : null
-    const floorOf = (track: string | null) => Math.min(0, pullFloorSec(prev, track) - cursor)
+    const floorOf = (track: string | null) => Math.min(0, (prev ? pullFloorSec(prev, track) : originSec) - cursor)
 
     // The main track's take, and AQU-2252 the line's takes on its other
     // tracks: each on a track that sets line lengths placed as the main take
@@ -907,7 +921,7 @@ export function layOutProgramme(
   cells: readonly CellData[],
   /** AQU-2252: which added tracks are laid in, and which of them are layers
    *  (see BuildProgrammeOptions). */
-  opts?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+  opts?: ProgrammeTrackOptions,
 ): { programme: Programme; lines: CellData[]; untimed: boolean } {
   const { lines, untimed } = programmeLines(cells)
   return { programme: buildProgramme(lines, { standInLenSec: standInEstimator(lines), ...opts }), lines, untimed }
@@ -950,7 +964,7 @@ export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<s
  */
 export function playedProgramme(
   cells: readonly CellData[],
-  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+  tracks?: ProgrammeTrackOptions,
 ): { programme: Programme; hiddenCellIds: ReadonlySet<string>; underLayers: ReadonlySet<string> } | null {
   const { programme: built, lines, untimed } = layOutProgramme(cells, tracks)
   if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) return null
@@ -1458,7 +1472,7 @@ export function pullBacksWokenBy(
   cells: readonly CellData[],
   cellId: string,
   newAudioIds: readonly string[],
-  opts?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+  opts?: ProgrammeTrackOptions,
 ): { cellId: string; audioId: string }[] {
   const fresh = new Set(newAudioIds)
   const before = cells.map((c) => {

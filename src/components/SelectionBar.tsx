@@ -32,7 +32,7 @@ import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { linesPlaybackStopsAt, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
-import { filmOverRun, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { filmOverRun, type ProgrammeTrackOptions } from "@/lib/timeline/programme"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
@@ -115,7 +115,7 @@ interface Props {
    *  lines: what the strip is handed (`freeTiming`, `programmeTracks`), so
    *  the "Play selected" count is the queue's answer for this file. */
   freeTiming?: boolean
-  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  programmeTracks?: ProgrammeTrackOptions
   /**
    * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
    * the text actions (AI translate, validate text, harmonize) and the voices
@@ -430,9 +430,17 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     () => playbackLines != null && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0,
     [playbackLines, film],
   )
+  // Sam, Nov 27 (AQU-2798): following the recordings with Split into
+  // milestones on, the milestone is a window onto the film's clock, laid out
+  // from its start (`programmeTracks.originSec`). A run of chosen lines inside
+  // it is a run of its lines too, film or not, so each chosen line plays where
+  // it sits there and the playhead (and any film) jumps between them; laid
+  // back to back they would all start at the milestone's start.
+  // (Its start is given, 0 too, whenever a milestone is the window.)
+  const inWindow = freeTiming === true && programmeTracks?.originSec != null
   const fileStops = useMemo(
-    () => (anyChosen && filmCovers && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
-    [anyChosen, filmCovers, playbackLines, ask],
+    () => (anyChosen && (filmCovers || inWindow) && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
+    [anyChosen, filmCovers, inWindow, playbackLines, ask],
   )
   // On a film file it is a run of the lines Play plays when every chosen line
   // on the timeline is among them (the check of the q44 fixes, Nov 12,
@@ -441,7 +449,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
     if (!anyChosen) return { cells: playbackRange, only: null, stopCount: 0 }
-    if (playbackLines && fileStops && film) {
+    if (playbackLines && fileStops && (film || inWindow)) {
       // The second check (Nov 13), NOTE 3: asked only of the chosen rows on
       // the timeline (the film's word names every line it draws, in every
       // chapter). A row it does not draw, a chapter heading while "Count
@@ -449,14 +457,16 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // Membership by a Set (N11). Where the run starts is the queue's to
       // say: its first chosen stop, in the order it plays them.
       const inList = new Set(playbackLines.map((c) => c.id))
-      const onTimeline = playbackRange.filter((c) => film.cellIds.has(c.id)).map((c) => c.id)
+      // With no film, every chosen row counts: one outside the milestone's
+      // lines makes it a run of the chosen lines on their own, none dropped.
+      const onTimeline = playbackRange.filter((c) => (film ? film.cellIds.has(c.id) : true)).map((c) => c.id)
       if (onTimeline.length > 0 && onTimeline.every((id) => inList.has(id))) {
         const only = new Set(onTimeline)
         return { cells: playbackLines, only, stopCount: onTimeline.filter((id) => fileStops.has(id)).length }
       }
     }
     return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
-  }, [anyChosen, playbackRange, playbackLines, fileStops, film, ask])
+  }, [anyChosen, playbackRange, playbackLines, fileStops, film, inWindow, ask])
   const playableSelectedCount = selectionRun.stopCount
 
   /**

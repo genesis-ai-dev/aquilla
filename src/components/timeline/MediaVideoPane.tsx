@@ -61,6 +61,7 @@ import {
   type PlaybackSource,
 } from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
+import { filmElementVolume, useFilmSoundDb } from "@/lib/audio/track-volume"
 import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoDriftBarSec, videoSyncAction } from "./video-sync"
 import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
@@ -1023,16 +1024,20 @@ export function MediaVideoPane({
   // the part iPhone and iPad honour (they ignore an element's volume). Back
   // following the source, where the strip sets the film's volume itself, the
   // film has its own again.
+  //
+  // Sam, Nov 27: and the film's row has its own volume slider, like every
+  // track's (track-volume.ts `applyFilmSoundDb`). The element plays at the
+  // bar's volume times that level, so the bar keeps meaning the bar. This is
+  // the one place the element's volume is set; the bar's own number lives in
+  // the video clock's store and is never read back from the element.
   const queueVolume = queue.progress.volume
   const ownVolume = useVideoVolume()
+  const filmDb = useFilmSoundDb()
   useEffect(() => {
     const video = videoRef.current
-    if (!video || !followsRecordings) return
-    video.volume = Math.max(0, Math.min(1, queueVolume))
-    return () => {
-      video.volume = ownVolume
-    }
-  }, [followsRecordings, queueVolume, ownVolume, mediaEpoch])
+    if (!video) return
+    video.volume = filmElementVolume(followsRecordings ? queueVolume : ownVolume, filmDb)
+  }, [followsRecordings, queueVolume, ownVolume, filmDb, mediaEpoch])
 
   // An explicit seek from the timeline. Applied whatever the queue thinks.
   const seekSec = useVideoSeek(seek)
@@ -1219,10 +1224,9 @@ export function MediaVideoPane({
         const video = videoRef.current
         if (video) video.playbackRate = rate
       },
-      setVolume: (volume) => {
-        const video = videoRef.current
-        if (video) video.volume = Math.max(0, Math.min(1, volume))
-      },
+      // The bar's volume, kept as the bar's; the effect above sets the
+      // element from it and the film row's level.
+      setVolume: (volume) => setVideoVolume(volume),
     }
     setVideoController(controller)
     registeredControllerRef.current = controller
@@ -1536,7 +1540,9 @@ export function MediaVideoPane({
           // only the film to voice the original, imported or linked.
           // AQU-2253 (review, Nov 9): and the bottom strip's mute, which
           // following the recordings is the queue's volume at zero.
-          muted={(importedFilm && !playsHeardLines) || recordingIsTheSound || !sourceAudible || (followsRecordings && queueVolume === 0)}
+          // Sam, Nov 27: and the film row's volume at −∞ (an element's volume
+          // alone is ignored on iPhone and iPad).
+          muted={(importedFilm && !playsHeardLines) || recordingIsTheSound || !sourceAudible || (followsRecordings && queueVolume === 0) || filmDb === -Infinity}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it
@@ -1606,10 +1612,12 @@ export function MediaVideoPane({
           // Standalone only: the queue is idle here, so it cannot tell the
           // playhead whether anything is running. `ended` is included because
           // it does not imply `pause` on every engine.
-          // Mirror the element's own rate/volume so the bar and these native
+          // Mirror the element's own rate so the bar and these native
         // controls always agree — whichever the user reaches for.
         onRateChange={slaved ? undefined : (e) => setVideoRate((e.currentTarget as HTMLVideoElement).playbackRate)}
-        onVolumeChange={slaved ? undefined : (e) => setVideoVolume((e.currentTarget as HTMLVideoElement).volume)}
+        // Not volume (Nov 27): the element plays the bar's volume times the
+        // film row's level, so reading it back would fold that level into the
+        // bar's number. The bar sets its number through the controller.
           onPlay={
             slaved
               ? undefined

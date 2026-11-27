@@ -7,13 +7,16 @@
 //
 // Every makeTestDb() is its own database, loaded from the one template the
 // run built (db/shared/test-pg-harness.ts) rather than bootstrapped and
-// schema'd from nothing each time.
+// schema'd from nothing each time. One made inside a test is closed by the
+// harness once a later test has gone by without using it; one made in
+// beforeAll is the suite's to close (helpers/test-db-lifetime.ts).
 import { PGlite } from "@electric-sql/pglite"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
 import { rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
 import { TEST_PG_RESET_SQL, TEST_PG_SESSION_SQL, testPgTemplate } from "../../../../db/shared/test-pg-harness"
 import { guardPoolOverflow } from "../../../../db/shared/test-pool-guard"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
+import { closeFinishedTestDbs, trackTestDb } from "./test-db-lifetime"
 
 /**
  * AQU-1543: the most bound values postgres.js — the driver every worker reaches
@@ -227,7 +230,9 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
   // The template carries the schema and the lane-fill trigger (lane_id is
   // NOT NULL; tests that omit it get a lane minted by that trigger). The
   // session setting that switches the fill on is this database's own.
+  await closeFinishedTestDbs()
   const pg = new PGlite({ loadDataDir: await testPgTemplate(() => new PGlite()) })
+  trackTestDb(pg)
   await pg.exec(TEST_PG_SESSION_SQL)
   // Lanes before content rows, so an explicit seed lane wins over a minted one.
   const seeded = Object.entries(seed).filter(([table, rows]) => rows && table !== "cells_fts")

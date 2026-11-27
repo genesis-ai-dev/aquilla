@@ -3,9 +3,10 @@
 // test wrote. Both are shortcuts for something slower, so these pin that the
 // shortcut leaves exactly what the slow way left.
 import { existsSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { TEST_PG_TEMPLATE_ENV } from "../../../db/shared/test-pg-harness"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { USED_AFTER_CLOSE } from "./helpers/test-db-lifetime"
 
 const USER = `INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id`
 
@@ -109,5 +110,70 @@ describe("reset()", () => {
     } finally {
       await t.close()
     }
+  })
+})
+
+// An open database is about 180 MB, and most tests never close theirs. These
+// run in order: each `it` is one test going by.
+describe("when the harness closes a database", () => {
+  let suiteOwned: TestDb
+  let lazy: TestDb | undefined
+  let madeInFirstTest: TestDb
+  const perTest: TestDb[] = []
+
+  beforeAll(async () => {
+    suiteOwned = await makeTestDb()
+  })
+  afterAll(async () => {
+    await suiteOwned.close()
+  })
+  // The spelling a great many suites use to share one database.
+  beforeEach(async () => {
+    if (!lazy) lazy = await makeTestDb()
+    else await lazy.reset()
+  })
+
+  it("test 1 makes a database and does not close it", async () => {
+    madeInFirstTest = await makeTestDb()
+    perTest.push(madeInFirstTest)
+    await madeInFirstTest.pg.query(USER, ["ada", "ada@example.com"])
+  })
+
+  it("test 2 carries on with it", async () => {
+    perTest.push(await makeTestDb())
+    expect(await count(madeInFirstTest, `SELECT count(*) AS n FROM users`)).toBe(1)
+  })
+
+  it("test 3 still has it, because test 2 used it", async () => {
+    perTest.push(await makeTestDb())
+    expect(madeInFirstTest.pg.closed).toBe(false)
+    expect(await count(madeInFirstTest, `SELECT count(*) AS n FROM users`)).toBe(1)
+  })
+
+  it("test 4 does not use it", async () => {
+    perTest.push(await makeTestDb())
+  })
+
+  it("test 5 asks for a database, and one unused since test 3 is closed and says why", async () => {
+    perTest.push(await makeTestDb())
+    expect(madeInFirstTest.pg.closed).toBe(true)
+    expect(() => madeInFirstTest.pg.query(`SELECT 1`)).toThrow(USED_AFTER_CLOSE)
+    await expect(madeInFirstTest.reset()).rejects.toThrow(USED_AFTER_CLOSE)
+    // Test 2's and test 3's were not used after their own tests either.
+    expect(perTest.map((db) => db.pg.closed)).toEqual([true, true, true, false, false])
+  })
+
+  it("never closes a database made in beforeAll, nor one every test resets", async () => {
+    expect(suiteOwned.pg.closed).toBe(false)
+    expect(await count(suiteOwned, `SELECT count(*) AS n FROM users`)).toBe(0)
+    expect(lazy!.pg.closed).toBe(false)
+  })
+
+  it("lets a test close its own database, twice, or after the harness has", async () => {
+    const mine = await makeTestDb()
+    await mine.close()
+    await mine.close()
+    await madeInFirstTest.close()
+    await madeInFirstTest.pg.close()
   })
 })

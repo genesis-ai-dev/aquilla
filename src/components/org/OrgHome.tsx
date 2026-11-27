@@ -229,13 +229,11 @@ export function OrgHome() {
     () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
     [accessibleProjects],
   )
-  const [directoryRetry, setDirectoryRetry] = useState(0)
   const directory = useProjectDirectory({
     jwt,
     enabled: Boolean(jwt) && !orgLoading && directoryOrgIds.length > 0,
     query: projectQuery,
     orgIds: directoryOrgIds,
-    refreshKey: directoryRetry,
   })
 
   useEffect(() => {
@@ -244,8 +242,8 @@ export function OrgHome() {
       setResolvedPortfolioScopeKey(null)
       return
     }
-    if (portfolioScopeKey === null) return
-    if (portfolioOrgIds.length === 0) {
+    if (orgLoading) return
+    if (orgs.length === 0) {
       setError(null)
       setAggregates({ ...emptyPortfolioAggregate(), orgs: [] })
       setResolvedPortfolioScopeKey(portfolioScopeKey)
@@ -383,7 +381,9 @@ export function OrgHome() {
     }
   }
 
-  const totalsLoading = resolvedPortfolioScopeKey !== portfolioScopeKey
+  if (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey) {
+    return <OrgHomeLoadingShell label={t("org.orgHome.loadingDashboard")} />
+  }
 
   // Rollup stats. Computed on the server from the same visible projects the
   // unpaged portfolio used to send down, so the tiles do not depend on which
@@ -480,7 +480,9 @@ export function OrgHome() {
       main={
         <Page size="wide">
           <PageHeader title={workspaceLabel} inset={false} />
-
+          {error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : (
             <div className="space-y-6">
               {/* AQU-326: received invites — the user has been invited but
                   hasn't accepted yet. Without this, an invite whose email/link
@@ -518,9 +520,7 @@ export function OrgHome() {
                 </Section>
               )}
 
-              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-              {showOrgRollup && totalsLoading && <p role="status">{t("org.orgHome.loadingDashboard")}</p>}
-              {showOrgRollup && !totalsLoading && !error && (
+              {showOrgRollup && (
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
                 <StatTile label={t("nav.projects")} value={rollup.projectCount} />
@@ -577,12 +577,7 @@ export function OrgHome() {
                       }
                     />
                   ) : null}
-                  {directory.error && (
-                    <div role="alert">
-                      {directory.error} <Button size="sm" onClick={() => setDirectoryRetry(n => n + 1)}>{t("common.retry")}</Button>
-                    </div>
-                  )}
-                    {(directory.error || accessibleProjectsError) && tableProjects.length === 0 ? null : (
+                    {accessibleProjectsError && tableProjects.length === 0 ? null : (
                     <div
                       data-testid="projects-scroll"
                       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -665,7 +660,7 @@ export function OrgHome() {
                     )}
                 </Section>
 
-                {showOrgRollup && !totalsLoading && !error && (
+                {showOrgRollup && (
                 <Section
                   data-testid="organizations-panel"
                   title={t("org.orgHome.organizations")}
@@ -725,6 +720,7 @@ export function OrgHome() {
                 )}
               </div>
             </div>
+          )}
         </Page>
       }
     />

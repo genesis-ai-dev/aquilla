@@ -372,23 +372,7 @@ orgs.get("/:orgId", async (c) => {
 /** No length cap. Omitted orgIds resolves every membership (AQU-756). */
 const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
-// An absent revision preserves the original response. Hash only authorized,
-// fully materialized rows so changes to access, progress, or pagination count.
-async function directoryResponse(c: Context<AuthHonoEnv>, body: object, known?: string) {
-  if (known === undefined) return c.json(body)
-  try {
-    const bytes = new TextEncoder().encode(JSON.stringify(body))
-    const digest = await crypto.subtle.digest("SHA-256", bytes)
-    const revision = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("")
-    if (known === revision) return c.json({ unchanged: true, revision })
-    return c.json({ ...body, revision })
-  } catch {
-    return c.json(body)
-  }
-}
-
 const portfolioBatchBody = z.object({
-  revision: z.string().optional(),
   orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
@@ -484,13 +468,13 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     else byOrg.set(row.orgId, [row])
   }
 
-  return directoryResponse(c, {
+  return c.json({
     portfolios: uniqueOrgIds.map((orgId) => ({
       orgId,
       projects: (byOrg.get(orgId) ?? []).map(({ orgId: _orgId, ...project }) => project),
     })),
     nextCursor,
-  }, c.req.valid("json").revision)
+  })
 })
 
 /** GET /api/v2/orgs/:orgId/portfolio — per-project rollup for org (derive-on-read). */
@@ -530,11 +514,11 @@ orgs.get("/:orgId/portfolio", async (c) => {
       ? countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]).then(({ byOrg }) => byOrg.get(orgId) ?? 0)
       : countVisibleActiveLanguages(c.env, orgId, user.id),
   ])
-  return directoryResponse(c, {
+  return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
     activeLanguageCount,
     nextCursor,
-  }, c.req.query("revision"))
+  })
 })
 
 /**

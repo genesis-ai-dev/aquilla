@@ -7,10 +7,10 @@ import {
   isAudioCueFile,
   isHiddenTimelineFile,
   isSubtitleImportFile,
-  isVideoTimedSubtitleFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
   isFilmTimedFile,
+  linkSwitchesTimingToSource,
   resolveFileTimingMode,
   type FileType,
 } from "./types"
@@ -159,24 +159,6 @@ describe("hidden timeline content", () => {
   })
 })
 
-describe("isVideoTimedSubtitleFile", () => {
-  it.each(["vtt", "srt", "sbv"] as const)("%s with footage linked is video-timed", (type) => {
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(true)
-  })
-
-  it.each(["vtt", "srt", "sbv"] as const)("%s with no footage is not", (type) => {
-    expect(isVideoTimedSubtitleFile({ type })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: null })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "" })).toBe(false)
-  })
-
-  it("a non-subtitle file is never video-timed, footage or not", () => {
-    expect(isVideoTimedSubtitleFile({ type: "audio", coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(false)
-    expect(isVideoTimedSubtitleFile(null)).toBe(false)
-    expect(isVideoTimedSubtitleFile(undefined)).toBe(false)
-  })
-})
-
 describe("resolveFileTimingMode", () => {
   it.each(["vtt", "srt", "sbv"] as const)(
     "%s with footage linked still ignores the legacy project-level audioFirst",
@@ -190,17 +172,16 @@ describe("resolveFileTimingMode", () => {
     },
   )
 
-  // The AQU-646 guard, kept for files with footage: the picker is hidden for
-  // them, so a stored audioFirst must be inert. Covers a value written before
-  // AQU-646 or by an older client, AND the AQU-1704 flow where a maintainer
-  // picks Free timing on a video-less SRT and then links a video (which leaves
-  // the stored mode in place).
+  // AQU-2253 lifts the AQU-646 guard: the film runs on its own clock in both
+  // timings, so the picker is offered on these files and their own stored
+  // choice is the one they follow.
   it.each(["vtt", "srt", "sbv"] as const)(
-    "%s with footage linked ignores its own stored audioFirst, whoever wrote it",
+    "%s with footage linked keeps its own stored choice — nothing locks (Sam, Oct 28)",
     (type) => {
       expect(
         resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4", timingMode: "audioFirst" }, null),
-      ).toBe("dubbing")
+      ).toBe("audioFirst")
+      expect(resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4" }, null)).toBe("dubbing")
     },
   )
 
@@ -252,39 +233,43 @@ describe("resolveFileTimingMode", () => {
   })
   // AQU-1565 follow-up: a file timed to a linked YouTube video defaults to
   // Original timing, so the legacy project-level Free timing no longer hides
-  // the video on a file nobody set. A Free timing chosen ON the file (through
-  // the video-stays-hidden warning) still stands: an existing YouTube file
-  // with an uploaded recording does not silently re-flow.
+  // the video on a file nobody set. A Free timing chosen ON the file still
+  // stands: an existing YouTube file with an uploaded recording does not
+  // silently re-flow. (AQU-2227: a linked film of any kind does this now.)
   it("a file timed to a linked YouTube video ignores the project's audioFirst", () => {
-    const opts = { timedToLinkedVideo: true }
-    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
-    expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
-  })
-
-  // AQU-2204 (Sam, Oct 26): a file timed to a film ONLY follows its source —
-  // the Free timing it could once pick through the video-stays-hidden warning
-  // is gone, and a stored choice from then no longer re-flows it.
-  it("a file with any footage linked follows its source, whatever it stored (AQU-2204)", () => {
     const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    expect(
-      resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null, { timedToLinkedVideo: true }),
-    ).toBe("dubbing")
-    expect(
-      resolveFileTimingMode({ type: "audio", coreMediaUrl: "https://cdn.test/ep1/master.m3u8", timingMode: "audioFirst" }, null),
-    ).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "video", coreMediaUrl: youTube }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: youTube }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
   })
 
-  it("a file carrying an audio cue file follows its source, with no footage linked (AQU-2204)", () => {
-    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" }, null, { hasAudioCues: true })).toBe("dubbing")
-    // …and without the cue file, the same video-less subtitle file keeps its choice (LOTE).
-    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" }, null, { hasAudioCues: false })).toBe("audioFirst")
-  })
-
-  it("without the flag a video file keeps Free timing exactly as before", () => {
-    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
+  // AQU-2204 (Sam, Oct 26), corrected by AQU-2227: a file timed to a film
+  // STARTS on Follows source, and a choice of its own still stands.
+  it("a file with any footage linked STARTS on Follows source, and keeps a choice of its own (AQU-2204, corrected Oct 27)", () => {
+    const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    const film = "https://cdn.test/ep1/master.m3u8"
+    // No choice of its own: Follows source, even under a project that chose Free timing.
+    expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: film }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
+    // A lead switched it: the switch stands.
     expect(
-      resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, { timedToLinkedVideo: false }),
+      resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null),
     ).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: film, timingMode: "audioFirst" }, null)).toBe("audioFirst")
+  })
+
+  it("a file carrying an audio cue file starts on Follows source, and keeps a choice of its own (AQU-2204, corrected Oct 27)", () => {
+    expect(resolveFileTimingMode({ type: "vtt" }, { audioTimingMode: "audioFirst" }, { hasAudioCues: true })).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" }, null, { hasAudioCues: true })).toBe("audioFirst")
+  })
+
+  it("linking a film to a file with nothing to follow leaves it following its recordings (Oct 27, Ruth)", () => {
+    expect(
+      resolveFileTimingMode({ type: "usfm", coreMediaUrl: "https://cdn.test/ep1/master.m3u8" } as never, null, { nothingToFollow: true }),
+    ).toBe("audioFirst")
+  })
+
+  it("a video file with no footage linked keeps the project's Free timing exactly as before", () => {
+    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "video", coreMediaUrl: null }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
   })
 })
 
@@ -306,10 +291,10 @@ describe("resolveFileTimingMode — nothing to follow (AQU-2204, board 24)", () 
     expect(resolveFileTimingMode({ type: "usfm" } as never, null, { nothingToFollow: true })).toBe("audioFirst")
   })
 
-  it("a film still wins: its lines are timed to it", () => {
+  it("a film does not override it: lines with no times can't follow it (Oct 27, Ruth)", () => {
     expect(
       resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, null, { nothingToFollow: true }),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
   })
 })
 
@@ -328,12 +313,38 @@ describe("resolveFileTimingMode — where each file starts (AQU-2204, board 23)"
     expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" } as never, null)).toBe("audioFirst")
   })
 
-  it("a file with a linked film only follows its source, whatever it stored", () => {
+  it("a subtitle import with its film starts on Follows source like any file with a film, and keeps a choice of its own (Oct 28: nothing locks)", () => {
+    expect(resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, { audioTimingMode: "audioFirst" })).toBe("dubbing")
     expect(
       resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst", coreMediaUrl: "https://x.test/f.mp4" } as never, null),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "mp4", coreMediaUrl: "https://youtu.be/x" } as never, null)).toBe("dubbing")
     expect(
       resolveFileTimingMode({ type: "mp4", timingMode: "audioFirst", coreMediaUrl: "https://youtu.be/x" } as never, null),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
+  })
+})
+
+// AQU-2227: the link-film dialog says linking "makes this file follow its
+// source". Now that a file's own choice and a file with nothing to follow both
+// outrank the film, that is only true of a file with no choice of its own.
+describe("linkSwitchesTimingToSource (AQU-2227)", () => {
+  const film = "https://cdn.test/ep1/master.m3u8"
+
+  it("is true for a file with no choice of its own under a project that follows its recordings", () => {
+    expect(linkSwitchesTimingToSource({ type: "audio" }, { audioTimingMode: "audioFirst" }, film)).toBe(true)
+  })
+
+  it("is false for a file whose own choice is Follows recordings: that choice stands", () => {
+    expect(linkSwitchesTimingToSource({ type: "vtt", timingMode: "audioFirst" }, null, film)).toBe(false)
+  })
+
+  it("is false for a file with nothing to follow: it keeps following its recordings", () => {
+    expect(linkSwitchesTimingToSource({ type: "usfm" } as never, null, film, { nothingToFollow: true })).toBe(false)
+  })
+
+  it("is false for a file already following its source, and when the film is cleared", () => {
+    expect(linkSwitchesTimingToSource({ type: "audio" }, null, film)).toBe(false)
+    expect(linkSwitchesTimingToSource({ type: "audio" }, { audioTimingMode: "audioFirst" }, null)).toBe(false)
   })
 })

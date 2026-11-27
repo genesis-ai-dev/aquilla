@@ -35,6 +35,26 @@ export interface LinkableCue {
   endTime?: number
   /** The cue's own words — subtitle text on one side, transcript on the other. */
   original?: string
+  /** A line of an imported recording or film says only the media's name in
+   *  `original`; its words are its transcription. */
+  medium?: string
+  transcription?: string
+}
+
+/**
+ * The words a line is paired on. A line of an imported recording or film
+ * (`medium: "media"`) carries the media's file name as its text, the same on
+ * every line; its words are in its transcription. Pairing on the name paired
+ * nothing on an imported film (import map, Nov 8).
+ *
+ * AQU-2460 (review, Nov 9): a media line that has not been transcribed has NO
+ * words, never the file's name. It used to fall back to the name here, so a
+ * heard line that happened to say the film's name paired on it. With no words
+ * it pairs with nothing until it has a transcription.
+ */
+export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "transcription">): string {
+  if (cell.medium === "media") return cell.transcription?.trim() ? cell.transcription : ""
+  return cell.original ?? ""
 }
 
 /**
@@ -90,6 +110,22 @@ const WEAK_SIM_MIN_FRAC = 0.5
  *  all the work, so they must coincide properly. */
 const CROSS_SCRIPT_MIN_FRAC = 0.5
 
+
+/**
+ * How many heard lines, and how many subtitle lines, a set of pairings joins.
+ * Pairing is many-to-many (one heard line can perform two subtitle lines, and
+ * two heard lines one), so the number of pairings is neither: Sam's import of
+ * 548 heard lines read "paired 648 of them" (import map X-avtt-paired-count).
+ */
+export function pairedLineCounts(plans: readonly Pick<CueLinkPlan, "textCellId" | "cueCellId">[]): {
+  heardLines: number
+  subtitleLines: number
+} {
+  return {
+    heardLines: new Set(plans.map((p) => p.cueCellId)).size,
+    subtitleLines: new Set(plans.map((p) => p.textCellId)).size,
+  }
+}
 
 /**
  * Tokenise for comparison.
@@ -514,7 +550,7 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
   }
 
   for (const cue of cues) {
-    const cueText = cue.original ?? ""
+    const cueText = pairingWords(cue)
     const cueScript = dominantScript(cueText)
     for (const text of texts) {
       // Sorted by start, so once a subtitle begins after this cue ends, so does
@@ -525,7 +561,7 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
 
       const shorter = Math.min(cue.endTime - cue.startTime, text.endTime - text.startTime)
       const frac = shorter > 0 ? overlap / shorter : 0
-      const subtitleText = text.original ?? ""
+      const subtitleText = pairingWords(text)
       const subtitleScript = dominantScript(subtitleText)
 
       // Different writing systems: the words cannot be compared, so the spans
@@ -570,9 +606,9 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
   // judged against each other.
   claimWords(
     candidates,
-    new Map(texts.map((c) => [c.id, c.original ?? ""])),
-    new Map(cues.map((c) => [c.id, c.original ?? ""])),
-    distinctiveWords([...texts, ...cues].map((c) => c.original ?? "")),
+    new Map(texts.map((c) => [c.id, pairingWords(c)])),
+    new Map(cues.map((c) => [c.id, pairingWords(c)])),
+    distinctiveWords([...texts, ...cues].map((c) => pairingWords(c))),
   )
 
   // Returned in the order they were found — cue by cue, subtitle by subtitle —

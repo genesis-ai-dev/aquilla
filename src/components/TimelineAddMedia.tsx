@@ -119,7 +119,9 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
             onKeyDown={(e) => {
               if (e.key === "Enter") void attachUrl()
             }}
-            placeholder="https://example.com/episode.mp4"
+            // Not Link a film's placeholder (D#13): this field takes a direct
+            // link to an audio or video file, which becomes Source audio.
+            placeholder={t("editor.media.urlPlaceholder")}
             disabled={busy != null}
             aria-label={t("editor.media.urlLabel")}
             className="h-8 text-sm"

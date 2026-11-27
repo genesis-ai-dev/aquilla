@@ -636,3 +636,40 @@ describe("TimelineCard — a hidden line", () => {
     expect(screen.getByTestId("tl-card-c1")).not.toHaveAttribute("data-hidden-line")
   })
 })
+
+// AQU-2426: a source recording clip has its own menu — a ⋯ on hover and the
+// same menu on a right-click — with what it is and Split into lines….
+describe("TimelineCard — a source recording's menu (AQU-2426)", () => {
+  const menu = { details: "Source recording · 0:40", name: "Ruth 1 intro.m4a", onSplitIntoLines: vi.fn() }
+  it("opens on a right-click and offers Split into lines…", async () => {
+    render(<TimelineCard cell={cell()} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}} recordingMenu={menu} />)
+    fireEvent.contextMenu(screen.getByTestId("tl-card-c1"))
+    expect(await screen.findByText("Source recording · 0:40")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Split into lines…"))
+    expect(menu.onSplitIntoLines).toHaveBeenCalledOnce()
+  })
+  // AQU-2426 (review, Nov 9): a recording added by web address can't be read
+  // here, so it can't be split. Its menu had no Split into lines… at all, with
+  // nothing saying why; the item is now there, greyed, with the reason.
+  it("greys Split into lines… with the reason when the recording can't be split here", async () => {
+    const onSplitIntoLines = vi.fn()
+    const linked = { details: "Source recording · 52:14", name: "sermon.mp3", onSplitIntoLines,
+      splitDisabledReason: "This recording isn't stored in the project, so it can't be split here." }
+    render(<TimelineCard cell={cell()} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}} recordingMenu={linked} />)
+    fireEvent.contextMenu(screen.getByTestId("tl-card-c1"))
+    const item = await screen.findByTestId("tl-card-c1-split-lines")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("tl-card-c1-split-lines-reason"))
+      .toHaveTextContent("This recording isn't stored in the project, so it can't be split here.")
+    fireEvent.click(item)
+    expect(onSplitIntoLines).not.toHaveBeenCalled()
+  })
+  it("shows its ⋯ and its notice, and no menu on a subtitle card", () => {
+    const { unmount } = render(<TimelineCard cell={cell()} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}}
+      recordingMenu={menu} notice={<span>Not split into lines yet</span>} />)
+    expect(screen.getByTestId("tl-card-c1-more")).toBeInTheDocument()
+    unmount()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" onSelect={() => {}} onRetime={() => {}} recordingMenu={menu} />)
+    expect(screen.queryByTestId("tl-card-c1-more")).not.toBeInTheDocument()
+  })
+})

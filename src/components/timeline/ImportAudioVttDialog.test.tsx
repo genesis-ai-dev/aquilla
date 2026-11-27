@@ -391,3 +391,18 @@ describe("times written as frame numbers in hundredths (AQU-2197)", () => {
     }
   })
 })
+
+// Import map X-G-dead-drop (Nov 2, found by Sam): the dashed box drew like a
+// drop target, but a dropped file did nothing.
+describe("the drop box", () => {
+  it("takes a dropped file, as the button does, and lights up while one is over it", async () => {
+    render(<ImportAudioVttDialog open replacing={false} textFileName="ep101.vtt"
+      onConfirm={vi.fn()} onReconcile={vi.fn()} onCancel={() => {}} />)
+    const box = screen.getByTestId("import-audio-vtt-drop")
+    fireEvent.dragOver(box)
+    expect(box).toHaveAttribute("data-drag-over", "true")
+    const file = new File([VTT("10.000", "20.000")], "audio.vtt", { type: "text/vtt" })
+    fireEvent.drop(box, { dataTransfer: { files: [file] } })
+    await waitFor(() => expect(screen.getByTestId("import-audio-vtt-confirm")).not.toBeDisabled())
+  })
+})

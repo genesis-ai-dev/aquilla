@@ -468,6 +468,79 @@ export const audio = defineNamespace({
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
     "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
+    // AQU-2375: the end of a transcription run says how many rows landed and
+    // how many did not, and a run a page reload stopped is carried on.
+    "audio.transcribeRun.progressSections": plural({
+      one: "Transcribing {count} section of \"{name}\"…",
+      other: "Transcribing {count} sections of \"{name}\"…",
+    }),
+    "audio.transcribeRun.progressRecordings": plural({
+      one: "Transcribing {count} recording…",
+      other: "Transcribing {count} recordings…",
+    }),
+    "audio.transcribeRun.progressCount": "Transcribing — {done} of {count} done…",
+    "audio.transcribeRun.carryingOn": "Carrying on transcribing \"{name}\" after the page reloaded — {done} of {count} done…",
+    "audio.transcribeRun.waitingForFile":
+      "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It carries on when you open \"{name}\".",
+    "audio.transcribeRun.waitingForLanguage":
+      "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It was started in {language}, and carries on when you open this file in {language}.",
+    "audio.transcribeRun.doneSections": plural({
+      one: "Transcribed {count} section of \"{name}\".",
+      other: "Transcribed {count} sections of \"{name}\".",
+    }),
+    "audio.transcribeRun.doneRecordings": plural({
+      one: "Transcribed {count} recording.",
+      other: "Transcribed {count} recordings.",
+    }),
+    "audio.transcribeRun.partialSections": plural({
+      one: "Transcribed {done} of {count} section of \"{name}\".",
+      other: "Transcribed {done} of {count} sections of \"{name}\".",
+    }),
+    "audio.transcribeRun.partialRecordings": plural({
+      one: "Transcribed {done} of {count} recording.",
+      other: "Transcribed {done} of {count} recordings.",
+    }),
+    "audio.transcribeRun.failedAllNamed": "Couldn't transcribe \"{name}\": {reason}",
+    "audio.transcribeRun.failedAll": "Couldn't transcribe: {reason}",
+    "audio.transcribeRun.stopped": "Transcription stopped — {done} of {count} done.",
+    "audio.transcribeRun.failedSome": plural({
+      one: "{count} couldn't be transcribed: {reason}",
+      other: "{count} couldn't be transcribed. The first one said: {reason}",
+    }),
+    // Sam, Nov 12: AQU-2521's reason, in the one closing message.
+    "audio.transcribeRun.heardNothing": plural({
+      one: "{count} had nothing to transcribe.",
+      other: "{count} had nothing to transcribe.",
+    }),
+    "audio.transcribeRun.retry": plural({
+      one: "Retry {count}",
+      other: "Retry the {count}",
+    }),
+    // AQU-2426 × AQU-2375: one line's words (Import and transcribe…, Split
+    // into lines… › At sentences, with words), a window of at most a minute
+    // at a time, kept as they land.
+    "audio.lineWords.progress": plural({
+      one: "Transcribing \"{name}\" to find its lines — {done} of {count} minute…",
+      other: "Transcribing \"{name}\" to find its lines — {done} of {count} minutes…",
+    }),
+    "audio.lineWords.partial": plural({
+      one: "Transcribed {done} of {count} minute of \"{name}\".",
+      other: "Transcribed {done} of {count} minutes of \"{name}\".",
+    }),
+    "audio.lineWords.staysWhole": "It stays one line, with the words it has, until every minute is transcribed.",
+    "audio.lineWords.stopping": "Stopping \"{name}\" after this minute…",
+    "audio.lineWords.stopped": plural({
+      one: "Stopped transcribing \"{name}\" — {done} of {count} minute done.",
+      other: "Stopped transcribing \"{name}\" — {done} of {count} minutes done.",
+    }),
+    "audio.lineWords.stoppedKept": "It is still one line. The words so far are kept, so transcribing it again sends only the rest.",
+    "audio.lineWords.transcribeRest": "Transcribe the rest",
+    "audio.lineWords.readyAfterReload":
+      "Finished transcribing \"{name}\" after the page reloaded. Its words are on the line, and Split into lines… › At sentences, with words uses them at no cost.",
+    "audio.lineWords.dialogPartial": plural({
+      one: "{done} of {count} minute is transcribed. The rest couldn't be: {reason} Transcribing again sends only the rest; the words so far stay on the line.",
+      other: "{done} of {count} minutes are transcribed. The rest couldn't be: {reason} Transcribing again sends only the rest; the words so far stay on the line.",
+    }),
 
     // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
     // speak every selected line in one chosen voice.
@@ -909,6 +982,38 @@ export const audio = defineNamespace({
       "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
     "audio.aiError.unknownBody":
       "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
+    // AQU-2426: importing and splitting recordings.
+    "audio.transcribeCost.audioLabel": "Audio",
+    "audio.transcribeCost.requestsLabel": "Requests",
+    "audio.transcribeCost.timeLabel": "Roughly how long",
+    "audio.transcribeCost.modelLabel": "Model",
+    "audio.transcribeCost.creditsLabel": "Credits",
+    "audio.transcribeCost.hours": plural({ one: "{count} hour", other: "{count} hours" }),
+    "audio.transcribeCost.minutes": plural({ one: "{count} minute", other: "{count} minutes" }),
+    "audio.transcribeCost.seconds": plural({ one: "{count} second", other: "{count} seconds" }),
+    "audio.transcribeCost.hoursAndMinutes": "{hours} {minutes}",
+    "audio.transcribeCost.minutesAndSeconds": "{minutes} {seconds}",
+    "audio.transcribeCost.inRecordings": plural({ one: "{length}, in {count} recording", other: "{length}, in {count} recordings" }),
+    "audio.transcribeCost.requestsEachMinute": "About {count}, one for each minute",
+    "audio.transcribeCost.requestsTwoEachMinute": "About {count}, two for each minute",
+    "audio.transcribeCost.about": "About {length}",
+    "audio.transcribeCost.aboutWithWait": "About {length}, with a wait at the limit",
+    "audio.transcribeCost.limitInfoLabel": "About the wait at the limit",
+    "audio.transcribeCost.limitInfo": "Transcription takes up to 60 requests every 15 minutes for each person. After the first 60, it waits and carries on by itself; you can keep working.",
+    "audio.transcribeCost.modelAuto": "{model}, chosen automatically for {language}",
+    "audio.transcribeCost.modelAutoNoLanguage": "{model}, chosen automatically",
+    "audio.transcribeCost.modelChosen": "{model}, from your Preferences",
+    "audio.transcribeCost.onDeviceModel": "Whisper, on this device",
+    "audio.transcribeCost.onDeviceRequests": "None: it runs on this device",
+    "audio.transcribeCost.onDeviceTime": "Depends on this device",
+    "audio.transcribeCost.onDevice": "On this device: no credits and no limit",
+    "audio.transcribeCost.creditsShare": "About {credits} credits, {percent}% of this week's remaining",
+    "audio.transcribeCost.creditsOnly": "About {credits} credits",
+    "audio.transcribeBlock.import": "Only people who can import files in this project can transcribe, and in this project that is {role} and up (Project settings → Who can import files).",
+    "audio.transcribeBlock.timingLocked": "Transcribing a recording cuts it into lines, which changes their timing. Timing is locked for this project, so only {role} and up can do that.",
+    "audio.transcribeBlock.creditsToday": "Your organization has reached today's AI limit, so transcription is off until it resets at midnight.",
+    "audio.transcribeBlock.creditsWeek": "Your organization has reached this week's AI limit, so transcription is off until it resets next week.",
+    "audio.transcribeBlock.splitFree": "Split at pauses is free and works now.",
   },
   context: {
     _context: {
@@ -2767,6 +2872,187 @@ export const audio = defineNamespace({
           "Nothing is lost and the person does not need to do anything.",
         placeholders: { time: "Clock time the batch carries on, e.g. 7:45 PM, in the reader's locale." },
       },
+      "audio.transcribeRun.progressSections": {
+        description:
+          "Progress toast title when a recording's sections start being transcribed into " +
+          "text (speech recognition), before any is done.",
+        placeholders: { count: "How many sections will be transcribed.", name: "The recording's file name." },
+      },
+      "audio.transcribeRun.progressRecordings": {
+        description:
+          "Progress toast title when several recordings start being transcribed into text " +
+          "(speech recognition), before any is done.",
+        placeholders: { count: "How many recordings will be transcribed." },
+      },
+      "audio.transcribeRun.progressCount": {
+        description: "Progress toast title while a transcription run goes on.",
+        placeholders: { done: "How many are done so far.", count: "How many the run will do in all." },
+      },
+      "audio.transcribeRun.carryingOn": {
+        description:
+          "Progress toast title when the app picks a transcription run back up by itself " +
+          "after the browser page was reloaded part-way through. Nothing is lost.",
+        placeholders: {
+          name: "The file name.",
+          done: "How many were already done before the reload.",
+          count: "How many the run will do in all.",
+        },
+      },
+      "audio.transcribeRun.waitingForFile": {
+        description:
+          "Toast after a page reload, when a transcription run was stopped part-way by the " +
+          "reload and its file is not open. The run picks up again by itself when the " +
+          "person opens that file.",
+        placeholders: {
+          name: "The file name (appears twice).",
+          done: "How many were done before the reload.",
+          count: "How many the run will do in all.",
+        },
+      },
+      "audio.transcribeRun.waitingForLanguage": {
+        description:
+          "Toast after a page reload, when a transcription run over recorded takes was " +
+          "stopped part-way by the reload and its file is now open in a different target " +
+          "language than the one the run was started in. The run picks up again by itself " +
+          "when the person switches the file to that language.",
+        placeholders: {
+          name: "The file name.",
+          done: "How many were done before the reload.",
+          count: "How many the run will do in all.",
+          language: "The target language the run was started in, e.g. 'French' (appears twice).",
+        },
+      },
+      "audio.transcribeRun.doneSections": {
+        description: "Toast when every section of a recording was transcribed into text.",
+        placeholders: { count: "How many sections.", name: "The recording's file name." },
+      },
+      "audio.transcribeRun.doneRecordings": {
+        description: "Toast when every recording in a run was transcribed into text.",
+        placeholders: { count: "How many recordings." },
+      },
+      "audio.transcribeRun.partialSections": {
+        description:
+          "Toast title when some, but not all, sections of a recording were transcribed. " +
+          "The line under it says how many could not be and why.",
+        placeholders: {
+          done: "How many were transcribed.",
+          count: "How many the run set out to do.",
+          name: "The recording's file name.",
+        },
+      },
+      "audio.transcribeRun.partialRecordings": {
+        description:
+          "Toast title when some, but not all, recordings in a run were transcribed. The " +
+          "line under it says how many could not be and why.",
+        placeholders: { done: "How many were transcribed.", count: "How many the run set out to do." },
+      },
+      "audio.transcribeRun.failedAllNamed": {
+        description: "Toast when none of a recording's sections could be transcribed.",
+        placeholders: { name: "The recording's file name.", reason: "The error, as the service gave it." },
+      },
+      "audio.transcribeRun.failedAll": {
+        description: "Toast when none of the recordings in a run could be transcribed.",
+        placeholders: { reason: "The error, as the service gave it." },
+      },
+      "audio.transcribeRun.stopped": {
+        description: "Toast when someone cancelled a transcription run part-way.",
+        placeholders: { done: "How many were done before it stopped.", count: "How many the run set out to do." },
+      },
+      "audio.transcribeRun.failedSome": {
+        description:
+          "Line under a transcription toast: how many sections or recordings could not be " +
+          "transcribed, and the error the first of them gave.",
+        placeholders: { count: "How many failed.", reason: "The first error, as the service gave it." },
+      },
+      "audio.transcribeRun.heardNothing": {
+        description:
+          "One reason in the line under a transcription toast, before any failures: the " +
+          "audio of some sections or recordings held no speech (music, silence), so there " +
+          "were no words to keep. Not an error. The toast's count above leaves them out.",
+        placeholders: { count: "How many sections or recordings had no speech in their audio." },
+      },
+      "audio.transcribeRun.retry": {
+        description:
+          "Button on the toast that transcribes again only the sections or recordings that " +
+          "failed. 'the {count}' means those failed ones.",
+        placeholders: { count: "How many failed." },
+        maxLength: 24,
+      },
+      "audio.lineWords.progress": {
+        description:
+          "Progress toast title while one recording is transcribed into text (speech " +
+          "recognition) so it can be cut into lines at its sentences. It goes a minute of " +
+          "audio at a time.",
+        placeholders: {
+          name: "The recording's file name.",
+          done: "How many minutes are transcribed so far.",
+          count: "How many minutes the recording has (rounded up).",
+        },
+      },
+      "audio.lineWords.partial": {
+        description:
+          "Toast title when only some minutes of a recording could be transcribed. The " +
+          "recording is not cut into lines yet; the lines under the title say why and that " +
+          "it stays one line.",
+        placeholders: {
+          done: "How many minutes were transcribed.",
+          count: "How many minutes the recording has (rounded up).",
+          name: "The recording's file name.",
+        },
+      },
+      "audio.lineWords.staysWhole": {
+        description:
+          "Line under a transcription toast: the recording is not cut into lines yet. It " +
+          "stays one line and keeps the words that were transcribed; Retry transcribes the " +
+          "minutes still missing.",
+      },
+      "audio.lineWords.stopping": {
+        description:
+          "Progress toast title right after someone pressed Cancel on a recording that is " +
+          "being transcribed a minute at a time. The minute already sent finishes, then it stops.",
+        placeholders: { name: "The recording's file name." },
+      },
+      "audio.lineWords.stopped": {
+        description:
+          "Toast title after someone cancelled the transcription of a recording part-way. " +
+          "The recording was not cut into lines.",
+        placeholders: {
+          name: "The recording's file name.",
+          done: "How many minutes were transcribed before it was stopped.",
+          count: "How many minutes the recording has (rounded up).",
+        },
+      },
+      "audio.lineWords.stoppedKept": {
+        description:
+          "Line under the 'Stopped transcribing' toast title: the recording is still one line, " +
+          "and the minutes already transcribed are remembered so they are not paid for twice.",
+      },
+      "audio.lineWords.transcribeRest": {
+        description:
+          "Button on the 'Stopped transcribing' toast: transcribes the minutes that were not " +
+          "done before Cancel was pressed.",
+        maxLength: 28,
+      },
+      "audio.lineWords.readyAfterReload": {
+        description:
+          "Toast after a page reload: a recording that was being transcribed in the Split " +
+          "into lines dialog finished by itself. Its words were put on the line, and " +
+          "choosing 'At sentences, with words' in Split into lines… again costs nothing. " +
+          "'Split into lines…' and 'At sentences, with words' are the names of a menu item " +
+          "and a choice in that dialog.",
+        placeholders: { name: "The recording's file name." },
+      },
+      "audio.lineWords.dialogPartial": {
+        description:
+          "Message in the Split into lines dialog when only some minutes of the recording " +
+          "could be transcribed. Pressing the transcribe button again sends only the minutes " +
+          "still missing. {reason} is a full sentence and ends with its own full stop.",
+        placeholders: {
+          done: "How many minutes were transcribed.",
+          count: "How many minutes the recording has (rounded up).",
+          reason: "The first error, as the service gave it.",
+        },
+      },
       "audio.batchVoice.title": {
         description:
           "Heading of the dialog that generates spoken audio for every line the " +
@@ -3980,6 +4266,38 @@ export const audio = defineNamespace({
           "providerRejectedBody it can only point at the technical detail and " +
           "support. 'Technical detail' names the disclosure control beneath it.",
       },
+      // AQU-2426: importing and splitting recordings.
+      "audio.transcribeCost.audioLabel": { description: "Label of the first line of what transcribing will cost: how much audio.", maxLength: 24 },
+      "audio.transcribeCost.requestsLabel": { description: "Label of the cost line: how many requests are sent to the transcription service.", maxLength: 24 },
+      "audio.transcribeCost.timeLabel": { description: "Label of the cost line: roughly how long transcribing will take.", maxLength: 24 },
+      "audio.transcribeCost.modelLabel": { description: "Label of the cost line: which transcription model will run.", maxLength: 24 },
+      "audio.transcribeCost.creditsLabel": { description: "Label of the cost line: how many of the organization's AI credits it will use.", maxLength: 24 },
+      "audio.transcribeCost.hours": { description: "A length of audio or time, in hours, e.g. the '1 hour' of '1 hour 40 minutes'.", placeholders: { count: "A whole number." } },
+      "audio.transcribeCost.minutes": { description: "A length of audio or time, in minutes.", placeholders: { count: "A whole number." } },
+      "audio.transcribeCost.seconds": { description: "A length of audio or time, in seconds.", placeholders: { count: "A whole number." } },
+      "audio.transcribeCost.hoursAndMinutes": { description: "Joins an hours part and a minutes part of one length, e.g. '1 hour 40 minutes'.", placeholders: { hours: "e.g. '1 hour'.", minutes: "e.g. '40 minutes'." } },
+      "audio.transcribeCost.minutesAndSeconds": { description: "Joins a minutes part and a seconds part of one length of audio, e.g. '1 minute 12 seconds'. Used under ten minutes, so the length agrees with the number of one-minute requests beside it.", placeholders: { minutes: "e.g. '1 minute'.", seconds: "e.g. '12 seconds'." } },
+      "audio.transcribeCost.inRecordings": { description: "The Audio cost line when several recordings are transcribed together, e.g. '1 hour 40 minutes, in 3 recordings'.", placeholders: { length: "Their total length.", count: "How many recordings." } },
+      "audio.transcribeCost.requestsEachMinute": { description: "The Requests cost line when each request carries about a minute of audio, e.g. 'About 55, one for each minute'. The count is an estimate.", placeholders: { count: "How many requests." } },
+      "audio.transcribeCost.requestsTwoEachMinute": { description: "The Requests cost line when each request carries about half a minute (Omnilingual), e.g. 'About 22, two for each minute'. The count is an estimate.", placeholders: { count: "How many requests." } },
+      "audio.transcribeCost.about": { description: "The 'Roughly how long' cost line, e.g. 'About 4 minutes'.", placeholders: { length: "A rounded length, e.g. '4 minutes'." } },
+      "audio.transcribeCost.aboutWithWait": { description: "The 'Roughly how long' cost line when the run passes the hourly transcription limit and has to wait part of the way.", placeholders: { length: "A rounded length." } },
+      "audio.transcribeCost.limitInfoLabel": { description: "Accessible label of the (i) beside 'with a wait at the limit' (screen readers only)." },
+      "audio.transcribeCost.limitInfo": { description: "Text the (i) beside 'with a wait at the limit' opens: why the run waits." },
+      "audio.transcribeCost.modelAuto": { description: "The Model cost line when the person's Preferences leave the model on Automatic, e.g. 'Whisper, chosen automatically for English'.", placeholders: { model: "A model name such as 'Whisper'.", language: "The source language's name." } },
+      "audio.transcribeCost.modelAutoNoLanguage": { description: "The Model cost line on Automatic when the source language is not known.", placeholders: { model: "A model name." } },
+      "audio.transcribeCost.modelChosen": { description: "The Model cost line when the person picked the model in Preferences.", placeholders: { model: "A model name." } },
+      "audio.transcribeCost.onDeviceModel": { description: "The Model cost line when transcription runs in the browser on this device." },
+      "audio.transcribeCost.onDeviceRequests": { description: "The Requests cost line when transcription runs on this device." },
+      "audio.transcribeCost.onDeviceTime": { description: "The 'Roughly how long' cost line when transcription runs on this device." },
+      "audio.transcribeCost.onDevice": { description: "The Credits cost line when transcription runs on this device: nothing is paid and there is no hourly limit." },
+      "audio.transcribeCost.creditsShare": { description: "The Credits cost line, e.g. 'About 40 credits, 3% of this week's remaining'.", placeholders: { credits: "A number of credits.", percent: "A whole percentage." } },
+      "audio.transcribeCost.creditsOnly": { description: "The Credits cost line when this week's balance can't be read.", placeholders: { credits: "A number of credits." } },
+      "audio.transcribeBlock.import": { description: "Why someone can't transcribe a recording: their role is below who may import files.", placeholders: { role: "A role name, e.g. 'Project lead'." } },
+      "audio.transcribeBlock.timingLocked": { description: "Why someone can't transcribe a recording: transcribing splits it into lines, and this project's timing is locked, which only higher roles may change.", placeholders: { role: "A role name, e.g. 'Maintainer'." } },
+      "audio.transcribeBlock.creditsToday": { description: "Why no one can transcribe right now: the organization used its AI credits for today." },
+      "audio.transcribeBlock.creditsWeek": { description: "Why no one can transcribe right now: the organization used its AI credits for this week." },
+      "audio.transcribeBlock.splitFree": { description: "Added after the reason transcription isn't available, where 'Split at pauses' is offered beside it." },
     },
   },
   surfaces: [

@@ -35,7 +35,7 @@ import { sharedClipWindow } from "./shared-clip-pcm"
 import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { AsrWarmingError, transcribeHosted } from "./transcribe-hosted"
 import { WARMUP_CAP_MS } from "./omni-warmup"
-import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from "./transcribe"
+import { audioBytesToWhisperPcm, readClipBytes, type TranscribeRowOutcome, type TranscriptionResult } from "./transcribe"
 
 /** The most audio one hosted request carries for Whisper and Qwen
  *  (transcribe-hosted.ts windows at exactly this), so a minute is one
@@ -258,8 +258,9 @@ export interface ChunkRunContext {
    *  minute is sent again (see `sendWaitingOutWarmup`). May throw to give up. */
   onWarming?: (retryAfterSeconds: number) => Promise<void>
   /** Finish one row: with its words, or (no words given) transcribe it on its
-   *  own. The batch passes `transcribeCell`. */
-  transcribeRow: (cell: CellData, recognised?: TranscriptionResult) => Promise<unknown>
+   *  own. The batch passes `transcribeCellOutcome`; a row whose finisher says
+   *  nothing counts as done (AQU-2375). */
+  transcribeRow: (cell: CellData, recognised?: TranscriptionResult) => Promise<TranscribeRowOutcome | void>
   /** Recognise a minute. Injected by tests; defaults to the shared-clip PCM
    *  and the hosted route. */
   recognise?: (chunk: TranscriptionChunk, ctx: ChunkRunContext) => Promise<TranscriptionResult>
@@ -314,19 +315,29 @@ async function recogniseChunk(chunk: TranscriptionChunk, ctx: ChunkRunContext): 
 }
 
 /** Transcribe one minute's rows with one request (more only for a refusal
- *  that is waited out), then store each row's share. */
-export async function transcribeChunk(chunk: TranscriptionChunk, ctx: ChunkRunContext): Promise<void> {
+ *  that is waited out), then store each row's share. Resolves with how each
+ *  row ended, by row id (AQU-2375): a minute the service refused fails every
+ *  row in it, and a cancelled one leaves them skipped. */
+export async function transcribeChunk(
+  chunk: TranscriptionChunk,
+  ctx: ChunkRunContext,
+): Promise<Map<string, TranscribeRowOutcome>> {
+  const outcomes = new Map<string, TranscribeRowOutcome>()
   for (const { cell } of chunk.rows) setTranscribeStatus(cell.selectedAudioId!, { kind: "transcribing" })
   let result: TranscriptionResult
   try {
     result = await (ctx.recognise ?? recogniseChunk)(chunk, ctx)
   } catch (err) {
+    const cancelled = ctx.isCancelled?.() ?? false
+    const message = err instanceof Error ? err.message : String(err)
     for (const { cell } of chunk.rows) {
-      setTranscribeStatus(cell.selectedAudioId!, ctx.isCancelled?.()
-        ? { kind: "idle" }
-        : { kind: "error", message: err instanceof Error ? err.message : String(err) })
+      setTranscribeStatus(cell.selectedAudioId!, cancelled ? { kind: "idle" } : { kind: "error", message })
+      outcomes.set(cell.id, cancelled ? { kind: "skipped" } : { kind: "failed", message })
     }
-    return
+    return outcomes
+  }
+  const finish = async (cell: CellData, recognised?: TranscriptionResult) => {
+    outcomes.set(cell.id, (await ctx.transcribeRow(cell, recognised)) ?? { kind: "done", words: 0 })
   }
   const perRow = assignWordsToRows(result, chunk)
   if (!perRow) {
@@ -334,8 +345,9 @@ export async function transcribeChunk(chunk: TranscriptionChunk, ctx: ChunkRunCo
       `[transcribe] AQU-1681: the transcription of ${chunk.rows.length} rows came back without word timings ` +
       `(${result.timingsApproximate ? "approximate" : result.granularity ?? "none"}); transcribing those rows one by one`,
     )
-    for (const { cell } of chunk.rows) await ctx.transcribeRow(cell)
-    return
+    for (const { cell } of chunk.rows) await finish(cell)
+    return outcomes
   }
-  for (const { cell } of chunk.rows) await ctx.transcribeRow(cell, perRow.get(cell.id))
+  for (const { cell } of chunk.rows) await finish(cell, perRow.get(cell.id))
+  return outcomes
 }

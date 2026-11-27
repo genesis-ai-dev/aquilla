@@ -12,7 +12,9 @@ describe("TimingModeControl sizes", () => {
   })
 
   it("keeps the read-only label at the same height in the bar", () => {
-    render(<TimingModeControl size="bar" mode="dubbing" filmTimed />)
+    // No onChange: below project lead, the one read-only case (AQU-2227:
+    // a film no longer locks the control).
+    render(<TimingModeControl size="bar" mode="dubbing" />)
     expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveClass("h-7")
   })
 

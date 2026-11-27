@@ -26,6 +26,10 @@ export interface CellAreaStateInput {
   cellsError: boolean
   /** A timeline picture is usable even before the user adds caption segments. */
   hasLinkedPicture?: boolean
+  /** An empty time-ordered file this person may add media to: its "No media on
+   *  this file yet" card (a file drop and an address) is the way in, so it
+   *  shows rather than the generic empty-file screen (import map, Nov 8). */
+  offersMediaCard?: boolean
   /** AQU-1901: the open target lane cannot be named yet (the project's lane
    *  rows have not loaded and no lane id is remembered for it). The cell list
    *  is then paired against a fallback tag — `''` for a first-time reader —
@@ -64,7 +68,7 @@ export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
     if (input.syncStatus === "connecting" || input.syncStatus === "reconnecting") {
       return { kind: "syncing-empty" }
     }
-    return { kind: input.hasLinkedPicture ? "ready" : "ready-empty" }
+    return { kind: input.hasLinkedPicture || input.offersMediaCard ? "ready" : "ready-empty" }
   }
   return { kind: "ready" }
 }

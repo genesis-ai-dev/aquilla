@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  FILM_NOT_ARRIVING_SEC,
   forgetStallSample,
   IDLE_STALL_STATE,
+  browserPlaysHls,
+  IDLE_SEEK_WATCH,
+  seekTargetLoaded,
+  watchSeek,
+  type SeekWatch,
   stallStep,
   STALL_FROZEN_TICKS,
   STALL_SETTLED_TICKS,
+  STALL_TICK_MS,
   type StallAction,
   type StallSample,
   type StallState,
@@ -74,6 +81,96 @@ describe("a frozen clock while the element claims to be playing", () => {
     const { actions } = run(frozen(60))
     expect(actions.filter((a) => a.kind === "giveUp")).toHaveLength(1)
     expect(actions).toHaveLength(4)
+  })
+})
+
+// AQU-2253 (browser pass, Nov 11: 4-hls-stream in WebKit): with every segment
+// held, the film ran out of what it had loaded. The ladder could not tell that
+// from a wedged decoder, so it reopened the stream (throwing away what had
+// loaded) and then moved it to WebKit's own player, which started cold: the
+// spinner stayed 10–11 s after the network came back. A film waiting on the
+// network now gets what a seek into unloaded film gets: it is waited on.
+describe("a film that has run out of what it loaded", () => {
+  const starved = (n: number, at = 76) => Array.from({ length: n }, () => running(at, { loadedAhead: false }))
+
+  it("says so and nudges once, and never reopens, rebuilds or gives up while it waits", () => {
+    const { state, actions } = run(starved(60))
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
+    expect(actions.some((a) => a.kind === "recover" && a.rung !== "nudge")).toBe(false)
+    expect(actions.some((a) => a.kind === "giveUp")).toBe(false)
+    expect(state.stalled).toBe(true)
+    expect(state.gaveUp).toBe(false)
+  })
+
+  it("carries on with no rung spent past the nudge once the film moves", () => {
+    const { actions } = run([...starved(10), ...moving(1, 76)])
+    expect(actions.at(-1)).toEqual({ kind: "recovered" })
+  })
+
+  it("climbs from where it was once the film has loaded but still does not move", () => {
+    // Loaded film that stops is the wedge the ladder is for: every step.
+    const { actions } = run([...starved(8), ...frozen(12, 76)])
+    expect(actions.filter((a) => a.kind === "recover").map((a) => (a.kind === "recover" ? a.rung : ""))).toEqual(["nudge", "recover", "rebuild"])
+    expect(actions.at(-1)).toEqual({ kind: "giveUp" })
+  })
+
+  it("a nudge already spent on loaded film leaves only the spinner when the film then runs dry", () => {
+    const { actions } = run([...frozen(3, 76), ...starved(20)])
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
+  })
+})
+
+// AQU-2253 (review, Nov 13; probes P1, P2): waiting on the network has a
+// ceiling. A film that loads nothing at all (a blocked or hanging host, a
+// streaming player that went quiet, a rebuilt player that never fetches) would
+// otherwise spin for good; before the wait it ended at "Click to start" after
+// about 8 s. After FILM_NOT_ARRIVING_SEC with nothing new loaded it stops and
+// says so; anything new arriving starts the minute again.
+describe("a film that loads nothing stops waiting after a minute", () => {
+  const TICKS = (FILM_NOT_ARRIVING_SEC * 1000) / STALL_TICK_MS
+  const empty = (n: number, end = 0, at = 0) => Array.from({ length: n }, () => running(at, { loadedAhead: false, loadedEnd: end }))
+
+  it("P1: a film that never loads anything: a nudge, the spinner, and after a minute it is not arriving, once", () => {
+    const { state, actions } = run(empty(TICKS + 30))
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.filter((a) => a.kind === "notArriving")).toHaveLength(1)
+    expect(actions.some((a) => a.kind === "giveUp" || (a.kind === "recover" && a.rung !== "nudge"))).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "notArriving" })
+    expect(state.gaveUp).toBe(true)
+    // …not a moment before the minute is up.
+    expect(run(empty(TICKS)).actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("P2: a wedge over loaded film climbs to a rebuild; a rebuilt player that loads nothing then stops after a minute", () => {
+    const loaded = Array.from({ length: 7 }, () => running(12, { loadedAhead: true, loadedEnd: 60 }))
+    const { actions } = run([...loaded, ...empty(TICKS + 5, 0, 12)])
+    const rungs = actions.filter((a) => a.kind === "recover").map((a) => (a.kind === "recover" ? a.rung : ""))
+    expect(rungs).toEqual(["nudge", "recover", "rebuild"])
+    expect(actions.some((a) => a.kind === "giveUp")).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "notArriving" })
+  })
+
+  it("a film still arriving, however slowly, is waited on past the minute", () => {
+    const trickle = Array.from({ length: TICKS * 3 }, (_, i) => running(0, { loadedAhead: false, loadedEnd: Math.floor(i / 30) * 0.2 }))
+    expect(run(trickle).actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("a minute of waiting counts through a seek that never lands over film that has not loaded", () => {
+    const { actions } = run(Array.from({ length: TICKS + 2 }, () => running(26, { seeking: true, loadedAhead: false, loadedEnd: 21 })))
+    expect(actions).toEqual([{ kind: "notArriving" }])
+  })
+
+  it("a pause, or the film paused, starts the minute again", () => {
+    const { actions } = run([...empty(TICKS - 5), running(0, { wantPlay: false }), ...empty(TICKS - 5)])
+    expect(actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("loaded film that stops keeps the ladder: never 'not arriving', 'Click to start' after the rebuild", () => {
+    const { actions } = run(Array.from({ length: TICKS + 10 }, () => running(12, { loadedAhead: true, loadedEnd: 60 })))
+    expect(actions.some((a) => a.kind === "notArriving")).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "giveUp" })
   })
 })
 
@@ -172,5 +269,65 @@ describe("forgetStallSample", () => {
     const after = forgetStallSample(state)
     const { actions } = run(frozen(6, 12), after)
     expect(actions).toEqual([{ kind: "recover", rung: "rebuild" }, { kind: "giveUp" }])
+  })
+})
+
+// AQU-2253 (browser pass, Nov 9; review, Nov 9): WebKit left a seek past what
+// had loaded unfinished for good, though the film went on to load all of it.
+// Such a seek is stuck only after SEEK_STUCK_MS over loaded film, with no
+// newer seek asked for; and it is never seeked again on top of itself.
+describe("a seek that never lands", () => {
+  const ranges = (...r: Array<[number, number]>) => ({ length: r.length, start: (i: number) => r[i]![0], end: (i: number) => r[i]![1] })
+  const loadedAt = (currentTime: number, buffered: ReturnType<typeof ranges> | null, duration = 60) =>
+    seekTargetLoaded({ currentTime, duration, buffered })
+
+  it("its place has loaded only with one range from it to a second past it", () => {
+    expect(loadedAt(26, ranges([0, 21.5]))).toBe(false)
+    expect(loadedAt(26, ranges([0, 26.4]))).toBe(false)
+    expect(loadedAt(26, ranges([0, 21.5], [26.5, 40]))).toBe(false)
+    expect(loadedAt(26, null)).toBe(false)
+    expect(loadedAt(26, ranges([0, 28.2]))).toBe(true)
+    expect(loadedAt(26, ranges([0, 3.2], [22.6, 28.2]))).toBe(true)
+    // Near the end, loaded to the end is enough.
+    expect(loadedAt(59.5, ranges([0, 60]))).toBe(true)
+  })
+
+  const step = (w: SeekWatch, now: number, over: Partial<{ seeking: boolean; sec: number; loaded: boolean; askedAt: number | null }> = {}) =>
+    watchSeek(w, { seeking: true, sec: 26, loaded: true, now, askedAt: null, ...over })
+
+  it("is stuck after five seconds seeking over loaded film, and not a moment before", () => {
+    let w = IDLE_SEEK_WATCH
+    for (let now = 1_000; now < 6_000; now += 1_000) {
+      const r = step(w, now)
+      expect(r.stuck, String(now)).toBe(false)
+      w = r.watch
+    }
+    expect(step(w, 6_000).stuck).toBe(true)
+  })
+
+  it("starts again for a new target, a newer seek asked for, a film not loaded there, or a seek that landed", () => {
+    let w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 5_000, { sec: 30 }).watch // a new target
+    expect(step(w, 9_000, { sec: 30 }).stuck).toBe(false)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    expect(step(w, 6_000, { askedAt: 4_000 }).stuck).toBe(false) // a seek asked for at 4 s
+    expect(step(w, 9_000, { askedAt: 4_000 }).stuck).toBe(true)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 3_000, { loaded: false }).watch
+    expect(step(w, 6_000).stuck).toBe(false)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 3_000, { seeking: false }).watch
+    expect(step(w, 6_000).stuck).toBe(false)
+  })
+
+  it("its ladder starts past the nudge, which would seek again on top of it", () => {
+    const { actions } = run(Array.from({ length: 1 + STALL_FROZEN_TICKS }, () => running(26, { seekStuck: true })))
+    expect(actions).toEqual([{ kind: "recover", rung: "recover" }])
+  })
+
+  it("only Safari's own player plays a stream", () => {
+    expect(browserPlaysHls({ canPlayType: () => "maybe" })).toBe(true)
+    expect(browserPlaysHls({ canPlayType: () => "" })).toBe(false)
+    expect(browserPlaysHls({})).toBe(false)
   })
 })

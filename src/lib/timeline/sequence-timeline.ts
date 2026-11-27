@@ -149,6 +149,96 @@ export function timelineCellsForMilestoneSplit<T extends { id: string }>(
   return dropped ? kept : cells as T[]
 }
 
+type TimedLine = { id: string; startTime?: number | null; endTime?: number | null }
+
+/**
+ * AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file's heard lines (its
+ * audio cue file's) for the milestone on the timeline, with Split into
+ * milestones on. Every heard line belongs to exactly one milestone (`pages`,
+ * in the file's order):
+ *  - one paired with subtitle lines, to the milestone of its earliest paired
+ *    line;
+ *  - one paired with none (or with none on any milestone), by where it
+ *    starts: to the milestone
+ *    whose time range it starts in; in a gap, to the next one; after the last,
+ *    to the last; with no times at all, to the first.
+ * While the pairs are being worked on, the pairs already settled keep
+ * deciding, so no line jumps milestones; one whose pair does not exist yet is
+ * unpaired until it does.
+ * With the whole file on the timeline (`milestone` is `all`: the split off, or
+ * one milestone holding everything) the heard lines come back as they are.
+ */
+export function heardLinesOfMilestone<T extends TimedLine>(
+  heard: T[] | null,
+  milestone: readonly TimedLine[],
+  all: readonly TimedLine[],
+  pages: readonly (readonly TimedLine[])[],
+  textForCue: ReadonlyMap<string, readonly string[]>,
+): T[] | null {
+  if (!heard || milestone === all) return heard
+  const pageOf = new Map<string, number>()
+  pages.forEach((page, i) => { for (const line of page) if (!pageOf.has(line.id)) pageOf.set(line.id, i) })
+  const target = milestone.length > 0 ? pageOf.get(milestone[0].id) ?? -1 : -1
+  if (target < 0) return []
+  // Where each milestone's time range ends (-Infinity: no times).
+  const ends = pages.map((page) => {
+    let end = -Infinity
+    for (const line of page) {
+      const e = typeof line.endTime === "number" && Number.isFinite(line.endTime) ? line.endTime : line.startTime
+      if (typeof e === "number" && Number.isFinite(e)) end = Math.max(end, e)
+    }
+    return end
+  })
+  const byTime = (at: number | null | undefined): number => {
+    if (typeof at !== "number" || !Number.isFinite(at)) return 0
+    // The first milestone that has not ended by the time it starts: its own
+    // range, or the next one after a gap; after the last, the last.
+    let lastTimed = 0
+    for (let i = 0; i < ends.length; i++) {
+      if (ends[i] === -Infinity) continue
+      lastTimed = i
+      if (at < ends[i]) return i
+    }
+    return lastTimed
+  }
+  const placeOf = (cue: T): number => {
+    let earliest = Infinity
+    for (const id of textForCue.get(cue.id) ?? []) {
+      const i = pageOf.get(id)
+      if (i != null) earliest = Math.min(earliest, i)
+    }
+    return Number.isFinite(earliest) ? earliest : byTime(cue.startTime)
+  }
+  return heard.filter((cue) => placeOf(cue) === target)
+}
+
+/**
+ * AQU-2711 x AQU-2253 (review, Nov 25): is only part of the file on the
+ * timeline? `timelineCellsForMilestoneSplit` hands back the file's own list
+ * whenever it keeps every line (the split off, no milestones, one milestone
+ * holding everything), so a different list is a part.
+ */
+export function showsPartOfFile(shown: readonly unknown[], all: readonly unknown[]): boolean {
+  return shown !== all
+}
+
+/**
+ * AQU-2711 x AQU-2253 (review, Nov 25): the lines the recorder walks. The
+ * milestone's heard lines (`cut`); opened on a line the cut does not hold (a
+ * milestone with none, or the table's own record button on a line elsewhere),
+ * the whole cue file, so the line it was opened on is there to record. With
+ * no cue file, the file's own lines.
+ */
+export function recorderLinesFor<T extends { id: string }>(
+  cut: T[] | null,
+  whole: T[] | null,
+  plain: T[],
+  openedOn: string | null,
+): T[] {
+  if (cut && (openedOn == null || cut.some((c) => c.id === openedOn))) return cut
+  return whole ?? plain
+}
+
 /** The lines of one chapter (the whole list when null), in order. */
 export function scopeCells<T extends CellData>(cells: readonly T[], scope: TimelineChapter | null): T[] {
   if (!scope) return cells as T[]

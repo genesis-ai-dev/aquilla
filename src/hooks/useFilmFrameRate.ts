@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { frameRateLabelFor, type FrameRateLabel } from "@/lib/parsers/frame-timecode"
-import { fetchFilmFrameRate } from "@/lib/video/film-frame-rate"
+import { fetchFilmFrameRate, readBlobFrameRate } from "@/lib/video/film-frame-rate"
 
 /** A linked film's frame rate, as an import's frame check uses it (AQU-2197):
  *  one of the common rates, null when there is no film or its rate is none of
@@ -54,4 +54,22 @@ export function filmFrameRateOf(
 ): FilmFrameRate {
   if (!url) return null
   return rates.has(url) ? rates.get(url)! : "pending"
+}
+
+/**
+ * A film's frame rate read from the file being imported, before it has a
+ * link: "pending" while it is read, null without a file or a stated rate.
+ */
+export function useFileFrameRate(file: Blob | null | undefined): FilmFrameRate {
+  const [read, setRead] = useState<{ file: Blob; rate: FrameRateLabel | null } | null>(null)
+  useEffect(() => {
+    if (!file) return
+    let live = true
+    void readBlobFrameRate(file).then((fps) => {
+      if (live) setRead({ file, rate: fps === null ? null : frameRateLabelFor(fps) })
+    })
+    return () => { live = false }
+  }, [file])
+  if (!file) return null
+  return read && read.file === file ? read.rate : "pending"
 }

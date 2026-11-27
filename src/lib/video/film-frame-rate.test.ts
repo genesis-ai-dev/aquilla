@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { box } from "./__fixtures__/fmp4"
-import { fetchFilmFrameRate, parseHlsFrameRate, parseMp4FrameRate, parseWebmFrameRate } from "./film-frame-rate"
+import { fetchFilmFrameRate, parseHlsFrameRate, parseMp4FrameRate, parseWebmFrameRate, readBlobFrameRate } from "./film-frame-rate"
 
 // Episode 101's master (read 2026-10-26), trimmed: every video variant
 // states its rate.
@@ -121,5 +121,25 @@ describe("fetching it", () => {
     expect(await fetchFilmFrameRate("https://cdn.example.test/master.m3u8", {
       fetchImpl: vi.fn(async () => ({ ok: false }) as Response),
     })).toBeNull()
+  })
+})
+
+// Import map M-frames: a film being imported has no link yet, so its rate is
+// read from the file itself.
+describe("reading it from a file being imported", () => {
+  it("reads an MP4 or a WebM from the head of the file", async () => {
+    expect(await readBlobFrameRate(new Blob([mp4(trak("vide", 24000, [[10, 1001]]))]))).toBeCloseTo(23.976, 3)
+    expect(await readBlobFrameRate(new Blob([webm(40000000)]))).toBe(25)
+  })
+
+  it("looks at the tail for an MP4 whose moov comes last", async () => {
+    const head = new Uint8Array(4 * 1024 * 1024)
+    head.set(box("ftyp", ascii("isom")))
+    const tail = mp4(trak("vide", 25, [[10, 1]])).slice(12)
+    expect(await readBlobFrameRate(new Blob([head, new Uint8Array(1024), tail]))).toBe(25)
+  })
+
+  it("answers null for sound only", async () => {
+    expect(await readBlobFrameRate(new Blob([mp4(trak("soun", 48000, [[100, 1024]]))]))).toBeNull()
   })
 })

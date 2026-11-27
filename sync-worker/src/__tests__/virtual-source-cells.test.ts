@@ -36,6 +36,7 @@ import { handleCellsByRefRequest } from '../events/cells-by-ref-route'
 import { handleProgressReadRequest } from '../events/progress-read-route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { handleSourceUploadRequest } from '../events/source-upload-route'
+import { handleImportReconcileRequest } from '../events/import-reconcile-route'
 import { buildUsfmExportPlan } from '../events/usfm-export-plan'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -439,5 +440,236 @@ describe('AQU-2459 Phase B: pure virtual source cells', () => {
     expect(pubRes?.status).toBe(200)
     const filesAfter = await rows<{ id: string; deleted_at: number | null }>('files')
     expect(filesAfter.every((f) => f.deleted_at === null)).toBe(true)
+  })
+
+  it('supports bilingual virtual imports (0 source rows + hash-pinned targets), virtual assignments, tombstones, and reconcile', async () => {
+    const { db, rows } = await makeTestDb({
+      projects: [{ id: PROJECT, name: 'Bilingual Virtual', created_by: 1 }],
+      files: [
+        {
+          id: FILE_GEN,
+          project_id: PROJECT,
+          name: 'Genesis',
+          event_id: 'ev-file-gen',
+          meta: JSON.stringify({ parserVersion: 'builtin:paratext-bilingual@1', fileType: 'usfm' }),
+        },
+      ],
+    })
+    await db
+      .prepare(`INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 1, 600)`)
+      .bind(PROJECT)
+      .run()
+    await db
+      .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ cellEditingFloor: 'project_lead' }))
+      .run()
+    const bucket = makeStubBucket()
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE_GEN, userId: 1, role: 600, username: 'ryder' })
+    const env = { SNAPSHOTS: bucket, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
+
+    // 1. Fresh bilingual virtual import: rev 1 preserves caller cellIds, then target-only /import chunk pins hashes.
+    const rev1Res = await handleRevisionsRequest(
+      new Request(`https://x/api/v1/projects/${PROJECT}/files/${FILE_GEN}/revisions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          artifactSha256: SHA_1,
+          stamp: 'builtin:paratext-bilingual@1',
+          virtual: true,
+          finalizeFollows: true,
+          units: [
+            { ...verseUnit(0, 'GEN 1:1', 'In the beginning God created the heavens.'), cellId: 'cell-gen-1-1' },
+            { ...verseUnit(1, 'GEN 1:2', 'Now the earth was formless.'), cellId: 'cell-gen-1-2' },
+            { ...verseUnit(2, 'GEN 2:1', 'Thus the heavens were finished.'), cellId: 'cell-gen-2-1' },
+          ],
+        }),
+      }),
+      env,
+    )
+    expect(rev1Res?.status).toBe(200)
+    const rev1Body = (await rev1Res!.json()) as { eventId: string; revisionN: number }
+    expect(rev1Body.revisionN).toBe(1)
+    expect(rev1Body.eventId).toBeTruthy()
+
+    const targetChunkRes = await handleBulkImportRequest(
+      new Request('https://x/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          projectId: PROJECT,
+          fileId: FILE_GEN,
+          cells: [],
+          targets: [
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000b1',
+              cellId: 'cell-gen-1-1',
+              parentId: rev1Body.eventId,
+              value: 'Au commencement Dieu créa les cieux.',
+            },
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000b2',
+              cellId: 'cell-gen-1-2',
+              parentId: rev1Body.eventId,
+              value: 'La terre était informe.',
+            },
+          ],
+        }),
+      }),
+      env,
+    )
+    expect(targetChunkRes?.status).toBe(200)
+
+    const finRes = await handleBulkImportRequest(
+      new Request('https://x/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ projectId: PROJECT, fileId: FILE_GEN, cells: [], complete: true }),
+      }),
+      env,
+    )
+    expect(finRes?.status).toBe(200)
+
+    // 0 Postgres source rows, 2 target rows with source_content_hash stamped!
+    const allPgCells = await rows<{ side: string; cell_id: string; source_content_hash: string | null }>('cells')
+    expect(allPgCells.filter((c) => c.side === 'source')).toHaveLength(0)
+    const targetRows = allPgCells.filter((c) => c.side === 'target')
+    expect(targetRows).toHaveLength(2)
+    expect(targetRows.every((r) => typeof r.source_content_hash === 'string' && r.source_content_hash.length > 0)).toBe(true)
+
+    // 2. Virtual assignment (chapter-scoped on GEN 1) resolves into assignment_cells & assignment_member_cells!
+    const assignRes = await handleEventsWriteRequest(
+      new Request('https://x/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          events: [
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000c1',
+              schemaVersion: 1,
+              projectId: PROJECT,
+              fileId: FILE_GEN,
+              cellId: null,
+              parentId: null,
+              kind: 'assignment.create',
+              payload: {
+                assignmentId: 'assign-gen-1',
+                assigneeUserId: 1,
+                scopeKind: 'chapter',
+                scopeLabel: 'GEN 1',
+                scope: [{ fileId: FILE_GEN, chapter: 'GEN 1' }],
+              },
+              clientTs: Date.now(),
+            },
+          ],
+        }),
+      }),
+      env,
+    )
+    expect(assignRes?.status).toBe(200)
+    const assignBody = (await assignRes!.json()) as { accepted: string[]; rejected: unknown[] }
+    expect(assignBody.rejected).toEqual([])
+    expect(assignBody.accepted).toHaveLength(1)
+    const memberCells = await db
+      .prepare(`SELECT cell_id, canonical_ref FROM assignment_member_cells WHERE assignment_id = ? ORDER BY cell_id`)
+      .bind('assign-gen-1')
+      .all<{ cell_id: string; canonical_ref: string }>()
+    expect(memberCells.results.map((r) => r.cell_id)).toEqual(['cell-gen-1-1', 'cell-gen-1-2'])
+
+    // 3. Virtual source.cell.delete writes a tombstoned sparse overlay (does NOT resurrect from R2 manifest)
+    //    and hides the tombstoned cell from both GET /cells and assignment_member_cells!
+    const delRes = await handleEventsWriteRequest(
+      new Request('https://x/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          events: [
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000d1',
+              schemaVersion: 1,
+              projectId: PROJECT,
+              fileId: FILE_GEN,
+              cellId: 'cell-gen-1-2',
+              parentId: rev1Body.eventId,
+              kind: 'source.cell.delete',
+              payload: {},
+              clientTs: Date.now(),
+            },
+          ],
+        }),
+      }),
+      env,
+    )
+    expect(delRes?.status).toBe(200)
+    const cellsAfterDelete = (await (
+      await handleCellsReadRequest(
+        new Request(`https://x/api/v1/projects/${PROJECT}/files/${FILE_GEN}/cells?side=source`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        env,
+      )
+    )!.json()) as { cells: Array<{ cellId: string }> }
+    expect(cellsAfterDelete.cells.map((c) => c.cellId)).toEqual(['cell-gen-1-1', 'cell-gen-2-1'])
+
+    const memberCellsAfterDelete = await db
+      .prepare(`SELECT cell_id FROM assignment_member_cells WHERE assignment_id = ? ORDER BY cell_id`)
+      .bind('assign-gen-1')
+      .all<{ cell_id: string }>()
+    expect(memberCellsAfterDelete.results.map((r) => r.cell_id)).toEqual(['cell-gen-1-1'])
+
+    // 4. Reconcile on a virtual file (`reviewChangedSource: true`) reads virtual rows, commits changes cleanly.
+    const reconcileRes = await handleImportReconcileRequest(
+      new Request('https://x/import/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          projectId: PROJECT,
+          fileId: FILE_GEN,
+          file: { id: '018f6b2e-0000-7000-8000-0000000000e1', name: 'Genesis', fileType: 'usfm' },
+          reviewChangedSource: true,
+          cells: [
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000e2',
+              cellId: 'cell-gen-1-1',
+              anchorCellId: null,
+              value: 'In the very beginning God created the heavens.',
+              canonicalRef: 'GEN 1:1',
+              type: 'verse',
+              sequenceIndex: 0,
+              metadata: { aquillaImport: { unitKey: 'GEN 1:1' } },
+            },
+            {
+              id: '018f6b2e-0000-7000-8000-0000000000e3',
+              cellId: 'cell-gen-2-1',
+              anchorCellId: 'cell-gen-1-1',
+              value: 'Thus the heavens were finished.',
+              canonicalRef: 'GEN 2:1',
+              type: 'verse',
+              sequenceIndex: 1,
+              metadata: { aquillaImport: { unitKey: 'GEN 2:1' } },
+            },
+          ],
+          clientTs: Date.now(),
+        }),
+      }),
+      env,
+    )
+    expect(reconcileRes?.status).toBe(200)
+    const reconcileBody = (await reconcileRes!.json()) as { matched: number; changed: number; exact: number; ice: number }
+    expect(reconcileBody.matched).toBe(2)
+    expect(reconcileBody.exact + reconcileBody.ice).toBe(1)
+    const cellsAfterReconcile = (await (
+      await handleCellsReadRequest(
+        new Request(`https://x/api/v1/projects/${PROJECT}/files/${FILE_GEN}/cells?side=source`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        env,
+      )
+    )!.json()) as { cells: Array<{ cellId: string; value: string }> }
+    expect(cellsAfterReconcile.cells.find((c) => c.cellId === 'cell-gen-1-1')?.value).toBe(
+      'In the very beginning God created the heavens.',
+    )
+    expect(cellsAfterReconcile.cells.find((c) => c.cellId === 'cell-gen-2-1')?.value).toBe(
+      'Thus the heavens were finished.',
+    )
   })
 })

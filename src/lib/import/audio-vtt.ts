@@ -37,6 +37,7 @@ import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { extractVttStrings, repairShortFormCueTimestamps } from "@/lib/parsers/subtitle"
 import { AUDIO_CUES_ROLE, type TranslatableString } from "@/lib/parsers/types"
 import { bulkUploadSource } from "@/lib/sync/bulk-import"
+import { buildSyntheticRevision } from "@/lib/sync/revision-import"
 import type { LinkableCue } from "@/lib/timeline/cue-links"
 import { applyTimebaseScale } from "./timebase"
 
@@ -235,6 +236,12 @@ export async function uploadAudioCueFile(
       },
     },
     cells,
+    revision: buildSyntheticRevision({
+      stamp: "builtin:audio-vtt@1",
+      fileType: "vtt",
+      cells,
+      preserveCellIds: true,
+    }),
     getToken: args.getToken,
     signal: args.signal,
   })

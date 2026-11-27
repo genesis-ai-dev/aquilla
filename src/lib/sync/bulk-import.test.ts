@@ -772,6 +772,58 @@ describe("bulkUploadSource — revision import (AQU-2459)", () => {
     ).rejects.toThrow(/original bytes/)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it("uploads bilingual virtual revisions: 0 source rows + target-only chunk pinned to revision eventId", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) })
+      return Response.json(
+        String(url).endsWith("/revisions")
+          ? { noop: false, revisionN: 1, eventId: "rev-event-1" }
+          : { accepted: 0 },
+      )
+    }) as unknown as typeof fetch
+    const cells = [makeCell(0), makeCell(1)]
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "lexicon.json", fileType: "sdbh", parserVersion: "sdbh-import-v2" },
+      cells,
+      targets: [
+        { id: "t-0", cellId: "cell-0", parentId: "evt-0", value: "traduction 0" },
+        { id: "t-1", cellId: "cell-1", parentId: "evt-1", value: "traduction 1" },
+      ],
+      targetLang: "fr",
+      revision: {
+        stamp: "sdbh-import-v2",
+        allowSyntheticArtifactHash: true,
+        units: cells.map((c, i) => ({
+          unitKey: `u:${i}`,
+          positional: false,
+          text: c.value,
+          sequenceIndex: i,
+          cellId: c.cellId,
+        })),
+      },
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://sync.example/import",
+      "https://sync.example/api/v1/projects/p1/files/f1/revisions",
+      "https://sync.example/import",
+      "https://sync.example/import",
+    ])
+    expect(calls[0].body.cells).toEqual([])
+    expect(calls[1].body.virtual).toBe(true)
+    expect(calls[1].body.artifactSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(calls[2].body.cells).toEqual([])
+    expect(calls[2].body.targets).toEqual([
+      { id: "t-0", cellId: "cell-0", parentId: "rev-event-1", value: "traduction 0", targetLang: "fr" },
+      { id: "t-1", cellId: "cell-1", parentId: "rev-event-1", value: "traduction 1", targetLang: "fr" },
+    ])
+    expect(calls[3].body).toMatchObject({ complete: true, cells: [] })
+  })
 })
 
 // Why: "Update existing" must move cells, files.meta (export rebuilds the

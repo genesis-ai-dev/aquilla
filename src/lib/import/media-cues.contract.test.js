@@ -7,6 +7,8 @@ import { readFile } from "node:fs/promises"
 import { prepareEmbeddedSubtitleSources } from "./embedded-subtitle-sources"
 import { handleBulkImportRequest } from "../../../sync-worker/src/events/import-route"
 import { handleSourceUploadRequest } from "../../../sync-worker/src/events/source-upload-route"
+import { handleRevisionsRequest } from "../../../sync-worker/src/events/revisions-route"
+import { handleCellsReadRequest } from "../../../sync-worker/src/events/cells-read-route"
 import { handleAudioRequest } from "../../../sync-worker/src/audio"
 import { handleOriginalDownloadRequest } from "../../../sync-worker/src/events/original-download-route"
 import { handleFilesReadRequest } from "../../../sync-worker/src/events/files-read-route"
@@ -38,7 +40,10 @@ describe("media wording import across browser and worker", () => {
         },
         async get(key) {
           const bytes = objects.get(key)
-          return bytes ? { arrayBuffer: async () => bytes } : null
+          return bytes ? {
+            arrayBuffer: async () => bytes,
+            text: async () => new TextDecoder().decode(bytes),
+          } : null
         },
       },
     }
@@ -49,6 +54,7 @@ describe("media wording import across browser and worker", () => {
       const request = new Request(String(url), { ...init, body })
       const response = await handleBulkImportRequest(request, env)
         ?? await handleSourceUploadRequest(request, env)
+        ?? await handleRevisionsRequest(request, env)
         ?? await handleAudioRequest(request, env)
       if (!response) throw new Error(`Unhandled import request: ${request.method} ${request.url}`)
       return response
@@ -86,12 +92,22 @@ describe("media wording import across browser and worker", () => {
       })
       const [file] = await testDb.rows("files")
       expect(file.deleted_at).toBeNull()
-      const source = (await testDb.rows("cells"))
-        .filter(cell => cell.target_lang === "")
-        .sort((a, b) => a.sequence_index - b.sequence_index)
+      expect(file.source_virtual).toBe(true)
+      expect((await testDb.rows("cells")).filter(cell => cell.side === "source")).toHaveLength(0)
+      const readToken = await makeTestToken(env.SYNC_SECRET_KEY, {
+        projectId: "p1", fileId: ref.id, role: 800,
+      })
+      const cellsRes = await handleCellsReadRequest(new Request(
+        `https://x/api/v1/projects/p1/files/${ref.id}/cells`,
+        { headers: { Authorization: `Bearer ${readToken}` } },
+      ), env)
+      expect(cellsRes.status).toBe(200)
+      const source = (await cellsRes.json()).cells
+        .filter(cell => cell.side === "source")
+        .sort((a, b) => a.sequenceIndex - b.sequenceIndex)
       expect(source).toEqual([
-        expect.objectContaining({ transcription: embedded ? "Embedded first caption." : "Supplied wording.", start_ms: 500, end_ms: 1500 }),
-        expect.objectContaining({ transcription: embedded ? "Embedded second caption." : "Second paragraph.", start_ms: 2000, end_ms: 3000 }),
+        expect.objectContaining({ transcription: embedded ? "Embedded first caption." : "Supplied wording.", startMs: 500, endMs: 1500 }),
+        expect.objectContaining({ transcription: embedded ? "Embedded second caption." : "Second paragraph.", startMs: 2000, endMs: 3000 }),
       ])
       const attachments = (await testDb.rows("cell_audio"))
         .sort((a, b) => a.trim_start_ms - b.trim_start_ms)

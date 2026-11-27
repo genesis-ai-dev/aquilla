@@ -123,6 +123,7 @@ interface RevisionRow {
   filter_stamp: string
   options_hash: string
   manifest_r2_key: string
+  event_id: string
 }
 
 /** Deterministic, so a replayed request derives the same event id. */
@@ -207,7 +208,7 @@ export async function handleRevisionsRequest(
   if (file.head_revision_n != null) {
     const row = await db
       .prepare(
-        `SELECT revision_n, artifact_sha256, filter_stamp, options_hash, manifest_r2_key
+        `SELECT revision_n, artifact_sha256, filter_stamp, options_hash, manifest_r2_key, event_id
          FROM file_revisions WHERE project_id = ? AND file_id = ? AND revision_n = ?`,
       )
       .bind(projectId, fileId, file.head_revision_n)
@@ -215,7 +216,7 @@ export async function handleRevisionsRequest(
     if (!row) return withCors(new Response('head revision row missing', { status: 500 }), request)
     const sameAsHead = row.artifact_sha256 === body.artifactSha256 && row.filter_stamp === body.stamp && row.options_hash === body.optionsHash
     if (sameAsHead && !body.realign) {
-      return withCors(Response.json({ noop: true, revisionN: row.revision_n }), request)
+      return withCors(Response.json({ noop: true, revisionN: row.revision_n, eventId: row.event_id }), request)
     }
     const obj = await env.SNAPSHOTS.get(row.manifest_r2_key)
     if (!obj) return withCors(new Response('head revision manifest missing from R2', { status: 500 }), request)

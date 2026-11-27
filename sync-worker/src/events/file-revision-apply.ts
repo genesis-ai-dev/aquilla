@@ -236,6 +236,7 @@ function cellStmtsForUnits(
       ...(u.medium !== undefined ? { medium: u.medium } : {}),
       ...(u.startMs !== undefined ? { startMs: u.startMs } : {}),
       ...(u.endMs !== undefined ? { endMs: u.endMs } : {}),
+      ...(u.transcription !== undefined ? { transcription: u.transcription } : {}),
       ...(u.paragraphStart !== undefined ? { paragraphStart: u.paragraphStart } : {}),
       sequenceIndex: u.sequenceIndex,
       ...(u.metadata !== undefined ? { metadata: u.metadata } : {}),
@@ -327,11 +328,17 @@ export function validateUnitInputs(raw: unknown): { ok: true; units: RevisionUni
     if (u.endMs !== undefined && (typeof u.endMs !== 'number' || !Number.isFinite(u.endMs))) {
       return { ok: false, reason: `units[${i}].endMs must be a finite number` }
     }
+    if (u.transcription !== undefined && typeof u.transcription !== 'string') {
+      return { ok: false, reason: `units[${i}].transcription must be a string` }
+    }
     if (u.paragraphStart !== undefined && typeof u.paragraphStart !== 'boolean') {
       return { ok: false, reason: `units[${i}].paragraphStart must be a boolean` }
     }
     if (u.metadata !== undefined && (!u.metadata || typeof u.metadata !== 'object' || Array.isArray(u.metadata))) {
       return { ok: false, reason: `units[${i}].metadata must be an object` }
+    }
+    if (u.cellId !== undefined && (typeof u.cellId !== 'string' || u.cellId.length === 0 || u.cellId.length > 255)) {
+      return { ok: false, reason: `units[${i}].cellId must be a non-empty string` }
     }
     units.push({
       unitKey: u.unitKey,
@@ -343,9 +350,11 @@ export function validateUnitInputs(raw: unknown): { ok: true; units: RevisionUni
       ...(u.medium !== undefined ? { medium: u.medium } : {}),
       ...(u.startMs !== undefined ? { startMs: u.startMs } : {}),
       ...(u.endMs !== undefined ? { endMs: u.endMs } : {}),
+      ...(u.transcription !== undefined ? { transcription: u.transcription } : {}),
       ...(u.paragraphStart !== undefined ? { paragraphStart: u.paragraphStart } : {}),
       sequenceIndex: typeof u.sequenceIndex === 'number' && Number.isFinite(u.sequenceIndex) ? u.sequenceIndex : i,
       ...(u.metadata !== undefined ? { metadata: u.metadata as Record<string, unknown> } : {}),
+      ...(u.cellId !== undefined ? { cellId: u.cellId } : {}),
     })
   }
   return { ok: true, units }

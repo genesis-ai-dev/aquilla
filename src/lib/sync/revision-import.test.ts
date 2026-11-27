@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
-import { canImportAsRevision, postFileRevision, revisionUnitsFromCells, REVISION_IMPORT_FORMATS } from "./revision-import"
+import {
+  buildSyntheticRevision,
+  canImportAsRevision,
+  postFileRevision,
+  revisionUnitsFromCells,
+  REVISION_IMPORT_FORMATS,
+} from "./revision-import"
 import type { BulkImportCell } from "./bulk-import"
 
 vi.mock("./sync-worker-url", () => ({ syncWorkerHttpOrigin: () => "https://sync.example" }))
@@ -42,29 +48,36 @@ describe("revisionUnitsFromCells", () => {
     ])
     expect(units.map((u) => u.unitKey)).toEqual(["k", "k#2", "cell:cell-2"])
   })
+  it("preserves caller-minted cellIds when preserveCellIds is set, and builds synthetic revisions", () => {
+    const units = revisionUnitsFromCells([cell(0)], { preserveCellIds: true })
+    expect(units[0].cellId).toBe("cell-0")
+    const synthetic = buildSyntheticRevision({ stamp: "sdbh-import-v2", fileType: "sdbh", cells: [cell(0)], preserveCellIds: true })
+    expect(synthetic).toMatchObject({ stamp: "sdbh-import-v2", allowSyntheticArtifactHash: true })
+    expect(synthetic?.units[0].cellId).toBe("cell-0")
+  })
 })
 
 describe("canImportAsRevision", () => {
   const base = { fileType: "docx", reimport: false as const, hasTargets: false, hasOriginalBytes: true, cells: [cell(0)] }
-  it("takes a fresh, source-only, filter-backed or usfm import with its bytes", () => {
+  it("takes fresh imports across formats (including bilingual, timed cues, and media) with original bytes", () => {
     expect(REVISION_IMPORT_FORMATS.has("docx")).toBe(true)
     expect(REVISION_IMPORT_FORMATS.has("usfm")).toBe(true)
     expect(canImportAsRevision(base)).toBe(true)
     expect(canImportAsRevision({ ...base, fileType: "usfm" })).toBe(true)
+    expect(canImportAsRevision({ ...base, fileType: "ebible" })).toBe(true)
+    expect(canImportAsRevision({ ...base, hasTargets: true })).toBe(true)
+    expect(canImportAsRevision({ ...base, cells: [cell(0, { medium: "media" })] })).toBe(true)
+    expect(canImportAsRevision({ ...base, cells: [cell(0, { startMs: 0, endMs: 10 })] })).toBe(true)
   })
-  // Why: "Update existing" is a plain revision; review apply and "Make updated
-  // copy" unvalidate, repin and clone, which only /import/reconcile does yet.
-  it("takes the plain update re-import, and leaves review apply and fork on reconcile", () => {
+  // Why: "Update existing" is a plain revision; review apply, "Make updated
+  // copy", and bilingual re-imports still use /import/reconcile.
+  it("takes plain update re-imports, and leaves review apply, fork, bilingual updates, and no-bytes imports off", () => {
     expect(canImportAsRevision({ ...base, reimport: "update" })).toBe(true)
     expect(canImportAsRevision({ ...base, reimport: "review" })).toBe(false)
     expect(canImportAsRevision({ ...base, reimport: "fork" })).toBe(false)
-  })
-  it("refuses bilingual rows, formats without a filter, missing bytes and media rows", () => {
-    expect(canImportAsRevision({ ...base, hasTargets: true })).toBe(false)
-    expect(canImportAsRevision({ ...base, fileType: "unknown-format" })).toBe(false)
+    expect(canImportAsRevision({ ...base, reimport: "update", hasTargets: true })).toBe(false)
+    expect(canImportAsRevision({ ...base, fileType: undefined })).toBe(false)
     expect(canImportAsRevision({ ...base, hasOriginalBytes: false })).toBe(false)
-    expect(canImportAsRevision({ ...base, cells: [cell(0, { medium: "media" })] })).toBe(false)
-    expect(canImportAsRevision({ ...base, cells: [cell(0, { startMs: 0, endMs: 10 })] })).toBe(false)
   })
 })
 

@@ -54,7 +54,7 @@ import {
 } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { buildVirtualFileProgressStmts } from './virtual-progress'
-import type { ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 import { withLongOperationTimeout } from '../../../db/shim/postgres'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import {
@@ -853,6 +853,15 @@ export async function handleBulkImportRequest(
             [body.projectId, body.fileId],
           ),
         ])
+        if (presentCells.size !== cellIds.length && env.SNAPSHOTS) {
+          const vFile = await loadVirtualSourceFile(db, env.SNAPSHOTS, body.projectId, body.fileId)
+          if (vFile) {
+            for (const cid of cellIds) {
+              const vRow = vFile.byCellId.get(cid)
+              if (vRow && vRow.tombstoned_at == null) presentCells.add(cid)
+            }
+          }
+        }
         if (presentCells.size !== cellIds.length) {
           return withCors(new Response('media attachment refers to a cell outside this file', { status: 409 }), request)
         }
@@ -1059,7 +1068,23 @@ export async function handleBulkImportRequest(
   }
 
   const targetEvents: PersistedEvent<'target.cell.commit'>[] = []
-  const sourceParentByCell = new Map(cellEvents.map((event) => [event.cellId, event.id]))
+  const sourceParentByCell = new Map<string, string>(
+    cellEvents.map((event) => [event.cellId!, event.id]),
+  )
+  const sourceHashByCell = new Map<string, string>()
+  if (cellEvents.length === 0 && (body.targets?.length ?? 0) > 0 && env.SNAPSHOTS) {
+    // AQU-2459 Phase B: target-only import chunks following a virtual file
+    // revision validate against the virtual manifest's cell ids and revision
+    // event ids, and stamp `sourceContentHash` onto each target row.
+    const vFile = await loadVirtualSourceFile(db, env.SNAPSHOTS, body.projectId, body.fileId)
+    if (vFile) {
+      for (const row of vFile.rows) {
+        if (row.tombstoned_at != null) continue
+        sourceParentByCell.set(row.cell_id, row.event_id)
+        if (row.revision_content_hash) sourceHashByCell.set(row.cell_id, row.revision_content_hash)
+      }
+    }
+  }
   for (const target of body.targets ?? []) {
     if (
       typeof target.id !== 'string'
@@ -1077,6 +1102,7 @@ export async function handleBulkImportRequest(
         request,
       )
     }
+    const sourceContentHash = sourceHashByCell.get(target.cellId)
     targetEvents.push({
       id: target.id,
       schemaVersion: 1,
@@ -1090,6 +1116,7 @@ export async function handleBulkImportRequest(
         value: target.value,
         ...(target.valueHtml !== undefined ? { valueHtml: target.valueHtml } : {}),
         sourceEventId: target.parentId,
+        ...(sourceContentHash ? { sourceContentHash } : {}),
         ...(target.targetLang ? { targetLang: target.targetLang } : {}),
       },
       clientTs,

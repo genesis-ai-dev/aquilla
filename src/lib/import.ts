@@ -69,7 +69,14 @@ import type { PartnerImportEdition, PartnerImportProgress } from "./partners/typ
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
-import { canImportAsRevision, revisionUnitsFromCells } from "./sync/revision-import"
+import {
+  buildSyntheticRevision,
+  canImportAsRevision,
+  normalizeRevisionStamp,
+  REVISION_IMPORT_ENABLED,
+  revisionUnitsFromCells,
+  VIRTUAL_SOURCE_CELLS_ENABLED,
+} from "./sync/revision-import"
 import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
@@ -1058,27 +1065,51 @@ async function emitScriptureBooks(
     return [ref]
   }
 
-  const refs: FileReference[] = []
-  let enqueuedBefore = 0
-  for (const slice of slices) {
-    const { ref } = await emitParsedFile(
-      {
-        name: getBookName(slice.bookCode) ?? slice.bookCode,
-        strings: slice.strings,
-        rawSource: spec.bookRawSource(slice),
-        rawSourceFormat: spec.rawSourceFormat,
-        bookCode: slice.bookCode,
-        roundTripFidelity: "content-only",
-      },
-      spec.fileType,
-      {
-        ...ctx,
-        onCellEnqueued: (count) => onCellsEnqueued(enqueuedBefore + count, total),
-      },
-    )
-    refs.push(ref)
-    enqueuedBefore += slice.strings.length
-    onCellsEnqueued(enqueuedBefore, total)
+  const refs = new Array<FileReference>(slices.length)
+  const perBookEnqueued = new Array<number>(slices.length).fill(0)
+  const reportTotal = () => {
+    const sum = perBookEnqueued.reduce((acc, n) => acc + n, 0)
+    onCellsEnqueued(sum, total)
+  }
+  const deferPerBook = !ctx.deferPublication && slices.length > 1
+  const CONCURRENCY = Math.min(6, slices.length)
+  let nextIdx = 0
+  const worker = async (): Promise<void> => {
+    while (nextIdx < slices.length) {
+      const idx = nextIdx++
+      const slice = slices[idx]
+      const { ref } = await emitParsedFile(
+        {
+          name: getBookName(slice.bookCode) ?? slice.bookCode,
+          strings: slice.strings,
+          rawSource: spec.bookRawSource(slice),
+          rawSourceFormat: spec.rawSourceFormat,
+          bookCode: slice.bookCode,
+          roundTripFidelity: "content-only",
+        },
+        spec.fileType,
+        {
+          ...ctx,
+          ...(deferPerBook ? { deferPublication: true } : {}),
+          onCellEnqueued: (count) => {
+            perBookEnqueued[idx] = count
+            reportTotal()
+          },
+        },
+      )
+      refs[idx] = ref
+      perBookEnqueued[idx] = slice.strings.length
+      reportTotal()
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
+  if (deferPerBook) {
+    await publishStagedImportBatch({
+      projectId: ctx.projectId,
+      files: refs.map((ref) => ({ fileId: ref.id })),
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
   }
   return refs
 }
@@ -1338,6 +1369,14 @@ export async function importMacula(
     cells,
     rawBytes,
     rawSourceFormat: "macula-tsv",
+    ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+      ? {
+          revision: {
+            stamp: normalizeRevisionStamp("macula-tsv-v1", "macula-tsv"),
+            units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+          },
+        }
+      : {}),
     deferPublication: true,
     getToken: ctx.getToken,
     onProgress: (count, total) => {
@@ -1462,6 +1501,14 @@ export async function importTranslationNotes(
     cells,
     rawBytes,
     rawSourceFormat: "tn-tsv",
+    ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+      ? {
+          revision: {
+            stamp: normalizeRevisionStamp("tn-tsv-v1", "tn-tsv"),
+            units: revisionUnitsFromCells(cells),
+          },
+        }
+      : {}),
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total, skippedCount })
@@ -1923,7 +1970,12 @@ export async function emitParsedFile(
     hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
     cells,
   })
-    ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
+    ? {
+        stamp: normalizeRevisionStamp(shared.file.parserVersion, fileType),
+        units: revisionUnitsFromCells(cells, {
+          preserveCellIds: targets.length > 0 || speakerPairs.length > 0,
+        }),
+      }
     : undefined
 
   if (existingFileId && revision) {
@@ -2118,6 +2170,7 @@ export function createMediaFileCommit(
       value: file.name,
       medium: "media",
       sequenceIndex: i,
+      ...(s.transcription ? { transcription: s.transcription } : {}),
       ...(s.metadata ? { metadata: s.metadata } : {}),
       ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
     }))
@@ -2140,6 +2193,12 @@ export function createMediaFileCommit(
         orderedBy: "time",
       },
       cells,
+      revision: buildSyntheticRevision({
+        stamp: "workspace-import-v1",
+        fileType,
+        cells,
+        preserveCellIds: true,
+      }),
       deferPublication: true,
       getToken: ctx.getToken,
       onProgress: ctx.onCellEnqueued,
@@ -2746,6 +2805,14 @@ export async function importParatextAsTarget(
           artifactFidelity: "native",
           targets,
           targetLang: ctx.targetLang,
+          ...(!existingFileId && REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+            ? {
+                revision: {
+                  stamp: normalizeRevisionStamp(`${normalized.profileId}@${normalized.profileVersion}`, "usfm"),
+                  units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+                },
+              }
+            : {}),
           ...(!existingFileId ? { deferPublication: true } : {}),
           getToken: ctx.getToken,
           onProgress: (uploaded) => bookProgress(uploaded),

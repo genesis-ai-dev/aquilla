@@ -360,7 +360,7 @@ export function manifestUnitToSourceRow(
     end_ms: unit.endMs ?? null,
     medium: unit.medium ?? null,
     sequence_index: unit.sequenceIndex,
-    transcription: null,
+    transcription: unit.transcription ?? null,
     camera_state: null,
     metadata,
     lane_id: sourceLaneId,

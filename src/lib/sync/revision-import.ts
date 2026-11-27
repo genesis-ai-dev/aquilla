@@ -39,11 +39,17 @@ interface ImportEnvelope {
 /**
  * Map the cells the importer already built to revision units. The unit key is
  * the normalized manifest's `aquillaImport.unitKey`, which re-import already
- * matches on; the cell id the importer minted is dropped — the server derives
- * identity from alignment.
+ * matches on. By default the importer-minted `cellId` is dropped so the server
+ * derives identity from alignment; callers with paired target commits,
+ * morphology rows, media attachments, or caller-visible cell ids pass
+ * `{ preserveCellIds: true }` so revision 1 keeps those exact ids.
  */
-export function revisionUnitsFromCells(cells: readonly BulkImportCell[]): RevisionUnitInput[] {
+export function revisionUnitsFromCells(
+  cells: readonly BulkImportCell[],
+  opts?: { preserveCellIds?: boolean },
+): RevisionUnitInput[] {
   const seen = new Map<string, number>()
+  const preserveCellIds = opts?.preserveCellIds === true
   return cells.map((cell, index) => {
     const envelope = (cell.metadata?.aquillaImport ?? {}) as ImportEnvelope
     const baseKey = typeof envelope.unitKey === "string" && envelope.unitKey ? envelope.unitKey : `cell:${cell.cellId}`
@@ -62,11 +68,42 @@ export function revisionUnitsFromCells(cells: readonly BulkImportCell[]): Revisi
       ...(cell.medium !== undefined ? { medium: cell.medium } : {}),
       ...(cell.startMs !== undefined ? { startMs: cell.startMs } : {}),
       ...(cell.endMs !== undefined ? { endMs: cell.endMs } : {}),
+      ...(cell.transcription !== undefined ? { transcription: cell.transcription } : {}),
       ...(cell.paragraphStart !== undefined ? { paragraphStart: cell.paragraphStart } : {}),
       sequenceIndex: cell.sequenceIndex ?? index,
       ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
+      ...(preserveCellIds ? { cellId: cell.cellId } : {}),
     }
   })
+}
+
+const VALID_STAMP_RE = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}(@\d+)?$/
+
+/** Normalize a parser version or file type into a valid revision filter stamp. */
+export function normalizeRevisionStamp(stamp: string | undefined, fallbackFormat?: string): string {
+  if (stamp && VALID_STAMP_RE.test(stamp)) return stamp
+  const cleaned = (fallbackFormat ?? "import").replace(/[^A-Za-z0-9:._-]/g, "-") || "import"
+  return `aquilla:${cleaned}@1`
+}
+
+/**
+ * Build a virtual revision for importers that intentionally do not upload
+ * per-file original source bytes (e.g., SDBH shared edition archive, media
+ * segment files, audio-VTT cue siblings, extension-created files).
+ */
+export function buildSyntheticRevision(args: {
+  stamp?: string
+  fileType?: string
+  cells: readonly BulkImportCell[]
+  preserveCellIds?: boolean
+}): RevisionImport | undefined {
+  if (!REVISION_IMPORT_ENABLED || !VIRTUAL_SOURCE_CELLS_ENABLED) return undefined
+  if (args.cells.length === 0) return undefined
+  return {
+    stamp: normalizeRevisionStamp(args.stamp, args.fileType),
+    units: revisionUnitsFromCells(args.cells, { preserveCellIds: args.preserveCellIds }),
+    allowSyntheticArtifactHash: true,
+  }
 }
 
 /** True when this import can travel as a revision instead of N cell events. */
@@ -82,11 +119,16 @@ export function canImportAsRevision(args: {
   cells: readonly BulkImportCell[]
 }): boolean {
   if (!REVISION_IMPORT_ENABLED) return false
-  if (!args.fileType || !REVISION_IMPORT_FORMATS.has(args.fileType)) return false
-  // Bilingual and media imports carry rows the revision has no slot for.
+  if (!args.fileType) return false
+  // When virtual source cells are enabled, every known import format travels
+  // through the virtual revision path (zero Postgres source rows).
+  if (!VIRTUAL_SOURCE_CELLS_ENABLED && !REVISION_IMPORT_FORMATS.has(args.fileType)) return false
   if (args.reimport === "review" || args.reimport === "fork") return false
-  if (args.hasTargets || !args.hasOriginalBytes) return false
-  return args.cells.every((cell) => (cell.medium ?? "text") === "text" && cell.startMs === undefined)
+  // Bilingual re-imports still use /import/reconcile to merge incoming target
+  // rows against existing translations; fresh bilingual imports go virtual.
+  if (args.reimport === "update" && args.hasTargets) return false
+  if (!args.hasOriginalBytes) return false
+  return true
 }
 
 export interface RevisionImport {
@@ -99,6 +141,9 @@ export interface RevisionImport {
   /** `cellId → unitKey` for cells this provider wrote before the file had
    *  revisions, so an adopted file pairs by the provider's key. */
   cellKeys?: Record<string, string>
+  /** Allow hashing the serialized unit list as `artifactSha256` when the
+   *  importer intentionally uploads no per-file original artifact bytes. */
+  allowSyntheticArtifactHash?: boolean
 }
 
 export type RevisionOrigin = "import" | "reimport" | "dcs"

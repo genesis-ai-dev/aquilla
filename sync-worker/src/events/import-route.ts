@@ -54,7 +54,7 @@ import {
 } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { buildVirtualFileProgressStmts } from './virtual-progress'
-import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
+import { loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
 import { withLongOperationTimeout } from '../../../db/shim/postgres'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import {

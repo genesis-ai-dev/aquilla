@@ -45,7 +45,7 @@ import { verifyTokenForProject } from "../auth"
 import { isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
 import { computeUpstreamStaleCellIds, resolveConsumedTargetLane } from "./inherited-staleness"
 import { contentHashOf } from "../../../db/shared/file-revision"
-import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
+import { loadVirtualSourceFile } from "../../../db/shared/virtual-source-store"
 
 export interface StaleSourceEnv {
   AQUILLA_PG?: AquillaDb

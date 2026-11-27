@@ -21,7 +21,7 @@ import { verifyTokenForProject } from "../auth"
 import { CELL_ROW_COLUMNS, mapCellRow, type CellRowRaw } from "./cell-row-serialize"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
 import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibleLanesForRead } from "./lane-read-wall"
-import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
+import { loadProjectVirtualSourceFiles } from "../../../db/shared/virtual-source-store"
 
 export interface CellsByRefEnv {
   AQUILLA_PG?: AquillaDb

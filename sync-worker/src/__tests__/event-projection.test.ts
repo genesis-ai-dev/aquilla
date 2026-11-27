@@ -215,8 +215,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     const aiStmt = recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
     expect(aiStmt.sql).toContain('ai_draft')
-    expect(aiStmt.args[11]).toBe(1)
-    expect(JSON.parse(String(aiStmt.args[12]))).toEqual(provenance)
+    expect(aiStmt.args[12]).toBe(1)
+    expect(JSON.parse(String(aiStmt.args[13]))).toEqual(provenance)
 
     const human = makeD1Stub()
     buildEventProjectionStmts(
@@ -225,8 +225,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       [],
     )
     const humanStmt = human.recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
-    expect(humanStmt.args[11]).toBe(0)
-    expect(humanStmt.args[12]).toBeNull()
+    expect(humanStmt.args[12]).toBe(0)
+    expect(humanStmt.args[13]).toBeNull()
   })
 })
 

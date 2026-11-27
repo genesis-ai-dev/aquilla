@@ -89,7 +89,6 @@ import { coloOrderCache, setColoOrderCacheForTests } from "./cells-order-cache"
 import {
   getVirtualFileHead,
   loadVirtualSourceFile,
-  type ManifestR2Bucket,
   type VirtualSourceRow,
 } from "../../../db/shared/virtual-source-store"
 

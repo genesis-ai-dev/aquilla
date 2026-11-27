@@ -6253,6 +6253,7 @@ export const fr: Catalog = {
   "workspace.sourceSelection.addToTermbase": "Ajouter à la terminologie",
   "workspace.statusBar.summary": "{total} cellules · {translated} traduites {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} non validées",
+  "workspace.statusBar.checking": "Vérification… {count} restants",
   "workspace.updateBanner.updateAvailable": "Mise à jour disponible",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} enregistrement mesuré ; {failed} n'ont pas pu être mesurés — réenregistrez-les pour corriger cela.","many":"{measured} enregistrements mesurés ; {failed} n'ont pas pu être mesurés — réenregistrez-les pour corriger cela.","other":"{measured} enregistrements mesurés ; {failed} n'ont pas pu être mesurés — réenregistrez-les pour corriger cela."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} enregistrement mesuré.","many":"{measured} enregistrements mesurés.","other":"{measured} enregistrements mesurés."},"countVar":"measured"},

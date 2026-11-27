@@ -6205,6 +6205,7 @@ export const my: Catalog = {
   "workspace.sourceSelection.addToTermbase": "ဝေါဟာရထဲ ထည့်ရန်",
   "workspace.statusBar.summary": "{total} အခန်းများ · {translated} ဘာသာပြန် {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} အတည်ပြုမည် မဟုတ်သည်",
+  "workspace.statusBar.checking": "စစ်ဆေးနေသည်… {count} ခု ကျန်သည်",
   "workspace.updateBanner.updateAvailable": "အဆင့်မြှင့်တင်မှု သိမ်းဆည်းသည်",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"အုပ်စုလူမှုအုပ်စု {measured} အုပ်စုလူမှုအုပ်စု; {failed} အုပ်စုလူမှုအုပ်စုမည်သည် — အုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စု။"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"အုပ်စုလူမှုအုပ်စု {measured} အုပ်စုလူမှုအုပ်စု။"},"countVar":"measured"},

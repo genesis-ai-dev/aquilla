@@ -7666,6 +7666,7 @@ export const ur: Catalog = {
   "workspace.statusBar.bothSummary": "{total} سطریں · {done} مکمل {pct}",
   "workspace.statusBar.textLeftBadge": "متن باقی: {count}",
   "workspace.statusBar.audioLeftBadge": "آڈیو باقی: {count}",
+  "workspace.statusBar.checking": "جانچ ہو رہی ہے… {count} باقی",
   "workspace.updateBanner.updateAvailable": "اپ ڈیٹ دستیاب",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} ریکارڈنگ ناپی گئی; {failed} نہیں ناپی جا سکی — ٹھیک کرنے کے لیے دوبارہ ریکارڈ کریں۔","other":"{measured} ریکارڈنگز ناپی گئیں; {failed} نہیں ناپی جا سکیں — ٹھیک کرنے کے لیے دوبارہ ریکارڈ کریں۔"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} ریکارڈنگ ناپی گئی۔","other":"{measured} ریکارڈنگز ناپی گئیں۔"},"countVar":"measured"},

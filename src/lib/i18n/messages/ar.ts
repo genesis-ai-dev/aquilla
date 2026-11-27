@@ -6217,6 +6217,7 @@ export const ar: Catalog = {
   "workspace.sourceSelection.addToTermbase": "إضافة إلى المصطلحات",
   "workspace.statusBar.summary": "{total} خلايا · {translated} مترجمة {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} غير موثقة",
+  "workspace.statusBar.checking": "جارٍ التحقق… المتبقي {count}",
   "workspace.updateBanner.updateAvailable": "تحديث متاح",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"zero":"تم قياس {measured} تسجيلات؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك.","one":"تم قياس {measured} تسجيل؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك.","two":"تم قياس {measured} تسجيلات؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك.","few":"تم قياس {measured} تسجيلات؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك.","many":"تم قياس {measured} تسجيلات؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك.","other":"تم قياس {measured} تسجيلات؛ لم يتمكن {failed} من القياس — أعد التسجيل لإصلاح تلك."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"zero":"تم قياس {measured} تسجيلات.","one":"تم قياس {measured} تسجيل.","two":"تم قياس {measured} تسجيلات.","few":"تم قياس {measured} تسجيلات.","many":"تم قياس {measured} تسجيلات.","other":"تم قياس {measured} تسجيلات."},"countVar":"measured"},

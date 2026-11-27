@@ -6228,6 +6228,7 @@ export const zh_Hant: Catalog = {
   "workspace.sourceSelection.addToTermbase": "加入術語",
   "workspace.statusBar.summary": "{total} 個單元格 · 已翻譯 {translated} 個 {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} 個未驗證",
+  "workspace.statusBar.checking": "正在檢查… 剩餘 {count}",
   "workspace.updateBanner.updateAvailable": "有可用的更新",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"已測量 {measured} 段錄音；有 {failed} 段無法測量 — 請重新錄製以修正。"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"已測量 {measured} 段錄音。"},"countVar":"measured"},

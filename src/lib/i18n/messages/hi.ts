@@ -7411,6 +7411,7 @@ export const hi: Catalog = {
   "workspace.sourceSelection.addToTermbase": "शब्दावली में जोड़ें",
   "workspace.statusBar.summary": "{total} कक्ष · {translated} अनुवादित {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} जाँचे नहीं",
+  "workspace.statusBar.checking": "जाँच हो रही है… {count} शेष",
   "workspace.updateBanner.updateAvailable": "अपडेट उपलब्ध",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} रिकॉर्डिंग मापी गई; {failed} मापी नहीं जा सकी — उन्हें ठीक करने के लिए फिर रिकॉर्ड करें।","other":"{measured} रिकॉर्डिंग मापी गईं; {failed} मापी नहीं जा सकीं — उन्हें ठीक करने के लिए फिर रिकॉर्ड करें।"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} रिकॉर्डिंग मापी गई।","other":"{measured} रिकॉर्डिंग मापी गईं।"},"countVar":"measured"},

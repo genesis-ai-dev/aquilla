@@ -7678,6 +7678,7 @@ export const sw: Catalog = {
   "workspace.statusBar.bothSummary": "{total} mistari · {done} imekamilika {pct}",
   "workspace.statusBar.textLeftBadge": "Maandishi yaliyobaki: {count}",
   "workspace.statusBar.audioLeftBadge": "Sauti iliyobaki: {count}",
+  "workspace.statusBar.checking": "Inakagua… {count} zimebaki",
   "workspace.updateBanner.updateAvailable": "Sasisho linapatikana",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"Rekodi {measured} imepimwa; {failed} hazikuweza kupimwa — rekodi tena ili kuzirekebisha.","other":"Rekodi {measured} zimepimwa; {failed} hazikuweza kupimwa — rekodi tena ili kuzirekebisha."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"Rekodi {measured} imepimwa.","other":"Rekodi {measured} zimepimwa."},"countVar":"measured"},

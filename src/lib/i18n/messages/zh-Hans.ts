@@ -6226,6 +6226,7 @@ export const zh_Hans: Catalog = {
   "workspace.sourceSelection.addToTermbase": "添加到术语",
   "workspace.statusBar.summary": "{total} 个单元格 · 已翻译 {translated} 个 {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} 个未验证",
+  "workspace.statusBar.checking": "正在检查… 剩余 {count}",
   "workspace.updateBanner.updateAvailable": "有可用的更新",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"已测量 {measured} 段录音；有 {failed} 段无法测量 — 请重新录制以修正。"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"已测量 {measured} 段录音。"},"countVar":"measured"},

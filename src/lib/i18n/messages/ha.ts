@@ -7675,6 +7675,7 @@ export const ha: Catalog = {
   "workspace.statusBar.bothSummary": "layuka {total} · an gama {done} {pct}",
   "workspace.statusBar.textLeftBadge": "Rubutu da ya rage: {count}",
   "workspace.statusBar.audioLeftBadge": "Sauti da ya rage: {count}",
+  "workspace.statusBar.checking": "Ana dubawa… saura {count}",
   "workspace.updateBanner.updateAvailable": "Sabuntawa tana samuwa",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"An auna naɗa {measured}; {failed} an kasa aunawa — ku sake naɗa don gyara waɗannan.","other":"An auna naɗaɗɗen {measured}; {failed} an kasa aunawa — ku sake naɗa don gyara waɗannan."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"An auna naɗa {measured}.","other":"An auna naɗaɗɗen {measured}."},"countVar":"measured"},

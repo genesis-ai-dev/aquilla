@@ -6210,6 +6210,7 @@ export const th: Catalog = {
   "workspace.sourceSelection.addToTermbase": "เพิ่มลงในคลังคำศัพท์",
   "workspace.statusBar.summary": "{total} เซลล์ · {translated} แปลแล้ว {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} ยังไม่ได้ตรวจสอบ",
+  "workspace.statusBar.checking": "กำลังตรวจสอบ… เหลือ {count}",
   "workspace.updateBanner.updateAvailable": "มีอัปเดต",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"วัดการบันทึก {measured}; ไม่สามารถวัด {failed} — บันทึกใหม่เพื่อแก้ไขสิ่งเหล่านั้น"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"วัดการบันทึก {measured}"},"countVar":"measured"},

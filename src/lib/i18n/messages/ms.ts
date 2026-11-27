@@ -6181,6 +6181,7 @@ export const ms: Catalog = {
   "workspace.sourceSelection.addToTermbase": "Tambah ke pangkalan istilah",
   "workspace.statusBar.summary": "{total} sel · {translated} diterjemahkan {pct}",
   "workspace.statusBar.unvalidatedBadge": "{count} tidak divalidasi",
+  "workspace.statusBar.checking": "Menyemak… {count} lagi",
   "workspace.updateBanner.updateAvailable": "Pembaruan tersedia",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"other":"Diukur {measured} perakaman; {failed} tidak dapat diukur — rekod semula untuk memperbaiki."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"other":"Diukur {measured} perakaman."},"countVar":"measured"},

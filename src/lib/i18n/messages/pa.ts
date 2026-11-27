@@ -7673,6 +7673,7 @@ export const pa: Catalog = {
   "workspace.statusBar.bothSummary": "{total} ਕਤਾਰਾਂ · {done} ਪੂਰੀਆਂ {pct}",
   "workspace.statusBar.textLeftBadge": "ਬਾਕੀ ਲਿਖਤ: {count}",
   "workspace.statusBar.audioLeftBadge": "ਬਾਕੀ ਆਡੀਓ: {count}",
+  "workspace.statusBar.checking": "ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ… {count} ਬਾਕੀ",
   "workspace.updateBanner.updateAvailable": "ਅੱਪਡੇਟ ਉਪਲਬਧ",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured} ਰਿਕਾਰਡਿੰਗ ਮਾਪੀ; {failed} ਮਾਪੀ ਨਹੀਂ ਜਾ ਸਕੀ — ਉਨ੍ਹਾਂ ਨੂੰ ਠੀਕ ਕਰਨ ਲਈ ਮੁੜ ਰਿਕਾਰਡ ਕਰੋ.","other":"{measured} ਰਿਕਾਰਡਿੰਗਾਂ ਮਾਪੀਆਂ; {failed} ਮਾਪੀਆਂ ਨਹੀਂ ਜਾ ਸਕੀਆਂ — ਉਨ੍ਹਾਂ ਨੂੰ ਠੀਕ ਕਰਨ ਲਈ ਮੁੜ ਰਿਕਾਰਡ ਕਰੋ."},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured} ਰਿਕਾਰਡਿੰਗ ਮਾਪੀ.","other":"{measured} ਰਿਕਾਰਡਿੰਗਾਂ ਮਾਪੀਆਂ."},"countVar":"measured"},

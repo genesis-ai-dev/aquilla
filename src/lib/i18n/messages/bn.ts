@@ -7693,6 +7693,7 @@ export const bn: Catalog = {
   "workspace.statusBar.bothSummary": "{total} লাইন · {done} শেষ {pct}",
   "workspace.statusBar.textLeftBadge": "বাকি লেখা: {count}",
   "workspace.statusBar.audioLeftBadge": "বাকি অডিও: {count}",
+  "workspace.statusBar.checking": "পরীক্ষা করা হচ্ছে… {count} বাকি",
   "workspace.updateBanner.updateAvailable": "হালনাগাদ আছে",
   "workspace.legacyMeasure.partialSuccessToast": {"forms":{"one":"{measured}টি রেকর্ডিং মাপা হয়েছে; {failed}টি মাপা যায়নি — ঠিক করতে আবার রেকর্ড করুন।","other":"{measured}টি রেকর্ডিং মাপা হয়েছে; {failed}টি মাপা যায়নি — ঠিক করতে আবার রেকর্ড করুন।"},"countVar":"measured"},
   "workspace.legacyMeasure.successToast": {"forms":{"one":"{measured}টি রেকর্ডিং মাপা হয়েছে।","other":"{measured}টি রেকর্ডিং মাপা হয়েছে।"},"countVar":"measured"},

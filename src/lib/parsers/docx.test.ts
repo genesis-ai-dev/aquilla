@@ -325,6 +325,120 @@ describe("extractDocxStrings", () => {
       expect(bloated.map((c) => c.original)).toEqual(clean.map((c) => c.original))
     })
 
+    it("reflows stacked line frames into sentences and closes a line-break hyphen", () => {
+      const documentXml = (bodyXml: string) =>
+        `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${bodyXml}</w:body></w:document>`
+      const line = (text: string, x: number, y: number, rPr = "") =>
+        `<w:p><w:pPr><w:framePr w:w="7000" w:h="270" w:hRule="exact" w:hAnchor="page" w:vAnchor="page" w:x="${x}" w:y="${y}" w:wrap="none"/></w:pPr><w:r>${rPr}<w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+      const bold = `<w:rPr><w:b/></w:rPr>`
+      const size = (halfPoints: number) => `<w:rPr><w:sz w:val="${halfPoints}"/></w:rPr>`
+      const plain = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`
+      const pageBreak = `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`
+
+      const quote = [
+        "You hold in your hands a smorgasbord of theological delights. Daily Doctrine",
+        "is at once a daily devotional, a mini systematic theology, and a reference tool. It",
+        "is deep but delightful, profound but practical, comprehensive but concise, and",
+        "accurate but accessible. May the Lord use this manual to raise up more systematic",
+        "theologians in our pews!",
+      ].map((text, i) => line(text, 1740, 1880 + i * 260)).join("")
+
+      const cases: { body: string; expected: string[] }[] = [
+        {
+          body: quote,
+          expected: [
+            "You hold in your hands a smorgasbord of theological delights.",
+            "Daily Doctrine is at once a daily devotional, a mini systematic theology, and a reference tool.",
+            "It is deep but delightful, profound but practical, comprehensive but concise, and accurate but accessible.",
+            "May the Lord use this manual to raise up more systematic theologians in our pews!",
+          ],
+        },
+        {
+          body: line("systematic theol-", 1740, 1000) + line("ogy of the church.", 1740, 1260),
+          expected: ["systematic theology of the church."],
+        },
+        {
+          body: line("human effort and self-", 1740, 1000) + line("salvation was not of faith.", 1740, 1260),
+          expected: ["human effort and self-salvation was not of faith."],
+        },
+        {
+          body: line("him as a twelve-", 1740, 1000) + line("year-old in the temple.", 1740, 1260),
+          expected: ["him as a twelve-year-old in the temple."],
+        },
+        {
+          body: line("See Jer. 23 and then stop. Next", 1740, 1000) + line("sentence here.", 1740, 1260),
+          expected: ["See Jer. 23 and then stop.", "Next sentence here."],
+        },
+        {
+          body: line("A. W. Tozer wrote this. Then", 1740, 1000) + line("more follows.", 1740, 1260),
+          expected: ["A. W. Tozer wrote this.", "Then more follows."],
+        },
+        {
+          body: line("First paragraph.", 1740, 1000) + line("Second paragraph.", 1740, 2200),
+          expected: ["First paragraph.", "Second paragraph."],
+        },
+        {
+          body: line("this book can be help-", 1940, 10200) + line("ful for all Christians.", 1740, 10460),
+          expected: ["this book can be helpful for all Christians."],
+        },
+        {
+          body: line("Left column.", 1740, 1000) + line("Right column.", 5200, 1260),
+          expected: ["Left column.", "Right column."],
+        },
+        {
+          body: plain("First ordinary paragraph.") + plain("Second ordinary paragraph."),
+          expected: ["First ordinary paragraph.", "Second ordinary paragraph."],
+        },
+        {
+          // The byline is stored after both quotes, but it sits between them on the page.
+          body: [
+            line("First endorsement.", 1740, 1880),
+            line("Second endorsement.", 1740, 4200),
+            line("Joel R. Beeke, attribution.", 2100, 3180),
+          ].join(""),
+          expected: [
+            "First endorsement.",
+            "Joel R. Beeke, attribution.",
+            "Second endorsement.",
+          ],
+        },
+        {
+          body: line("End of page one.", 1740, 11000) + pageBreak + line("Start of page two.", 1740, 1880),
+          expected: ["End of page one.", "Start of page two."],
+        },
+        {
+          // A bold subheading sits one line-step above the body and has no style.
+          body: line("Choose Your Own Adventure", 1560, 2640, bold)
+            + line("There is an old comedy skit.", 1560, 2920, `<w:rPr><w:b w:val="0"/></w:rPr>`),
+          expected: ["Choose Your Own Adventure", "There is an old comedy skit."],
+        },
+        {
+          body: line("Daily Doctrine is a", 1560, 2640, bold) + line("daily devotional.", 1560, 2920, bold),
+          expected: ["Daily Doctrine is a daily devotional."],
+        },
+        {
+          // Section title is 18pt; the body under it is 10pt. Same column, one line-step.
+          body: line("Aseity", 1560, 5953, size(36)) + line("God is independent of everything he made.", 1560, 6400, size(20)),
+          expected: ["Aseity", "God is independent of everything he made."],
+        },
+      ]
+
+      for (const entry of cases) {
+        const cells = docxPartsToStrings({ documentXml: documentXml(entry.body) })
+        expect(cells.map((cell) => cell.original)).toEqual(entry.expected)
+      }
+
+      const quoteCells = docxPartsToStrings({ documentXml: documentXml(quote) })
+      expect(quoteCells[0].paragraphStart).toBe(true)
+      expect(quoteCells[1].paragraphStart).toBeUndefined()
+      expect(quoteCells.every((cell) => cell.group === quoteCells[0].group)).toBe(true)
+
+      const asParagraph = docxPartsToStrings({ documentXml: documentXml(quote) }, { cellUnit: "paragraph" })
+      expect(asParagraph).toHaveLength(1)
+      expect(asParagraph[0].original.startsWith("You hold in your hands")).toBe(true)
+      expect(asParagraph[0].original.endsWith("theologians in our pews!")).toBe(true)
+    })
+
     it("refuses a word/document.xml past the tree-size ceiling with a message naming the size and the fix", () => {
       // 64 M chars is the ceiling; a tree for this would be ~1.2 GB of heap.
       const oversized = documentXml(`<w:p><w:r><w:t>${"a".repeat(65 * 1024 * 1024)}</w:t></w:r></w:p>`)

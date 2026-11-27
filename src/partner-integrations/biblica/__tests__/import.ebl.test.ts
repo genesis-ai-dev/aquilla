@@ -160,9 +160,9 @@ describe("EBL import", () => {
     // page as two disjoint ranges of the file.
     const runs = keys.filter((key, index) => key !== keys[index - 1])
     expect(new Set(runs).size).toBe(runs.length)
-    // The loose frames the package lists ahead of the guide, then the outline.
+    // The badge sorts ahead of the guide and the summary sorts after it.
     expect(runs[0]).toBe("ebl:boxes:1")
-    expect(runs.at(-1)).toBe("ebl:section:5:words-you-need-to-know-list")
+    expect(runs.at(-1)).toBe("ebl:boxes:2")
   })
 
   it("does not let a lesson's timing badge open a division of its own", async () => {
@@ -174,7 +174,7 @@ describe("EBL import", () => {
     // Set in the same level-1 style a lesson tag uses, but a frame of its own.
     expect(milestoneOf(cells, SAMPLE_EBL.timingBadge)).toMatchObject({
       key: "ebl:boxes:1",
-      label: "Boxes and tables",
+      label: "Boxes and tables 1",
     })
     const labels = cells.map((cell) => milestoneOf(cells, cell.value)?.label)
     expect(labels).not.toContain(SAMPLE_EBL.timingBadge)

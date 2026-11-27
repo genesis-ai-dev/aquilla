@@ -732,6 +732,14 @@ export interface TimelineEditorProps {
    */
   filmVolumeDb?: number
   /**
+   * Sam, Nov 27: with Split into milestones on, where the open milestone
+   * starts on the film's own clock (the workspace's `milestoneWindowStart`,
+   * lib/timeline/sequence-timeline). Following the recordings the milestone
+   * is laid out from it; in both timings the view and the playhead (and so
+   * the film) go there when a milestone opens. 0 or absent: the whole file.
+   */
+  windowStartSec?: number
+  /**
    * AQU-2664 (boards 71, 74): Even out. `states` is each track's ≈ (only the
    * tracks holding takes are in it); `open` opens the one Even out window on
    * these tracks. Absent for anyone who may not even takes out.
@@ -1438,6 +1446,7 @@ export function TimelineEditor({
   onSetTrackColor,
   onSetTrackVolume,
   filmVolumeDb = 0,
+  windowStartSec = 0,
   evenOut,
   trackEditing,
 }: TimelineEditorProps) {
@@ -2340,9 +2349,12 @@ export function TimelineEditor({
   // drawing, the Timing menu and the playback agree about every line.
   // Keyed on the answer, not on the tracks: renaming or recolouring a track
   // makes a new tracks array, and must not lay the whole file out again.
-  const programmeTracksKey = JSON.stringify(programmeTrackSlots(tracks))
+  // Sam, Nov 27: following the recordings an open milestone is laid out from
+  // where it sits in the whole file (`windowStartSec`), as the transport lays it.
+  const programmeOriginSec = audioFirst && windowStartSec > 0 ? windowStartSec : 0
+  const programmeTracksKey = JSON.stringify({ ...programmeTrackSlots(tracks), ...(programmeOriginSec > 0 ? { originSec: programmeOriginSec } : {}) })
   const programmeTracks = useMemo(
-    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots> & { originSec?: number },
     [programmeTracksKey],
   )
   // Group D (Nov 5): a file with an audio cue file keeps its takes on the cue
@@ -4384,6 +4396,21 @@ export function TimelineEditor({
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
+
+  // Sam, Nov 27: a milestone opened (Split into milestones on) brings the
+  // view and the playhead to where it starts on the film's clock, so the film
+  // is there too: the timeline is a window onto the film. Once per new start;
+  // never while something plays (the transport is moving the head), and the
+  // whole file (0) leaves the view where it is.
+  const windowShownRef = useRef(0)
+  useEffect(() => {
+    if (windowStartSec === windowShownRef.current) return
+    windowShownRef.current = windowStartSec
+    if (windowStartSec <= 0 || queueActive || videoPlaying) return
+    scrollTrackTo(Math.max(0, secToPx(windowStartSec, pxPerSec)))
+    seekTo(windowStartSec)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per new window start
+  }, [windowStartSec])
 
   // 2026-08-07: publish the timeline's presence + chip selection to the media
   // cursor store — the table's rows highlight the pointed-at cell through it.

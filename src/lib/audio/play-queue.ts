@@ -11,7 +11,7 @@ import { activeTargetForCell, missingTakeKey, resolveTargetAudio, resolveTargetP
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type BuildProgrammeOptions, type Programme, type ProgrammeFilm, type ProgrammePiece, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type ProgrammeTrackOptions, type Programme, type ProgrammeFilm, type ProgrammePiece, type ProgrammeSlot } from "@/lib/timeline/programme"
 import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, lineTailAt, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -770,6 +770,24 @@ export function setQueueLayerTrackSlots(slots: readonly string[]): void {
   if (timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)
 }
 
+/**
+ * Sam, Nov 27: with Split into milestones on, where the milestone's first
+ * line sits on the film's clock, following the recordings (the workspace's
+ * `milestoneWindowStart`, lib/timeline/sequence-timeline). The programme is
+ * laid out from it, so the queue's clock, the bar and a linked film following
+ * it read the film's own time, and the bar's span starts there. 0: the whole
+ * file, laid out from 0:00 as always. A change re-flows a programme that is
+ * playing, as a change of layers does.
+ */
+let programmeOriginSec = 0
+
+export function setQueueProgrammeOrigin(sec: number): void {
+  const next = Number.isFinite(sec) && sec > 0 ? sec : 0
+  if (next === programmeOriginSec) return
+  programmeOriginSec = next
+  if (timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)
+}
+
 /** Three slots per sounding track. With one track this is the 3 that shipped;
  *  with N it is what stops N tracks evicting each other on every line. */
 function overlayCapacity(): number {
@@ -1331,6 +1349,11 @@ function progStateCell(): { cellIndex: number; cellId: string } {
   return { cellIndex: idx, cellId: slot?.cellId ?? "" }
 }
 
+/** Sam, Nov 27: a run off the programme has no milestone window on the bar. */
+function progForgetWindowStart(): void {
+  if (progress.startSec !== undefined) setProgress({ startSec: undefined })
+}
+
 /** Rebuild the layout from the live cells. Cheap and pure — nothing is stored,
  *  so a trim or a new take just re-flows on the next call. */
 function progRebuild(): void {
@@ -1341,6 +1364,7 @@ function progRebuild(): void {
     progUnderLayers = new Set()
     progLayers = NO_LAYERS
     progFilmResolve()
+    progForgetWindowStart()
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
@@ -1366,6 +1390,7 @@ function progRebuild(): void {
   const played = playedProgramme(ctx.cells, {
     layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
     layerTrackSlots,
+    originSec: programmeOriginSec,
   })
   if (!played) {
     programme = null
@@ -1373,6 +1398,7 @@ function progRebuild(): void {
     progUnderLayers = new Set()
     progLayers = NO_LAYERS
     progFilmResolve()
+    progForgetWindowStart()
     return
   }
   programme = played.programme
@@ -1381,7 +1407,8 @@ function progRebuild(): void {
   progLayers = buildLayerSchedule(programme, ctx.cells)
   // AQU-2253 (Sam, Nov 9): …or as long as a linked film that outlasts the lines.
   progFilmResolve()
-  setProgress({ duration: progEndSec(programme) })
+  // Sam, Nov 27: the bar covers the milestone's window, from its start.
+  setProgress({ duration: progEndSec(programme), startSec: programmeOriginSec > 0 ? programmeOriginSec : undefined })
 }
 
 /** A verse with something to hear: an original or a take the programme can
@@ -5566,7 +5593,7 @@ export interface PlaybackAsk {
   freeTiming: boolean
   /** The added tracks laid in with the lines (the workspace's
    *  `programmeTracks`); none when absent. */
-  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  tracks?: ProgrammeTrackOptions
   /** The workspace's word about the linked film (`useProgrammeFilm`). */
   film: ProgrammeFilm | null
   /** "Skip lines with nothing to play" (`useSkipSilentLinesPref`). */
@@ -5578,7 +5605,11 @@ export interface PlaybackAsk {
 export function queuePlaybackAsk(): PlaybackAsk {
   return {
     freeTiming: timingMode === "audioFirst",
-    tracks: { layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)), layerTrackSlots },
+    tracks: {
+      layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
+      layerTrackSlots,
+      ...(programmeOriginSec > 0 ? { originSec: programmeOriginSec } : {}),
+    },
     film: progFilm,
     skipSilent: getSkipSilentLinesPref(),
   }

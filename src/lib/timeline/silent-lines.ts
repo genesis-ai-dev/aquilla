@@ -37,7 +37,7 @@ import { isHiddenCell } from "@/lib/cells/hidden"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { targetChipGeom } from "./lane-timing"
-import { filmOverRun, playedProgramme, slotHasNothingToPlay, type BuildProgrammeOptions, type ProgrammeFilm } from "./programme"
+import { filmOverRun, playedProgramme, slotHasNothingToPlay, type ProgrammeTrackOptions, type ProgrammeFilm } from "./programme"
 import { isDefaultTrackSlot, RECORDING_SLOT } from "./track-slots"
 import { setVirtualClockJumps, type ClockJump } from "./virtual-clock"
 
@@ -167,7 +167,7 @@ export interface SkipSilentLinesScope {
   /** AQU-2252: following the recordings, the file's added tracks and which of
    *  them are layers — what the queue lays every line out with, so a line
    *  only a take on another track sounds in counts as heard. */
-  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  tracks?: ProgrammeTrackOptions
   /** AQU-2253 (Sam, Nov 9): following the recordings, the linked film the
    *  workspace tells the queue about (`setProgrammeFilm`): a line it plays
    *  behind has it to play, so the setting changes nothing there. */

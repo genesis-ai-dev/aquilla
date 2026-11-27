@@ -32,7 +32,7 @@ import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { linesPlaybackStopsAt, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
-import { filmOverRun, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { filmOverRun, type ProgrammeTrackOptions } from "@/lib/timeline/programme"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
@@ -115,7 +115,7 @@ interface Props {
    *  lines: what the strip is handed (`freeTiming`, `programmeTracks`), so
    *  the "Play selected" count is the queue's answer for this file. */
   freeTiming?: boolean
-  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  programmeTracks?: ProgrammeTrackOptions
   /**
    * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
    * the text actions (AI translate, validate text, harmonize) and the voices

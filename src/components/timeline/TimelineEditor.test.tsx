@@ -1216,6 +1216,35 @@ describe("TimelineEditor", () => {
       })
     })
 
+    // Sam, Nov 27: with Split into milestones on, opening a milestone brings
+    // the playhead (and so the film) to where it starts on the film's clock.
+    describe("a milestone's window onto the film", () => {
+      const film = (over: Partial<React.ComponentProps<typeof TimelineEditor>> = {}) => (
+        <TimelineEditor
+          fileId="filmwin" coreMediaUrl="https://cdn/linked.webm" editable
+          cells={[cell({ id: "s3", original: "Three", translated: "Tres", medium: "text", startTime: 750, endTime: 754 })]}
+          tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+          onRetimeSubtitle={() => {}}
+          {...over}
+        />
+      )
+      it("seeks to the window's start when a milestone opens, in either timing", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        for (const timingMode of ["audioFirst", "dubbing"] as const) {
+          const onSeekToTime = vi.fn()
+          const view = render(film({ timingMode, windowStartSec: 750, onSeekToTime }))
+          expect(onSeekToTime).toHaveBeenCalledWith(750)
+          view.unmount()
+        }
+      })
+      it("the whole file (no window) leaves the playhead alone", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        const onSeekToTime = vi.fn()
+        render(film({ timingMode: "audioFirst", onSeekToTime }))
+        expect(onSeekToTime).not.toHaveBeenCalled()
+      })
+    })
+
     it("saves the fader once, on Option-click, and only when it changed", () => {
       const onSetTrackVolume = vi.fn()
       const tracks = deriveTracksForFile({ trackOverrides: { "target-audio": { volumeDb: -9 } } })

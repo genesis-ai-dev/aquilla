@@ -60,7 +60,7 @@ import { probeDurationMsSafe } from "@/lib/import"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
-import { RecordingVideoSurface } from "./RecordingVideoSurface"
+import { filmStartForLine, RecordingVideoSurface } from "./RecordingVideoSurface"
 import {
   setRecordingVideoCollapsed,
   useRecordingVideoCollapsed,
@@ -175,6 +175,10 @@ interface Props {
    * audio cues.
    */
   filmFileId?: string | null
+  /** Sam, Nov 27: with Split into milestones on, where the open milestone
+   *  starts on the film's clock; a line with no times yet shows the film
+   *  there (`filmStartForLine`). 0 or absent: the whole file. */
+  filmWindowStartSec?: number
   /**
    * Media redesign slice 2: the line's language delivers audio and no text.
    * The performer reads the SOURCE (gap 8) — the cue's own words on a dubbing
@@ -412,7 +416,7 @@ export type AudioRecordingModalProps = Props
 
 export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
-  onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onEditText, onClose,
+  onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, filmWindowStartSec = 0, onEditText, onClose,
   deliversAudioOnly = false,
 }: Props) {
   const t = useT()
@@ -1878,7 +1882,7 @@ export function AudioRecordingModal({
           <div className="relative hidden w-[60%] shrink-0 overflow-hidden rounded-l-3xl bg-black sm:block">
             <RecordingVideoSurface
               src={filmUrl}
-              startSec={activeCell.startTime ?? null}
+              startSec={filmStartForLine(activeCell.startTime, filmWindowStartSec)}
               // The picture is already rolling by now — the lead-in below
               // started it at the top of the countdown and brought it to this
               // line's first frame at zero. `running` only keeps it going, and

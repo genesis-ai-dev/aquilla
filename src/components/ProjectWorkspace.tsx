@@ -1,5 +1,6 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useLatchedLines } from "@/hooks/useLatchedLines"
+import { useMilestoneWindowStart } from "@/hooks/useMilestoneWindowStart"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -237,7 +238,7 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost as CloneVoiceModalHostImpl } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  setQueueTargetSlots, setQueueLayerTrackSlots, setQueueProgrammeOrigin, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
@@ -17109,9 +17110,10 @@ export function ProjectWorkspace() {
   // film, a film that could not be loaded.
   // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, Play
   // ends at the milestone's last line and the film does not run on: the
-  // milestone is laid out from 0:00, so the film's rest would play over an
-  // empty timeline. (Its picture is not yet at the milestone's place in the
-  // film: the programme clock starts at 0:00 for any list of lines.)
+  // film's rest would play over an empty timeline. (Sam, Nov 27: the
+  // milestone is a window onto the film's clock, laid out from where it
+  // starts, so the picture is at the milestone's place in the film;
+  // `milestoneWindowStart` below.)
   const filmBehind = useMemo(
     () => linkedFilmBehindLines({
       kind: filmKind,
@@ -18980,10 +18982,40 @@ export function ProjectWorkspace() {
   // Keyed on the answer (a renamed track is a new tracks array), so the play
   // strip doesn't lay the file out again for a rename.
   const programmeTracksKey = JSON.stringify(programmeTrackSlots(serverTimelineTracks))
-  const programmeTracks = useMemo(
+  const fileProgrammeTracks = useMemo(
     () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
     [programmeTracksKey],
   )
+  // Sam, Nov 27: with Split into milestones on, the timeline is a window onto
+  // the film's own clock, starting where the milestone starts in the whole
+  // file (hooks/useMilestoneWindowStart). Following the recordings the
+  // milestone is laid out from there (`originSec`), so the ruler, the queue's
+  // clock, the bar and a linked film following it all read film time. The
+  // split off: 0:00, no change.
+  const wholePlaybackCells = useMemo(
+    () => recordingsLines(timelineLines, audioCueCells, timingMode === "audioFirst"),
+    [timelineLines, audioCueCells, timingMode],
+  )
+  const milestoneWindowStart = useMilestoneWindowStart({
+    fileId: activeFileId ?? null,
+    partShown: showsPartOfFile(timelineCells, timelineLines),
+    milestoneKey: timelineMilestoneKey,
+    followsRecordings: timingMode === "audioFirst",
+    tracks: fileProgrammeTracks,
+    shown: playbackCells,
+    whole: wholePlaybackCells,
+  })
+  // Following the recordings the milestone is laid out from its window's
+  // start; everything handed these tracks lays it out the same way.
+  const programmeOriginSec = timingMode === "audioFirst" ? milestoneWindowStart : 0
+  const programmeTracks = useMemo(
+    () => (programmeOriginSec > 0 ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
+    [fileProgrammeTracks, programmeOriginSec],
+  )
+  useEffect(() => {
+    setQueueProgrammeOrigin(programmeOriginSec)
+  }, [programmeOriginSec])
+  useEffect(() => () => setQueueProgrammeOrigin(0), [])
   // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
   // into its lines' pieces, laid out by the programme the timeline draws and
   // the queue plays — the same lines and tracks — so the Film panel shows the
@@ -19014,7 +19046,7 @@ export function ProjectWorkspace() {
     const cells = audioCueSibling && where.fileId === audioCueSibling.id
       ? (audioCueCells ?? [])
       : where.fileId === activeFileId ? audioMergedCells : []
-    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], programmeTracks).flatMap(({ cellId, audioId }) => {
+    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], fileProgrammeTracks).flatMap(({ cellId, audioId }) => {
       const att = cells.find((c) => c.id === cellId)?.attachments?.[audioId]
       if (!att) return []
       const targetOffsetMs = att.targetOffsetMs ?? null
@@ -21726,6 +21758,7 @@ export function ProjectWorkspace() {
                     // with maintainers.
                     onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
                     filmVolumeDb={filmVolumeDb}
+                    windowStartSec={milestoneWindowStart}
                     // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
                     // window, for anyone who may even takes out.
                     evenOut={timelineEvenOut}
@@ -22632,6 +22665,8 @@ export function ProjectWorkspace() {
           // better"): this pane resolves the film from the FILE and never
           // consults the mode, so an audio-first file keeps its picture.
           filmFileId={activeFileId}
+          // Sam, Nov 27: the open milestone's window, for a line with no times yet.
+          filmWindowStartSec={milestoneWindowStart}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

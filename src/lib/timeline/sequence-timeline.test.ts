@@ -6,6 +6,7 @@ import {
   chapterOfCell,
   hasRealChapters,
   heardLinesOfMilestone,
+  milestoneWindowStartSec,
   recorderLinesFor,
   showsPartOfFile,
   nextPlayableChapter,
@@ -328,5 +329,46 @@ describe("recorderLinesFor", () => {
   it("closed: the cut", () => {
     const cut = [whole[0]]
     expect(recorderLinesFor(cut, whole, plain, null)).toBe(cut)
+  })
+})
+
+// Sam, Nov 27: with Split into milestones on, the timeline is a window onto
+// the film's own clock. It starts where the milestone starts; a milestone
+// whose lines have no times yet starts where the one before it ended.
+describe("milestoneWindowStartSec", () => {
+  type L = { id: string; startTime?: number | null; endTime?: number | null }
+  const at = (id: string, start?: number, end?: number): L => ({ id, startTime: start ?? null, endTime: end ?? null })
+  const fileSpan = (l: L) =>
+    typeof l.startTime === "number" && typeof l.endTime === "number" ? { start: l.startTime, end: l.endTime } : null
+  const whole = [at("a", 0, 4), at("b", 4, 9), at("c", 750, 760), at("d", 760, 1090), at("e"), at("f")]
+
+  it("the whole file on the timeline starts at 0:00", () => {
+    expect(milestoneWindowStartSec(whole, whole, fileSpan)).toBe(0)
+  })
+
+  it("a milestone starts at its earliest line", () => {
+    expect(milestoneWindowStartSec([whole[3], whole[2]], whole, fileSpan)).toBe(750)
+  })
+
+  it("one with no times yet starts where the lines before it ended, never earlier", () => {
+    expect(milestoneWindowStartSec([whole[4], whole[5]], whole, fileSpan)).toBe(1090)
+  })
+
+  it("with nothing timed before it either, 0:00", () => {
+    const untimed = [at("x"), at("y")]
+    expect(milestoneWindowStartSec([untimed[1]], untimed, fileSpan)).toBe(0)
+    expect(milestoneWindowStartSec([], whole, fileSpan)).toBe(0)
+  })
+
+  it("following the recordings, from the whole file's layout: the stand-ins keep it moving forward", () => {
+    const book = [line("v1"), line("v2"), line("v3"), line("v4")]
+    const { programme } = layOutProgramme(book)
+    const slotSpan = (c: CellData) => {
+      const s = programme.byCellId.get(c.id)
+      return s ? { start: s.startSec, end: s.startSec + s.slotLenSec } : null
+    }
+    const start = milestoneWindowStartSec(book.slice(2), book, slotSpan)
+    expect(start).toBeGreaterThan(0)
+    expect(start).toBe(programme.byCellId.get("v3")!.startSec)
   })
 })

@@ -16,6 +16,7 @@ import {
   pauseQueue,
   resumeQueue,
   seekQueueToTime,
+  setQueueProgrammeOrigin,
   setQueueTimingMode,
   skipForward,
   startQueue,
@@ -1157,5 +1158,35 @@ describe("audio-first transport — the film voices the original (AQU-2253)", ()
     } finally {
       setProgrammeSourceVoicedByFilm(false)
     }
+  })
+})
+
+// Sam, Nov 27: with Split into milestones on, the milestone is laid out from
+// where it starts on the film's clock (`setQueueProgrammeOrigin`), so the
+// clock and the bar read film time, and the bar's span starts there.
+describe("audio-first transport — a milestone laid out from its place in the film", () => {
+  afterEach(() => setQueueProgrammeOrigin(0))
+
+  it("starts the clock at the milestone's start and the bar covers its window", async () => {
+    const cells = [verse("v3", 750, 756, 11_000), verse("v4", 756, 766, 4_000)]
+    setQueueTimingMode("audioFirst")
+    setQueueProgrammeOrigin(750)
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(750, 6)
+    expect(getQueueProgress().startSec).toBe(750)
+    expect(getQueueProgress().duration).toBe(750 + 11 + 4)
+    dubEl("v3")!.tick(8)
+    expect(getQueueProgress().currentTime).toBeCloseTo(758, 6)
+  })
+
+  it("the whole file is laid out from 0:00, with no span start", async () => {
+    const cells = [verse("v1", 0, 6, 11_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 6)
+    expect(getQueueProgress().startSec).toBeUndefined()
   })
 })

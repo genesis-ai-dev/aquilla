@@ -99,15 +99,25 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # `pnpm lint` runs ESLint with an 8 GiB heap (see the `lint` script in
-      # package.json). V8's default ~4 GiB ceiling ran out on 2026-10-20 (AQU-2084):
-      # the job died with "JavaScript heap out of memory", exit 134, on every PR.
-      # ubuntu-latest for this public repo has 16 GB, so 8 GiB leaves the runner room.
-      - run: pnpm lint
-      - run: pnpm run i18n:check
+      # The three checks that take seconds run before ESLint, which takes 6 to
+      # 11 minutes. A step that fails stops the job, so in the old order (ESLint
+      # first) a failed ESLint run hid the secret scan's answer, and an i18n
+      # failure was reported eight minutes after it was known (AQU-2792).
       - run: pnpm run scan:secrets
+      # The branch's own English: context notes, retired words, catalog keys
+      # English lacks. Not whether it is translated yet: i18n-fill.yml translates
+      # after the merge, and `pnpm i18n:coverage` is the check it runs.
+      - run: pnpm run i18n:check
       # Doc pins: every `path::symbol` claim in the docs still resolves (AQU-2387).
       - run: pnpm run check:doc-pins
+      # `pnpm lint` runs ESLint with a 12 GiB heap cap (see the `lint` script in
+      # package.json). V8's default ~4 GiB ceiling ran out on 2026-10-20 (AQU-2084):
+      # the job died with "JavaScript heap out of memory", exit 134, on every PR.
+      # The cap was 8 GiB until 2026-11-27, when ESLint failed the same way under
+      # a 6 GiB cap and peaked at 7.05 GiB under a 7 GiB one (AQU-2792). The cap
+      # is a ceiling, not an allocation; ubuntu-latest for this public repo has
+      # 16 GB.
+      - run: pnpm lint
 
   typecheck:
     if: github.event_name == 'workflow_dispatch'

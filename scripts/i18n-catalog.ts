@@ -9,6 +9,17 @@
  *     interface's word list (AQU-2261, src/lib/i18n/retired-terms.ts), naming
  *     the word to write instead.
  *
+ *     These are rules about a branch's own English, so this is the command a
+ *     pull request runs (CI's lint job). It does not fail on a string that is
+ *     not translated yet: it says how many are waiting, and the fill job
+ *     translates them once the branch is on dev (AQU-2792).
+ *
+ *   pnpm i18n:coverage
+ *     The translation ratchet (AQU-2740): fails on a gap the baseline does not
+ *     allow, and on a baseline entry that is no longer a gap. The fill job
+ *     (`pnpm i18n:fill`, .github/workflows/i18n-fill.yml) runs it after it has
+ *     translated; it is also the command that answers "is dev fully translated".
+ *
  *   pnpm i18n:export [outDir]              (default: i18n-export/)
  *     Write the files a translator or the translation agent needs:
  *       en.context.json      — the context sidecar, in the AQU-832 interchange shape
@@ -53,7 +64,7 @@
  *     a format). `--rebuild` allows every current gap — the one way to grow the
  *     baseline wholesale, so it belongs in a commit of its own that says why.
  *
- * `check` fails on a gap the baseline does not allow, and on a baseline entry
+ * `coverage` fails on a gap the baseline does not allow, and on a baseline entry
  * that is no longer a gap, so the baseline only shrinks.
  *
  * See docs/I18N-CONTEXT-CATALOG.md.
@@ -123,15 +134,32 @@ function runCheck(): void {
     )
     for (const issue of retired) console.error(`  • ${issue}`)
   }
-  const coverage = coverageIssues()
-  if (coverage.length > 0) {
-    if (issues.length > 0 || retired.length > 0) console.error("")
-    for (const line of coverage) console.error(line)
-  }
-  if (issues.length > 0 || retired.length > 0 || coverage.length > 0) process.exit(1)
+  if (issues.length > 0 || retired.length > 0) process.exit(1)
   console.log(
-    `i18n-catalog: context complete — ${MESSAGE_KEYS.length} message key(s) covered, ` +
-      `no retired words, every locale translated outside the baseline.`,
+    `i18n-catalog: context complete — ${MESSAGE_KEYS.length} message key(s) covered, no retired words.`,
+  )
+  // AQU-2792: a translation gap is reported here and failed nowhere on a pull
+  // request. While it failed, one branch that merged without its translations
+  // turned this check red on every other open branch.
+  const waiting = coverageViolations(allLocaleGaps(CATALOGS, loadSourceHashes()), loadBaseline())
+  if (waiting.length > 0) {
+    const keys = new Set(waiting.map((v) => v.key))
+    console.log(
+      `i18n-catalog: ${keys.size} English message(s) are waiting for a translation ` +
+        `(${waiting.length} locale gap(s)). The fill job translates them once they are on dev ` +
+        `(docs/I18N-CONTEXT-CATALOG.md → "Translation coverage"). Nothing to do on this branch.`,
+    )
+  }
+}
+
+function runCoverage(): void {
+  const lines = coverageIssues()
+  if (lines.length > 0) {
+    for (const line of lines) console.error(line)
+    process.exit(1)
+  }
+  console.log(
+    `i18n-catalog: every locale is translated outside the baseline, and the baseline holds only current gaps.`,
   )
 }
 
@@ -149,8 +177,8 @@ function coverageIssues(): string[] {
     const keys = new Set(violations.map((v) => v.key))
     lines.push(
       `i18n-catalog: ${keys.size} English message(s) are not translated in every locale ` +
-        `(${violations.length} locale gap(s)). New or reworded English ships with its ` +
-        `translations (docs/I18N-CONTEXT-CATALOG.md → "Translating a branch's new strings"):\n`,
+        `(${violations.length} locale gap(s)). The fill job translates new or reworded English ` +
+        `after each merge to dev (docs/I18N-CONTEXT-CATALOG.md → "Translation coverage"):\n`,
     )
     const byKey = new Map<string, string[]>()
     for (const v of violations) {
@@ -161,7 +189,8 @@ function coverageIssues(): string[] {
     }
     if (byKey.size > LIST_LIMIT) lines.push(`  … and ${byKey.size - LIST_LIMIT} more key(s)`)
     lines.push(
-      `\n  Fix: pnpm i18n:todo --new, translate the values in i18n-todo/<locale>.todo.json, ` +
+      `\n  Fix: run the fill (gh workflow run i18n-fill.yml, or pnpm i18n:fill with a model key). ` +
+        `By hand: pnpm i18n:todo --new, translate the values in i18n-todo/<locale>.todo.json, ` +
         `then pnpm i18n:import-todo.` +
         `\n  A string that must read the same in every language: pnpm i18n:baseline --allow <key>.`,
     )
@@ -354,6 +383,9 @@ switch (command) {
   case "check":
     runCheck()
     break
+  case "coverage":
+    runCoverage()
+    break
   case "export":
     runExport(rest[0])
     break
@@ -370,5 +402,5 @@ switch (command) {
     runBaseline(rest)
     break
   default:
-    fail(`unknown command "${command ?? ""}" — expected check | export | import | import-todo | baseline`)
+    fail(`unknown command "${command ?? ""}" — expected check | coverage | export | import | import-todo | baseline`)
 }

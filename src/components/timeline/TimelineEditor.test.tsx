@@ -1216,13 +1216,19 @@ describe("TimelineEditor", () => {
       })
     })
 
-    // Sam, Nov 27: with Split into milestones on, opening a milestone brings
-    // the playhead (and so the film) to where it starts on the film's clock.
+    // Sam, Nov 27: with Split into milestones on, the timeline is a window
+    // onto the film's clock: opening a milestone brings the playhead (and so
+    // the film) to where it starts, and the timeline scrolls over the
+    // milestone's stretch of film only, with real film times on its ruler.
     describe("a milestone's window onto the film", () => {
+      const PX = 38
       const film = (over: Partial<React.ComponentProps<typeof TimelineEditor>> = {}) => (
         <TimelineEditor
           fileId="filmwin" coreMediaUrl="https://cdn/linked.webm" editable
-          cells={[cell({ id: "s3", original: "Three", translated: "Tres", medium: "text", startTime: 750, endTime: 754 })]}
+          cells={[
+            cell({ id: "s3", original: "Three", translated: "Tres", medium: "text", startTime: 750, endTime: 754 }),
+            cell({ id: "s4", original: "Four", translated: "Cuatro", medium: "text", startTime: 760, endTime: 770 }),
+          ]}
           tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
           onRetimeSubtitle={() => {}}
           {...over}
@@ -1232,16 +1238,40 @@ describe("TimelineEditor", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
         for (const timingMode of ["audioFirst", "dubbing"] as const) {
           const onSeekToTime = vi.fn()
-          const view = render(film({ timingMode, windowStartSec: 750, onSeekToTime }))
+          const view = render(film({ timingMode, milestoneWindow: { startSec: 750 }, onSeekToTime }))
           expect(onSeekToTime).toHaveBeenCalledWith(750)
           view.unmount()
         }
       })
-      it("the whole file (no window) leaves the playhead alone", () => {
+      it("the whole file (no window) leaves the playhead alone and runs to the film's end", () => {
         setVideoDurationSec("https://cdn/linked.webm", 1200)
         const onSeekToTime = vi.fn()
-        render(film({ timingMode: "audioFirst", onSeekToTime }))
+        render(film({ timingMode: "dubbing", onSeekToTime }))
         expect(onSeekToTime).not.toHaveBeenCalled()
+        expect(Number(screen.getByTestId("tl-canvas").dataset.filePx)).toBeGreaterThanOrEqual(1200 * PX)
+      })
+      it("following the source, it scrolls over the milestone's stretch only, ruler in film time", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        const onSeekToTime = vi.fn()
+        render(film({ timingMode: "dubbing", milestoneWindow: { startSec: 750 }, onSeekToTime }))
+        const px = Number(screen.getByTestId("tl-canvas").dataset.filePx)
+        // From 12:30 to the milestone's last line (12:50) and the track's pad.
+        expect(px).toBeGreaterThanOrEqual(20 * PX)
+        expect(px).toBeLessThan(30 * PX)
+        const ruler = screen.getByTestId("tl-ruler")
+        expect(ruler.textContent).toContain("12:30")
+        expect(ruler.textContent).not.toContain("0:00")
+        // The ruler's left edge is 12:30.
+        onSeekToTime.mockClear()
+        fireEvent.click(ruler, { clientX: 2 * PX })
+        expect(onSeekToTime).toHaveBeenLastCalledWith(752)
+      })
+      it("following the recordings, the same: its lines laid out from 12:30", () => {
+        setVideoDurationSec("https://cdn/linked.webm", 1200)
+        render(film({ timingMode: "audioFirst", milestoneWindow: { startSec: 750 } }))
+        const px = Number(screen.getByTestId("tl-canvas").dataset.filePx)
+        expect(px).toBeLessThan(120 * PX)
+        expect(screen.getByTestId("tl-ruler").textContent).toContain("12:30")
       })
     })
 

@@ -22,6 +22,9 @@ import { SCRUB_INTENT_PX, scrubSecAt } from "@/lib/timeline/scrub"
 export interface UseScrubGestureArgs {
   pxPerSec: number
   durationSec: number
+  /** Sam, Nov 27: the second the surface's left edge stands for (0 when
+   *  absent); `durationSec` is then the end on the same clock. */
+  originSec?: number
   /** The gesture became a drag — take the transport. Fires once, at the
    *  threshold, never on a plain click. */
   onScrubStart?(): void
@@ -74,13 +77,15 @@ export function useScrubGesture(args: UseScrubGestureArgs): ScrubGesture {
     // Read the rect LIVE on every move, never captured here: this element is
     // sticky over a scroller, so a rect taken now goes stale the moment the
     // track moves under it.
-    const secAt = (clientX: number) =>
-      scrubSecAt({
+    const secAt = (clientX: number) => {
+      const origin = live.current.originSec ?? 0
+      return origin + scrubSecAt({
         clientX,
         rectLeft: surface.getBoundingClientRect().left,
         pxPerSec: live.current.pxPerSec,
-        durationSec: live.current.durationSec,
+        durationSec: Math.max(0, live.current.durationSec - origin),
       })
+    }
 
     try { surface.setPointerCapture?.(e.pointerId) } catch { /* happy-dom */ }
     let moved = false

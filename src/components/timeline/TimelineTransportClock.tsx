@@ -34,11 +34,15 @@ export interface TimelineTransportClockProps {
   trackWidthPx: number
   scrollRef: RefObject<HTMLDivElement | null>
   scrollTrackTo: (left: number) => void
+  /** Sam, Nov 27: the second the canvas's left edge stands for (with Split
+   *  into milestones on, the open milestone's start on the film's clock).
+   *  0: the file's start, as always. */
+  originSec?: number
 }
 
 export function TimelineTransportClock({
   store, cellIds, cells, audioFirst, scrubbingRef, pxPerSec,
-  follow, viewportPx, trackWidthPx, scrollRef, scrollTrackTo,
+  follow, viewportPx, trackWidthPx, scrollRef, scrollTrackTo, originSec = 0,
 }: TimelineTransportClockProps) {
   const sec = useSyncExternalStore(store.subscribe, store.sec, store.sec)
   const scrubSec = useSyncExternalStore(store.subscribe, store.scrubSec, store.scrubSec)
@@ -130,9 +134,9 @@ export function TimelineTransportClock({
     if (!follow || !transportPlaying) return
     const el = scrollRef.current
     if (!el) return
-    const target = computeFollowScroll(secToPx(shownSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx)
+    const target = computeFollowScroll(secToPx(shownSec - originSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx)
     if (target != null) scrollTo.current(target)
-  }, [follow, transportPlaying, shownSec, pxPerSec, viewportPx, trackWidthPx, scrollRef])
+  }, [follow, transportPlaying, shownSec, pxPerSec, viewportPx, trackWidthPx, scrollRef, originSec])
 
   return (
     <TimelinePlayhead
@@ -143,6 +147,7 @@ export function TimelineTransportClock({
       // extrapolating FORWARD over the scrub position.
       playing={transportPlaying && scrubSec == null}
       rate={transportRate}
+      originSec={originSec}
     />
   )
 }

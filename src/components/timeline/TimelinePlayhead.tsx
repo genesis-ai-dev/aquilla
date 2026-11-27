@@ -17,6 +17,10 @@ export interface TimelinePlayheadProps {
   playing?: boolean
   /** Playback speed multiplier for interpolation (default 1). */
   rate?: number
+  /** Sam, Nov 27: the second the canvas's left edge stands for (with Split
+   *  into milestones on, the open milestone's start on the film's clock).
+   *  0: the file's start, as always. */
+  originSec?: number
 }
 
 /** Smooth-playback round: how far past the last clock anchor the rAF may
@@ -93,13 +97,14 @@ export function followFrame(
   return { sec: Math.max(prev.sec, pulled), at: now }
 }
 
-export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate = 1 }: TimelinePlayheadProps) {
+export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate = 1, originSec = 0 }: TimelinePlayheadProps) {
   const elRef = useRef<HTMLDivElement>(null)
   /** What the head last painted. The rAF owns it while playing. */
   const headRef = useRef<FollowedHead | null>(null)
   /** The clock's latest second, and when it reached this component. */
   const clockRef = useRef({ sec: currentSec, at: 0 })
   const pxPerSecRef = useRef(pxPerSec)
+  const originRef = useRef(originSec)
   const rateRef = useRef(rate)
 
   // While playing, a render draws where the head IS, not where the tick
@@ -110,6 +115,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
 
   useLayoutEffect(() => {
     pxPerSecRef.current = pxPerSec
+    originRef.current = originSec
     rateRef.current = rate
     const now = performance.now()
     if (clockRef.current.sec !== currentSec || clockRef.current.at === 0) clockRef.current = { sec: currentSec, at: now }
@@ -120,7 +126,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
     // stayed where the rAF ran it on to while `headRef` went back to the
     // clock, and playback then drew it backward from there.
     const el = elRef.current
-    if (el) el.style.left = `${secToPx(drawnSec, pxPerSec)}px`
+    if (el) el.style.left = `${secToPx(drawnSec - originRef.current, pxPerSec)}px`
   })
 
   useEffect(() => {
@@ -133,7 +139,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
       const clock = clockRef.current
       const next = followFrame({ sec: prev.sec, at: Math.min(prev.at, frameAt) }, clock.sec, clock.at, frameAt, rateRef.current)
       headRef.current = next
-      el.style.left = `${secToPx(next.sec, pxPerSecRef.current)}px`
+      el.style.left = `${secToPx(next.sec - originRef.current, pxPerSecRef.current)}px`
       raf = requestAnimationFrame(step)
     }
     // Playback starts from here and now: a clock or a head stamped before a
@@ -150,7 +156,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
       ref={elRef}
       data-testid="tl-playhead"
       className="pointer-events-none absolute inset-y-0 z-20 w-px bg-red-500"
-      style={{ left: `${secToPx(drawnSec, pxPerSec)}px` }}
+      style={{ left: `${secToPx(drawnSec - originSec, pxPerSec)}px` }}
     >
       <span className="absolute -left-[5px] -top-px h-0 w-0 border-[5px] border-transparent border-t-red-500 motion-safe:animate-pulse" />
     </div>

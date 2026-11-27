@@ -99,7 +99,7 @@ import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
-import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
+import { buildTimelineLayout, TRACK_PAD_SEC, type TimelineLayout } from "@/lib/timeline/layout"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
 import { CORNER_ICON_BTN, PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
@@ -732,13 +732,16 @@ export interface TimelineEditorProps {
    */
   filmVolumeDb?: number
   /**
-   * Sam, Nov 27: with Split into milestones on, where the open milestone
-   * starts on the film's own clock (the workspace's `milestoneWindowStart`,
-   * lib/timeline/sequence-timeline). Following the recordings the milestone
-   * is laid out from it; in both timings the view and the playhead (and so
-   * the film) go there when a milestone opens. 0 or absent: the whole file.
+   * Sam, Nov 27: with Split into milestones on, the open milestone's WINDOW
+   * onto the film's own clock: `startSec` is where it starts (the
+   * workspace's `milestoneWindowStart`, lib/timeline/sequence-timeline).
+   * The timeline then scrolls over the milestone's stretch only, from its
+   * start to its last line's end, with film times on the ruler; following
+   * the recordings its lines are laid out from its start; and opening one
+   * brings the view and the playhead (and so the film) to its start. Null or
+   * absent: the whole file, from 0:00 to the film's end, as always.
    */
-  windowStartSec?: number
+  milestoneWindow?: { startSec: number } | null
   /**
    * AQU-2664 (boards 71, 74): Even out. `states` is each track's ≈ (only the
    * tracks holding takes are in it); `open` opens the one Even out window on
@@ -1446,7 +1449,7 @@ export function TimelineEditor({
   onSetTrackColor,
   onSetTrackVolume,
   filmVolumeDb = 0,
-  windowStartSec = 0,
+  milestoneWindow = null,
   evenOut,
   trackEditing,
 }: TimelineEditorProps) {
@@ -2188,12 +2191,12 @@ export function TimelineEditor({
     const el = scrollRef.current
     if (!el) return
     setViewportPx(el.clientWidth)
-    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft + clipRef.current.startPx}px`)
     scrollBus.set(el.scrollLeft, el.clientWidth)
     if (typeof ResizeObserver === "undefined") return // happy-dom
     const ro = new ResizeObserver(() => {
       setViewportPx(el.clientWidth)
-      el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+      el.style.setProperty("--tl-scroll-left", `${el.scrollLeft + clipRef.current.startPx}px`)
       scrollBus.set(el.scrollLeft, el.clientWidth)
     })
     ro.observe(el)
@@ -2266,7 +2269,8 @@ export function TimelineEditor({
       }
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault()
-        onSeekToTimeRef.current?.(0)
+        // The timeline's start: a milestone's window starts at its start.
+        onSeekToTimeRef.current?.(clipRef.current.startSec)
         const el = scrollRef.current
         if (el) {
           lastProgrammaticScrollAt.current = performance.now()
@@ -2351,6 +2355,7 @@ export function TimelineEditor({
   // makes a new tracks array, and must not lay the whole file out again.
   // Sam, Nov 27: following the recordings an open milestone is laid out from
   // where it sits in the whole file (`windowStartSec`), as the transport lays it.
+  const windowStartSec = milestoneWindow ? Math.max(0, milestoneWindow.startSec) : 0
   const programmeOriginSec = audioFirst && windowStartSec > 0 ? windowStartSec : 0
   const programmeTracksKey = JSON.stringify({ ...programmeTrackSlots(tracks), ...(programmeOriginSec > 0 ? { originSec: programmeOriginSec } : {}) })
   const programmeTracks = useMemo(
@@ -3155,10 +3160,34 @@ export function TimelineEditor({
   // memoises these for us.
   const folderCues = filmFolder?.showCues && filmPieces ? cuesOnFilmPieces(audioCues ?? [], filmPieces) : null
   const folderCueRegions = folderCues ? deriveSourceRegions(folderCues, layout.totalSec) : null
-  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmPieces ? 0 : filmTrackSec)
-  const maxPxPerSec = zoomCeiling(durationSec)
+  // Sam, Nov 27: with a milestone's window, the timeline is its stretch of
+  // the film's clock: from its start (`clipStartSec`, the canvas's left edge)
+  // to its last line's end, not 0:00 to the film's end. Following the
+  // recordings its lines are laid out from its start, so the layout's end is
+  // the window's; following the source, the last of its lines' own ends.
+  // Every second below is on the film's clock; only where it is drawn starts
+  // at `clipStartSec`.
+  const clipStartSec = windowStartSec
+  let windowEndSec = 0
+  if (milestoneWindow) {
+    if (audioFirst) windowEndSec = layout.totalSec
+    else {
+      for (const c of cells) if (typeof c.endTime === "number" && Number.isFinite(c.endTime)) windowEndSec = Math.max(windowEndSec, c.endTime)
+      for (const c of audioCues ?? []) if (typeof c.endTime === "number" && Number.isFinite(c.endTime)) windowEndSec = Math.max(windowEndSec, c.endTime)
+      windowEndSec += TRACK_PAD_SEC
+    }
+  }
+  const durationSec = milestoneWindow
+    ? Math.max(clipStartSec, windowEndSec)
+    : Math.max(layout.totalSec, independentTextLayout.totalSec, filmPieces ? 0 : filmTrackSec)
+  const spanSec = durationSec - clipStartSec
+  const maxPxPerSec = zoomCeiling(spanSec)
   const pxPerSec = Math.min(chosenPxPerSec, maxPxPerSec)
-  const trackWidthPx = secToPx(durationSec, pxPerSec)
+  const trackWidthPx = secToPx(spanSec, pxPerSec)
+  const clipStartPx = secToPx(clipStartSec, pxPerSec)
+  // Read by the scroll and wheel handlers, which close over older renders.
+  const clipRef = useRef({ startSec: clipStartSec, startPx: clipStartPx })
+  clipRef.current = { startSec: clipStartSec, startPx: clipStartPx }
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
   // 28). Scrolling, following and seeking still go by the file's own width.
@@ -3170,18 +3199,24 @@ export function TimelineEditor({
   // Unmeasured (tests, the commit before layout): a short prefix of the
   // track. Once the column has a width, the horizontal list owns the window
   // and this range is only the fallback.
-  const viewStartSec = -overscanSec
+  const viewStartSec = clipStartSec - overscanSec
   // Before the column is measured, draw a short prefix. A book is hours long;
   // drawing every card on that first commit is what keeps the page from
   // loading. Tests use short files, so they still see the whole track. The
   // measured column hands the window to the horizontal list.
   const UNMEASURED_WINDOW_SEC = 600
-  const viewEndSec = (viewportPx > 0
+  const viewEndSec = clipStartSec + (viewportPx > 0
     ? pxToSec(viewportPx, pxPerSec)
     : Math.min(pxToSec(trackWidthPx, pxPerSec), UNMEASURED_WINDOW_SEC)) + overscanSec
+  // Each column's seconds are on the film's clock; its pixels from the
+  // canvas's left edge, so a column's origin is that edge plus its own start.
   const horizontalSlices = useMemo(
-    () => (viewportPx > 0 ? timeSlices(canvasWidthPx, pxPerSec) : []),
-    [viewportPx, canvasWidthPx, pxPerSec],
+    () => (viewportPx > 0
+      ? timeSlices(canvasWidthPx, pxPerSec).map((slice) => (clipStartSec > 0
+        ? { ...slice, startSec: slice.startSec + clipStartSec, endSec: slice.endSec + clipStartSec }
+        : slice))
+      : []),
+    [viewportPx, canvasWidthPx, pxPerSec, clipStartSec],
   )
   // Bumps on every render of this editor, and on none of the scroll ticks.
   // Mounted columns redraw when the lanes' data changes.
@@ -3281,7 +3316,7 @@ export function TimelineEditor({
     lastScrollLeft.current = el.scrollLeft
     // The film-length gap label reads this. Publishing it through React
     // re-rendered every source cue on the wheel tick.
-    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft + clipRef.current.startPx}px`)
     scrollBus.set(el.scrollLeft, el.clientWidth)
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
@@ -3312,7 +3347,7 @@ export function TimelineEditor({
         const startSec = layout.seekSecFor(cell)
         if (startSec != null) starts.push({ id: cell.id, startSec })
       }
-      const id = cellIdNearestStart(starts, pxToSec(left + width / 2, rate))
+      const id = cellIdNearestStart(starts, clipRef.current.startSec + pxToSec(left + width / 2, rate))
       if (id) onResumePlace(id)
     }, 400)
   }
@@ -3404,8 +3439,8 @@ export function TimelineEditor({
       // Round 5: a video-driven follow keeps its anchor too — zooming used to
       // recentre on the viewport middle instead of the playhead.
       const followAnchor = follow && (queueActive || videoPlaying)
-      const anchorSec = followAnchor ? clock.displaySec() : pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
-      const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
+      const anchorSec = followAnchor ? clock.displaySec() : clipStartSec + pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
+      const target = Math.max(0, secToPx(anchorSec - clipStartSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)
       // Apply after React paints the new track width, or the browser clamps
       // the scroll to the old width.
@@ -4152,7 +4187,7 @@ export function TimelineEditor({
       zoomTargetRef.current = target
       const offsetX = e.clientX - el.getBoundingClientRect().left
       zoomGestureAnchorRef.current = {
-        timeSec: pxToSec(el.scrollLeft + offsetX, pxPerSecRef.current),
+        timeSec: clipRef.current.startSec + pxToSec(el.scrollLeft + offsetX, pxPerSecRef.current),
         offsetX,
       }
       try {
@@ -4202,7 +4237,7 @@ export function TimelineEditor({
     // Stamp as programmatic: zoom re-anchoring must not read as a manual
     // scroll and disengage follow-playhead mid-glide.
     lastProgrammaticScrollAt.current = performance.now()
-    const wanted = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+    const wanted = Math.max(0, secToPx(anchor.timeSec - clipStartSec, pxPerSec) - anchor.offsetX)
     const left = clampScrollLeft(wanted, el.scrollWidth, el.clientWidth)
     el.scrollLeft = left
     lastScrollLeft.current = left
@@ -4321,7 +4356,7 @@ export function TimelineEditor({
     // "start" matches the chapter navigator, which puts the chapter's first
     // row at the top of the text. The line's start sits at the left edge.
     const origin = opts?.align === "start" ? 0 : viewport / 2
-    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - origin), opts?.smooth === true)
+    scrollTrackTo(Math.max(0, secToPx(at - clipStartSec, pxPerSec) - origin), opts?.smooth === true)
     if (opts?.play) playFromTime(at)
     else seekTo(at)
   }
@@ -4352,7 +4387,7 @@ export function TimelineEditor({
     }
     const heldOffset = hold?.id === cellId ? hold.offsetPx : null
     const decision = resumeScrollLeft({
-      atPx: secToPx(at, pxPerSec),
+      atPx: secToPx(at - clipStartSec, pxPerSec),
       scrollLeft: el.scrollLeft,
       viewportPx: el.clientWidth,
       heldOffsetPx: heldOffset,
@@ -4402,15 +4437,17 @@ export function TimelineEditor({
   // is there too: the timeline is a window onto the film. Once per new start;
   // never while something plays (the transport is moving the head), and the
   // whole file (0) leaves the view where it is.
-  const windowShownRef = useRef(0)
+  const windowShownRef = useRef<number | null>(null)
+  const windowStart = milestoneWindow ? windowStartSec : null
   useEffect(() => {
-    if (windowStartSec === windowShownRef.current) return
-    windowShownRef.current = windowStartSec
-    if (windowStartSec <= 0 || queueActive || videoPlaying) return
-    scrollTrackTo(Math.max(0, secToPx(windowStartSec, pxPerSec)))
-    seekTo(windowStartSec)
+    if (windowStart === windowShownRef.current) return
+    windowShownRef.current = windowStart
+    if (windowStart == null || queueActive || videoPlaying) return
+    // The canvas's left edge is the window's start.
+    scrollTrackTo(0)
+    seekTo(windowStart)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per new window start
-  }, [windowStartSec])
+  }, [windowStart])
 
   // 2026-08-07: publish the timeline's presence + chip selection to the media
   // cursor store — the table's rows highlight the pointed-at cell through it.
@@ -5383,7 +5420,7 @@ export function TimelineEditor({
             const el = scrollRef.current
             if (el) {
               const target = computeFollowScroll(
-                secToPx(clock.displaySec(), pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
+                secToPx(clock.displaySec() - clipStartSec, pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
               )
               if (target != null) scrollTrackTo(target)
             }
@@ -6461,6 +6498,7 @@ export function TimelineEditor({
             <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>
               <TimelineScrollingRuler
                 durationSec={durationSec}
+                originSec={clipStartSec}
                 pxPerSec={pxPerSec}
                 fillPx={canvasWidthPx}
                 onScrub={seekTo}
@@ -6475,7 +6513,7 @@ export function TimelineEditor({
                   slices={horizontalSlices}
                   extraData={laneEpoch.current}
                   renderSlice={(slice) => (
-                    <TimelineOrigin px={slice.startPx}>
+                    <TimelineOrigin px={clipStartPx + slice.startPx}>
                       <div
                         data-tl-slice={slice.key}
                         style={{ width: slice.widthPx, overflowX: "clip", overflowY: "visible" }}
@@ -6486,7 +6524,7 @@ export function TimelineEditor({
                   )}
                 />
               ) : (
-                renderLaneColumn(viewStartSec, viewEndSec)
+                <TimelineOrigin px={clipStartPx}>{renderLaneColumn(viewStartSec, viewEndSec)}</TimelineOrigin>
               )}
               </FilmFramesContext.Provider>
               {/* The film lanes' one frame grabber (useFilmFrames), after the
@@ -6524,6 +6562,7 @@ export function TimelineEditor({
                 trackWidthPx={trackWidthPx}
                 scrollRef={scrollRef}
                 scrollTrackTo={scrollTrackTo}
+                originSec={clipStartSec}
               />
             </div>
             </TimelineScrollBusContext.Provider>

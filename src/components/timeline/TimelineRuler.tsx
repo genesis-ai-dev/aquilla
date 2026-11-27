@@ -34,6 +34,11 @@ export interface TimelineRulerProps {
   onScrubMove?(sec: number): void
   /** Released (or cancelled). The caller lands this through its ordinary seek. */
   onScrubEnd?(sec: number): void
+  /** Sam, Nov 27: the second the ruler's left edge stands for (with Split
+   *  into milestones on, the open milestone's start on the film's clock).
+   *  `durationSec`, the window and every tick are on the film's clock; only
+   *  where they are drawn starts here. 0: the file's start. */
+  originSec?: number
 }
 
 function TimelineRulerImpl({
@@ -46,25 +51,30 @@ function TimelineRulerImpl({
   onScrubStart,
   onScrubMove,
   onScrubEnd,
+  originSec = 0,
 }: TimelineRulerProps) {
   const step = niceTickSec(pxPerSec)
   // Non-finite/negative means "not reported yet" — fall back to a one-step
   // track rather than an infinitely wide one.
   const safeDuration = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0
-  const spanSec = Math.max(safeDuration, step)
+  const origin = Number.isFinite(originSec) && originSec > 0 ? originSec : 0
+  // The drawn length, from the left edge (`origin`).
+  const spanSec = Math.max(safeDuration - origin, step)
   // Where a click or a scrub may land: the file's own end. The one-step track
   // above is only drawn room, so a clip shorter than a step still stops at its
   // end; while the duration is unknown that room is all there is to go on.
-  const endSec = safeDuration > 0 ? safeDuration : spanSec
+  const endSec = safeDuration > 0 ? safeDuration : origin + spanSec
   // What is drawn: the file, or the whole view when the file is shorter.
   const drawSec = Math.max(spanSec, pxToSec(fillPx, pxPerSec))
-  const from = Number.isFinite(viewStartSec) ? Math.max(0, viewStartSec as number) : 0
-  const to = Number.isFinite(viewEndSec) ? Math.min(drawSec, viewEndSec as number) : drawSec
+  const from = Number.isFinite(viewStartSec) ? Math.max(origin, viewStartSec as number) : origin
+  const to = Number.isFinite(viewEndSec) ? Math.min(origin + drawSec, viewEndSec as number) : origin + drawSec
   const ticks: number[] = []
   // Snap the first tick DOWN onto the step grid: a label must sit at the same
   // absolute second whatever the window happens to start at, or the numbers
   // slide around as you scroll.
-  for (let t = Math.floor(from / step) * step; t <= to; t += step) ticks.push(t)
+  // Never before the left edge: a milestone's ruler starts at its start.
+  const first = Math.max(Math.floor(from / step) * step, Math.ceil(origin / step - 1e-9) * step)
+  for (let t = first; t <= to; t += step) ticks.push(t)
   const width = secToPx(drawSec, pxPerSec)
 
   // AQU-646 stage 5: this band is a scrub surface now, as well as a place to
@@ -73,6 +83,7 @@ function TimelineRulerImpl({
   const scrub = useScrubGesture({
     pxPerSec,
     durationSec: endSec,
+    originSec: origin,
     onScrubStart,
     onScrubMove: onScrubMove ?? (() => {}),
     onScrubEnd,
@@ -121,14 +132,14 @@ function TimelineRulerImpl({
         // would fight the landing seek the drag already issued.
         if (scrub.consumeDragClick()) return
         const rect = e.currentTarget.getBoundingClientRect()
-        onScrub(Math.min(endSec, pxToSec(e.clientX - rect.left, pxPerSec)))
+        onScrub(Math.min(endSec, origin + pxToSec(e.clientX - rect.left, pxPerSec)))
       }}
     >
       {ticks.map((t) => (
         <div
           key={t}
           className="absolute inset-y-0 border-l border-border/70"
-          style={{ left: `${secToPx(t, pxPerSec)}px` }}
+          style={{ left: `${secToPx(t - origin, pxPerSec)}px` }}
         >
           <span className="absolute left-1 top-1 font-mono text-[10px] tabular-nums text-muted-foreground">
             {fmtClock(t)}

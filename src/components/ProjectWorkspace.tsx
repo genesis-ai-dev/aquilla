@@ -18996,9 +18996,10 @@ export function ProjectWorkspace() {
     () => recordingsLines(timelineLines, audioCueCells, timingMode === "audioFirst"),
     [timelineLines, audioCueCells, timingMode],
   )
+  const milestonePartShown = showsPartOfFile(timelineCells, timelineLines)
   const milestoneWindowStart = useMilestoneWindowStart({
     fileId: activeFileId ?? null,
-    partShown: showsPartOfFile(timelineCells, timelineLines),
+    partShown: milestonePartShown,
     milestoneKey: timelineMilestoneKey,
     followsRecordings: timingMode === "audioFirst",
     tracks: fileProgrammeTracks,
@@ -19007,7 +19008,7 @@ export function ProjectWorkspace() {
   })
   // Following the recordings the milestone is laid out from its window's
   // start; everything handed these tracks lays it out the same way.
-  const programmeOriginSec = timingMode === "audioFirst" ? milestoneWindowStart : 0
+  const programmeOriginSec = timingMode === "audioFirst" && milestonePartShown ? (milestoneWindowStart ?? 0) : 0
   const programmeTracks = useMemo(
     () => (programmeOriginSec > 0 ? { ...fileProgrammeTracks, originSec: programmeOriginSec } : fileProgrammeTracks),
     [fileProgrammeTracks, programmeOriginSec],
@@ -19016,6 +19017,11 @@ export function ProjectWorkspace() {
     setQueueProgrammeOrigin(programmeOriginSec)
   }, [programmeOriginSec])
   useEffect(() => () => setQueueProgrammeOrigin(0), [])
+  // The timeline scrolls over the milestone's stretch only (TimelineEditor).
+  const timelineMilestoneWindow = useMemo(
+    () => (milestonePartShown && milestoneWindowStart != null ? { startSec: milestoneWindowStart } : null),
+    [milestonePartShown, milestoneWindowStart],
+  )
   // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
   // into its lines' pieces, laid out by the programme the timeline draws and
   // the queue plays — the same lines and tracks — so the Film panel shows the
@@ -21758,7 +21764,7 @@ export function ProjectWorkspace() {
                     // with maintainers.
                     onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
                     filmVolumeDb={filmVolumeDb}
-                    windowStartSec={milestoneWindowStart}
+                    milestoneWindow={timelineMilestoneWindow}
                     // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
                     // window, for anyone who may even takes out.
                     evenOut={timelineEvenOut}
@@ -22666,7 +22672,7 @@ export function ProjectWorkspace() {
           // consults the mode, so an audio-first file keeps its picture.
           filmFileId={activeFileId}
           // Sam, Nov 27: the open milestone's window, for a line with no times yet.
-          filmWindowStartSec={milestoneWindowStart}
+          filmWindowStartSec={milestonePartShown ? (milestoneWindowStart ?? 0) : 0}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

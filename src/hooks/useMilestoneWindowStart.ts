@@ -9,7 +9,8 @@ import { milestoneWindowStartSec } from "@/lib/timeline/sequence-timeline"
  * following the source, at the milestone's earliest line's own time; following
  * the recordings, where its first line sits in the whole file's layout. A
  * milestone whose lines have no times yet starts where the lines before it
- * ended. The whole file on the timeline (`partShown` false): 0:00.
+ * ended. The whole file on the timeline (`partShown` false): 0:00. Null
+ * before it has been worked out for this file.
  *
  * Worked out once per milestone (`milestoneKey`), and again when lines are
  * added or removed, the timing or the tracks change, never per take or per
@@ -28,7 +29,7 @@ export function useMilestoneWindowStart({
   shown: readonly CellData[]
   /** The whole file's lines, the same way, in the file's order. */
   whole: readonly CellData[]
-}): number {
+}): number | null {
   const [win, setWin] = useState<{ fileId: string | null; startSec: number }>({ fileId: null, startSec: 0 })
   const shownCount = shown.length
   const wholeCount = whole.length
@@ -53,5 +54,8 @@ export function useMilestoneWindowStart({
     // Keyed on what decides the window, not on the lines themselves (see above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partShown, milestoneKey, followsRecordings, fileId, tracks, shownCount, wholeCount])
-  return win.fileId === fileId ? win.startSec : 0
+  // Null until it has been worked out for this file (the first render after
+  // opening one); a milestone turned to keeps the last start for that one
+  // render rather than jumping to the whole file.
+  return win.fileId === fileId ? win.startSec : null
 }

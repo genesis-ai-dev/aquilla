@@ -430,9 +430,16 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     () => playbackLines != null && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0,
     [playbackLines, film],
   )
+  // Sam, Nov 27 (AQU-2798): following the recordings with Split into
+  // milestones on, the milestone is a window onto the film's clock, laid out
+  // from its start (`programmeTracks.originSec`). A run of chosen lines inside
+  // it is a run of its lines too, film or not, so each chosen line plays where
+  // it sits there and the playhead (and any film) jumps between them; laid
+  // back to back they would all start at the milestone's start.
+  const inWindow = freeTiming === true && (programmeTracks?.originSec ?? 0) > 0
   const fileStops = useMemo(
-    () => (anyChosen && filmCovers && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
-    [anyChosen, filmCovers, playbackLines, ask],
+    () => (anyChosen && (filmCovers || inWindow) && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
+    [anyChosen, filmCovers, inWindow, playbackLines, ask],
   )
   // On a film file it is a run of the lines Play plays when every chosen line
   // on the timeline is among them (the check of the q44 fixes, Nov 12,
@@ -441,7 +448,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
     if (!anyChosen) return { cells: playbackRange, only: null, stopCount: 0 }
-    if (playbackLines && fileStops && film) {
+    if (playbackLines && fileStops && (film || inWindow)) {
       // The second check (Nov 13), NOTE 3: asked only of the chosen rows on
       // the timeline (the film's word names every line it draws, in every
       // chapter). A row it does not draw, a chapter heading while "Count
@@ -449,14 +456,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // Membership by a Set (N11). Where the run starts is the queue's to
       // say: its first chosen stop, in the order it plays them.
       const inList = new Set(playbackLines.map((c) => c.id))
-      const onTimeline = playbackRange.filter((c) => film.cellIds.has(c.id)).map((c) => c.id)
+      const onTimeline = playbackRange.filter((c) => (film ? film.cellIds.has(c.id) : inList.has(c.id))).map((c) => c.id)
       if (onTimeline.length > 0 && onTimeline.every((id) => inList.has(id))) {
         const only = new Set(onTimeline)
         return { cells: playbackLines, only, stopCount: onTimeline.filter((id) => fileStops.has(id)).length }
       }
     }
     return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
-  }, [anyChosen, playbackRange, playbackLines, fileStops, film, ask])
+  }, [anyChosen, playbackRange, playbackLines, fileStops, film, inWindow, ask])
   const playableSelectedCount = selectionRun.stopCount
 
   /**

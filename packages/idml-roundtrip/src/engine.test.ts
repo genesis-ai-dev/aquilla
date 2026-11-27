@@ -107,7 +107,7 @@ describe("IDML structural parser", () => {
     })
   })
 
-  it("discovers designmap stories first and appends remaining stories deterministically", async () => {
+  it("places a spread's story before stories named only in the designmap inventory", async () => {
     const parsed = await parseIdml(await makeIdml())
     expect(parsed.units.map((unit) => unit.locator.memberPath)).toEqual([
       "Stories/Story_u1.xml",
@@ -116,6 +116,41 @@ describe("IDML structural parser", () => {
       "Stories/Story_u3.xml",
       "Stories/Story_u9.xml",
       "Resources/TextVariables.xml",
+    ])
+  })
+
+  it("reads each spread from top to bottom, and earlier spreads before later ones", async () => {
+    const story = (storyId: string) =>
+      `<?xml version="1.0"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="${storyId}"><ParagraphStyleRange Self="p-${storyId}"><CharacterStyleRange><Content>${storyId}</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const frame = (storyId: string, x: number, y: number) =>
+      `<TextFrame ParentStory="${storyId}" ItemTransform="1 0 0 1 ${x} ${y}"/>`
+    const page = (name: string) =>
+      `<Page Name="${name}" GeometricBounds="0 0 800 600" ItemTransform="1 0 0 1 0 0"/>`
+    const parsed = await parseIdml(await makeIdml({
+      "designmap.xml":
+        `<?xml version="1.0"?><idPkg:DesignMap xmlns:idPkg="urn:test">`
+        + `<idPkg:Spread src="Spreads/Spread_page1.xml"/>`
+        + `<idPkg:Spread src="Spreads/Spread_page2.xml"/>`
+        + `<idPkg:Story src="Stories/Story_next.xml"/>`
+        + `<idPkg:Story src="Stories/Story_footer.xml"/>`
+        + `<idPkg:Story src="Stories/Story_body.xml"/>`
+        + `</idPkg:DesignMap>`,
+      "Spreads/Spread_page1.xml":
+        `<?xml version="1.0"?><idPkg:Spread xmlns:idPkg="urn:test"><Spread>${page("1")}${frame("footer", 40, 700)}${frame("body", 40, 80)}</Spread></idPkg:Spread>`,
+      "Spreads/Spread_page2.xml":
+        `<?xml version="1.0"?><idPkg:Spread xmlns:idPkg="urn:test"><Spread>${page("2")}${frame("next", 40, 80)}</Spread></idPkg:Spread>`,
+      "Stories/Story_u1.xml": null,
+      "Stories/Story_u3.xml": null,
+      "Stories/Story_u9.xml": null,
+      "Stories/Story_body.xml": story("body"),
+      "Stories/Story_footer.xml": story("footer"),
+      "Stories/Story_next.xml": story("next"),
+    }))
+
+    expect(parsed.units.map((unit) => unit.locator.elementId).filter((id) => id !== "TextVariable/Custom")).toEqual([
+      "p-body",
+      "p-footer",
+      "p-next",
     ])
   })
 

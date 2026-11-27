@@ -12,7 +12,7 @@
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError } from './errors'
-import { uploadArtifact } from './mcp-artifact-upload'
+import { createUploadUrl, uploadArtifact } from './mcp-artifact-upload'
 import type { ExternalErrorCode } from './errors'
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
@@ -294,7 +294,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       // original bytes FIRST, then let the server's built-in parsers turn them
       // into a staged, human-approvable changeset.
       workflow: [
-        '1. Upload the ORIGINAL file bytes via REST: POST .../projects/:projectId/artifacts with headers "Authorization: Bearer aqk_..." and "x-artifact-name: <filename>" (body = raw bytes). Upload is REST-only — MCP JSON-RPC cannot carry binary; from Claude Code, curl it. This preserves the original in storage for round-trip export.',
+        '1. Upload the ORIGINAL file bytes via REST: POST .../projects/:projectId/artifacts with headers "Authorization: Bearer aqk_..." and "x-artifact-name: <filename>" (body = raw bytes). From MCP, call create_upload_url and curl the bytes to the URL it returns (upload_artifact only takes small files inline). This preserves the original in storage for round-trip export.',
         '2. preview_import { projectId, artifactId } — the server parses with its built-in importers and returns totalCells + the first 10 cells, WITHOUT staging. Pass fileType to override detection.',
         '3. prepare_import (same arguments) — parses again and stages a PlanImport changeset linking the artifact; returns { changesetId, digest, summary, mode, approvalUrl? }.',
         '4. confirm_changeset as usual (ask mode: a human approves at the approvalUrl first).',
@@ -305,7 +305,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'Formats in clientOnlyFormats need DOM/browser parsers and are not yet server-' +
         'parseable — import those through the in-app Import dialog, or parse them yourself ' +
         'and stage raw PlanImport cells over REST. Limits: artifact uploads max ' +
-        `${MAX_ARTIFACT_BYTES} bytes (25MB); imports max ${PLAN_IMPORT_MAX_CELLS} cells ` +
+        `${MAX_ARTIFACT_BYTES} bytes (64MiB); imports max ${PLAN_IMPORT_MAX_CELLS} cells ` +
         'per changeset. A multi-book USFM artifact parses into one file per book — stage ' +
         'each book separately via resultIndex.',
     },
@@ -1774,6 +1774,8 @@ export async function callTool(
       return regenerateBriefSummaryTool(env, token, args, ctx)
     case 'upload_artifact':
       return uploadArtifact(env, token, args)
+    case 'create_upload_url':
+      return createUploadUrl(env, cred, args)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':

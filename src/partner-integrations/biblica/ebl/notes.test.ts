@@ -31,8 +31,8 @@ describe("selectEblNotes — the guide's outline", () => {
 
     expect(divisions.map((division) => [division.kind, division.shortLabel, division.label]))
       .toEqual([
-        // The loose frames the package lists ahead of the guide.
-        ["boxes", "B", "Boxes and tables"],
+        // The badge's story sorts ahead of the guide, the summary's after it.
+        ["boxes", "B", "Boxes and tables 1"],
         // Front matter, one division per level-1 heading.
         ["section", "1", "Facilitator Guide Module 1"],
         ["section", "2", SAMPLE_EBL.introHead],
@@ -44,6 +44,7 @@ describe("selectEblNotes — the guide's outline", () => {
         ["lesson", "1.1.2", "Lesson 2: Seeing God up close"],
         // Back matter: a level-1 heading in the lesson group numbering no lesson.
         ["section", "5", SAMPLE_EBL.glossaryHead],
+        ["boxes", "B2", "Boxes and tables 2"],
       ])
   })
 
@@ -100,11 +101,12 @@ describe("selectEblNotes — the guide's outline", () => {
   })
 
   it("files the cover line with the title page it introduces", async () => {
-    // It is printed above the guide's first heading, so no division is open
-    // yet — and it must not fall into the loose frames listed before it.
+    // It is the first line of the body, above the guide's first heading, so no
+    // division is open yet. The badge is a separate story and sorts ahead of
+    // the body; the cover line must not fall into that loose frame.
     const { notes } = await selectFrom()
 
-    expect(notes[0]?.unit.sourceText).toBe(SAMPLE_EBL.summaryBanner)
+    expect(notes[0]?.unit.sourceText).toBe(SAMPLE_EBL.timingBadge)
     expect(placement(notes)).toContainEqual([
       SAMPLE_EBL.coverLine,
       "Facilitator Guide Module 1",
@@ -131,13 +133,23 @@ describe("selectEblNotes — loose frames", () => {
     const { notes, divisions } = await selectFrom()
 
     expect(divisions.map((division) => division.label)).not.toContain(SAMPLE_EBL.timingBadge)
-    expect(placement(notes)).toContainEqual([SAMPLE_EBL.timingBadge, "Boxes and tables"])
-    expect(placement(notes)).toContainEqual([SAMPLE_EBL.summaryBanner, "Boxes and tables"])
+    expect(placement(notes)).toContainEqual([SAMPLE_EBL.timingBadge, "Boxes and tables 1"])
+    expect(placement(notes)).toContainEqual([SAMPLE_EBL.summaryBanner, "Boxes and tables 2"])
   })
 
   it("numbers the runs only when a package splits its loose frames", async () => {
-    const { divisions } = await selectFrom()
-    expect(divisions.filter((division) => division.kind === "boxes"))
+    // Path order puts the guide between the badge and the summary, so the two
+    // pull-outs are two runs. A package with only the badge keeps one run, and
+    // one run stays unnumbered.
+    const split = await selectFrom()
+    expect(split.divisions.filter((division) => division.kind === "boxes"))
+      .toEqual([
+        { key: "ebl:boxes:1", kind: "boxes", label: "Boxes and tables 1", shortLabel: "B" },
+        { key: "ebl:boxes:2", kind: "boxes", label: "Boxes and tables 2", shortLabel: "B2" },
+      ])
+
+    const together = await selectFrom({ summary: [] })
+    expect(together.divisions.filter((division) => division.kind === "boxes"))
       .toEqual([{ key: "ebl:boxes:1", kind: "boxes", label: "Boxes and tables", shortLabel: "B" }])
   })
 
@@ -148,7 +160,7 @@ describe("selectEblNotes — loose frames", () => {
     const { notes, divisions } = await selectFrom({ body: [] })
 
     expect(notes.map((note) => note.unit.sourceText))
-      .toEqual([SAMPLE_EBL.summaryBanner, SAMPLE_EBL.timingBadge])
+      .toEqual([SAMPLE_EBL.timingBadge, SAMPLE_EBL.summaryBanner])
     expect(notes.every((note) => note.division === undefined)).toBe(true)
     expect(divisions).toEqual([])
   })

@@ -196,6 +196,7 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
 const laneGrants = vi.hoisted(() => ({ byUser: {} as Record<number, { laneId: string; name: string; level: number }[]> }))
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: mockFetchMemberScopes,
+  // The real Languages table (rendered once below) reads the scope view too.
   fetchMemberScopeView: async (jwt: string, projectId: string, userId: number) => {
     const scopes = await mockFetchMemberScopes(jwt, projectId, userId)
     const grants = laneGrants.byUser[userId]

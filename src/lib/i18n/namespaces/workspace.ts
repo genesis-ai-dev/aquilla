@@ -478,9 +478,9 @@ export const workspace = defineNamespace({
     // -- timeline/LinkVideoTimingDialog --
     "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
     "workspace.linkVideoTiming.description":
-      "This file follows its recordings. A file timed to a film always follows its source, so " +
+      "This file follows its recordings. A file with a film starts on following its source, so " +
       "once the film is linked its lines keep the film's times and the film plays. No recordings " +
-      "or times change, and clearing the film lets the file follow its recordings again.",
+      "or times change. A project lead can switch it back under Timing, and clearing the film does too.",
     "workspace.linkVideoTiming.linkAnyway": "Link the film",
 
     // -- timeline/TimingModeChangedDialog --
@@ -583,6 +583,9 @@ export const workspace = defineNamespace({
       "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
     "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
     "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
+    // AQU-2426: a mic take waiting out the hourly limit.
+    "workspace.transcribeBadge.waitingForLimitPill": "Waiting at the limit",
+    "workspace.transcribeBadge.waitingForLimitTooltip": "Transcription takes up to 60 requests every 15 minutes for each person. This take waits and transcribes by itself once the limit allows.",
   },
   context: {
     _context: {
@@ -2089,8 +2092,9 @@ export const workspace = defineNamespace({
       "workspace.linkVideoTiming.title": {
         description:
           "Heading of the dialog shown when linking a film to a file whose timing " +
-          "is 'Follows recordings': a file timed to a film always follows its source, " +
-          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
+          "is 'Follows recordings' and that has no timing choice of its own: a file with " +
+          "a film starts on following its source, so linking switches it. Use the same " +
+          "names as the timeline's Timing dropdown.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.description": {
@@ -2478,6 +2482,9 @@ export const workspace = defineNamespace({
           "comma-separated list of file names.",
         placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
+      // AQU-2426: a mic take waiting out the hourly limit.
+      "workspace.transcribeBadge.waitingForLimitPill": { description: "Short status on a take recorded with the mic whose transcription is waiting out the hourly transcription limit; it carries on by itself.", maxLength: 24 },
+      "workspace.transcribeBadge.waitingForLimitTooltip": { description: "Text a click on the 'Waiting at the limit' status opens." },
     },
   },
   surfaces: [],

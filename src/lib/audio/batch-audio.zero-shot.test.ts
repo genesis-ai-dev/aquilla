@@ -4,11 +4,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { runTranscribeAll } from "./batch-audio"
 import { setTranscriptionModel } from "./transcription-model"
-import { transcribeCell } from "./transcribe"
+import { transcribeCellOutcome } from "./transcribe"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-vi.mock("./transcribe", () => ({ transcribeCell: vi.fn(async () => 5) }))
+vi.mock("./transcribe", () => ({ transcribeCellOutcome: vi.fn(async () => ({ kind: "done" as const, words: 5 })) }))
 vi.mock("./transcribe-status", () => ({
   getTranscribeStatus: vi.fn(() => ({ kind: "idle" })),
   setTranscribeStatus: vi.fn(),
@@ -34,7 +34,7 @@ describe("zero-shot batch confirm", () => {
     const confirmZeroShot = vi.fn(async () => "zs" as const)
     await runTranscribeAll({ cells, projectId: "p", session, confirmZeroShot })
     expect(confirmZeroShot).not.toHaveBeenCalled()
-    expect(transcribeCell).toHaveBeenCalledTimes(2)
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(2)
   })
 
   it("asks once with the count and cost line, then runs zero-shot", async () => {
@@ -42,19 +42,19 @@ describe("zero-shot batch confirm", () => {
     const confirmZeroShot = vi.fn(async () => "zs" as const)
     await runTranscribeAll({ cells, projectId: "p", session, orgId: 7, confirmZeroShot })
     expect(confirmZeroShot).toHaveBeenCalledWith({ count: 2, costLine: "≈ 12% of this week's remaining credits" })
-    expect(transcribeCell).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(transcribeCell).mock.calls[0][0]).not.toHaveProperty("forceAutoModel")
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(transcribeCellOutcome).mock.calls[0][0]).not.toHaveProperty("forceAutoModel")
   })
 
   it("closing the confirm transcribes nothing", async () => {
     setTranscriptionModel("user1", "omni-zs")
     await runTranscribeAll({ cells, projectId: "p", session, confirmZeroShot: async () => "cancel" })
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
   })
 
   it("Use automatic runs the batch without zero-shot, leaving the choice stored", async () => {
     setTranscriptionModel("user1", "omni-zs")
     await runTranscribeAll({ cells, projectId: "p", session, confirmZeroShot: async () => "auto" })
-    expect(vi.mocked(transcribeCell).mock.calls.map(([args]) => args.forceAutoModel)).toEqual([true, true])
+    expect(vi.mocked(transcribeCellOutcome).mock.calls.map(([args]) => args.forceAutoModel)).toEqual([true, true])
   })
 })

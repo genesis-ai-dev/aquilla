@@ -546,3 +546,21 @@ describe("parseFile — result shape", () => {
     }
   })
 })
+
+// AQU-2344: the text-file ceiling (95 MB) ran before the media branch, so every
+// film over 95 MB was refused and the 2 GB media ceiling was never reached.
+describe("prepareImportFile — a film over 95 MB", () => {
+  const sized = (name: string, bytes: number) => {
+    const f = new File(["x"], name)
+    Object.defineProperty(f, "size", { value: bytes })
+    return f
+  }
+  it("goes on to the media path, which has its own 2 GB ceiling", async () => {
+    const prepared = await prepareImportFile(sized("TheChosen_101_720p.mov", 1800 * 1024 * 1024), { projectId: "p1" })
+    expect(prepared).toEqual({ fileType: "video", results: [] })
+  })
+  it("leaves a text file over 95 MB refused, with the source ceiling", async () => {
+    await expect(prepareImportFile(sized("huge.vtt", 96 * 1024 * 1024), { projectId: "p1" })).rejects.toThrow(/95/)
+  })
+})
+

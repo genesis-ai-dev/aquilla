@@ -1,7 +1,9 @@
 // Decision 11, gaps 24 and 29: undoing a step made in another language opens
 // that language first, unless the person can no longer work in it.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { laneAccessFor, laneShownReady, waitUntilReady } from "./lane-switch"
+import { laneAccessFor, laneShownReady, stepReadsRecordings, waitUntilReady } from "./lane-switch"
 
 const base = { available: ["", "sw", "fr"], scoped: null, archived: [], canSwitch: true, loaded: true }
 
@@ -58,5 +60,52 @@ describe("waiting for the language to load", () => {
     const done = waitUntilReady(() => false, 300, 50)
     await vi.advanceTimersByTimeAsync(400)
     await expect(done).resolves.toBe("blocked")
+  })
+})
+
+// AQU-2426 (review, Nov 9, finding 3): opening a language waits for its
+// recordings only for a step that reads them. A text edit in the Text view,
+// where neither of the workspace's other audio reads loads, waited for them
+// too, and on a slow connection was refused after 15 s for want of
+// recordings it never needed.
+describe("waiting for the language's recordings", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("only a step that reads recordings waits for them", () => {
+    for (const kind of ["take.add", "take.window", "take.select", "take.remove", "vote.audio", "lines.split", "track.patch"]) {
+      expect(stepReadsRecordings([kind]), kind).toBe(true)
+    }
+    for (const kind of ["text.commit", "vote.text", "source.text", "cell.label", "row.retime", "row.add", "row.remove", "row.hidden", "lines.fromRecording", "file.importRecording", "film.link", "cue.link", "cast.assign", "settings.project"]) {
+      expect(stepReadsRecordings([kind]), kind).toBe(false)
+    }
+    // A group of steps waits when any of them does.
+    expect(stepReadsRecordings(["text.commit", "row.add"])).toBe(false)
+    expect(stepReadsRecordings(["text.commit", "take.select"])).toBe(true)
+  })
+
+  it("the language is on screen for a text edit while its recordings are still loading", () => {
+    const shown = { open: "fr", storeLane: "fr", loaded: true, recordingsLoaded: false }
+    expect(laneShownReady("fr", shown, stepReadsRecordings(["text.commit"]))).toBe(true)
+    expect(laneShownReady("fr", shown, stepReadsRecordings(["take.select"]))).toBe(false)
+    expect(laneShownReady("fr", { ...shown, recordingsLoaded: true }, stepReadsRecordings(["take.select"]))).toBe(true)
+  })
+
+  it("a text edit is never refused for recordings that never load; a take step waits and is kept", async () => {
+    vi.useFakeTimers()
+    const shown = { open: "fr", storeLane: "fr", loaded: true, recordingsLoaded: false }
+    const text = waitUntilReady(() => laneShownReady("fr", shown, stepReadsRecordings(["text.commit"])))
+    const take = waitUntilReady(() => laneShownReady("fr", shown, stepReadsRecordings(["take.select"])))
+    await vi.advanceTimersByTimeAsync(16_000)
+    await expect(text).resolves.toBe("ready")
+    await expect(take).resolves.toBe("blocked")
+  })
+
+  it("pins the workspace: the switcher waits for recordings only when the step reads them", () => {
+    const source = readFileSync(join(__dirname, "..", "..", "components", "ProjectWorkspace.tsx"), "utf8")
+    const ready = source.slice(source.indexOf("laneReadyRef.current = {"), source.indexOf("// Read through a ref: the switch may first wait"))
+    expect(ready).not.toMatch(/ready: [^\n]*audioValidationLoaded/)
+    expect(ready).toMatch(/recordingsLoaded: audioValidationLoaded && audioValidationAnswered/)
+    const switcher = source.slice(source.indexOf("laneSwitchRef.current = async"), source.indexOf("setLaneSwitcher((lane"))
+    expect(switcher).toMatch(/stepReadsRecordings\(kinds\)/)
   })
 })

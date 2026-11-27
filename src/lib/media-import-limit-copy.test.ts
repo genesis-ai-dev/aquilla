@@ -5,6 +5,7 @@ import { LOCALES } from "./i18n/locales"
 import { translate } from "./i18n/translate"
 import { formatByteLimit } from "./i18n/format"
 import { MAX_AUDIO_OBJECT_BYTES, MAX_AUDIO_UPLOAD_BYTES } from "./audio/upload"
+import { mediaOverLimitMessage } from "./audio/media-limit"
 
 /**
  * Regression guard for AQU-1975.
@@ -24,7 +25,7 @@ describe("media import limit copy", () => {
       fileName: "sermon.mp4",
       limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, "en"),
     }, "en")
-    expect(rendered).toBe("sermon.mp4 exceeds the 2 GB media import limit.")
+    expect(rendered).toBe("sermon.mp4 is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")
   })
 
   it("tracks the constant if the ceiling moves again", () => {
@@ -50,5 +51,15 @@ describe("media import limit copy", () => {
     // separate limit (single-request PUT / recorder memory budget).
     expect(MAX_AUDIO_UPLOAD_BYTES).toBe(95 * 1024 * 1024)
     expect(MAX_AUDIO_OBJECT_BYTES).toBeGreaterThan(MAX_AUDIO_UPLOAD_BYTES)
+  })
+
+  // Work Review question 122: the check every way in runs the moment a
+  // recording is picked, before anything is measured or uploaded.
+  it("names the first file over the ceiling, and nothing at or under it", () => {
+    const at = { name: "at.wav", size: MAX_AUDIO_OBJECT_BYTES }
+    const over = { name: "over.wav", size: MAX_AUDIO_OBJECT_BYTES + 1 }
+    expect(mediaOverLimitMessage([at])).toBeNull()
+    expect(mediaOverLimitMessage([at, over])).toBe(
+      "over.wav is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")
   })
 })

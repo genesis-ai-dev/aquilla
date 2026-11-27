@@ -64,8 +64,12 @@ export interface UseTransportForFileArgs {
    * on screen. Absent reads as `"recording"`, which is the old rule exactly.
    */
   playbackSource?: PlaybackSource
-  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`. */
+  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`.
+   *  AQU-2253: nor the picture's — see `videoOwnsFile`. */
   freeTiming?: boolean
+  /** AQU-2711 x AQU-2253 (review, Nov 25): the line-by-line clock's start
+   *  (a milestone's first heard line); the bar covers it..the end. */
+  timelineStartSec?: number
 }
 
 /**
@@ -84,6 +88,7 @@ export function useTransportForFile({
   virtualSoundingCellId = null,
   playbackSource = "recording",
   freeTiming = false,
+  timelineStartSec = 0,
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -97,6 +102,9 @@ export function useTransportForFile({
     coreMediaUrl,
     recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
     paneOnScreen,
+    // AQU-2253: following the recordings the film is on screen but follows
+    // the programme, which is the queue's.
+    freeTiming,
   )
   // Unconditional, like the video's — these are cheap module subscriptions, and
   // the CHOICE is made in the pure selector, so a file gaining or losing its
@@ -126,6 +134,7 @@ export function useTransportForFile({
               currentSec: virtualSec,
               playing: virtualPlaying,
               durationSec: timelineDurationSec,
+              startSec: timelineStartSec,
               soundingCellId: virtualSoundingCellId,
               rate: virtualRate,
               volume: virtualVolume,
@@ -135,7 +144,7 @@ export function useTransportForFile({
     [
       queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume, buffering,
       ownedByVirtual, virtualSec, virtualPlaying, virtualRate, virtualVolume, timelineDurationSec,
-      virtualSoundingCellId,
+      virtualSoundingCellId, timelineStartSec,
     ],
   )
 }

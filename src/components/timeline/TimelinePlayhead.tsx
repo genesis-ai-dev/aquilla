@@ -114,6 +114,13 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
     const now = performance.now()
     if (clockRef.current.sec !== currentSec || clockRef.current.at === 0) clockRef.current = { sec: currentSec, at: now }
     headRef.current = { sec: drawnSec, at: headRef.current?.at ?? now }
+    // AQU-2253 (browser pass, Nov 11): and paint it. The rAF writes `left`
+    // behind React's back, so a render whose `left` React thinks unchanged (a
+    // spinner over a clock whose second has not moved) wrote nothing: the head
+    // stayed where the rAF ran it on to while `headRef` went back to the
+    // clock, and playback then drew it backward from there.
+    const el = elRef.current
+    if (el) el.style.left = `${secToPx(drawnSec, pxPerSec)}px`
   })
 
   useEffect(() => {

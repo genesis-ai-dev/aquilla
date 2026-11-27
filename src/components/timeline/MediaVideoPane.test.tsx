@@ -39,9 +39,21 @@ vi.mock("@/lib/audio/play-queue", () => ({
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
   stopQueue: () => stopQueue(),
+  // AQU-2253 (review, Nov 9): where the film is the clock the pane reports the
+  // film's second to the queue, and pauses and resumes it around a film the
+  // browser will not start.
+  getQueueProgress: () => mockQueue.progress,
+  tickProgrammeFilm: (...args: [number, boolean?]) => tickProgrammeFilm(...args),
+  pauseQueue: () => pauseQueue(),
+  resumeQueue: () => resumeQueue(),
 }))
 // Hoisted with the mock above, so the factory can reach it.
-const { stopQueue } = vi.hoisted(() => ({ stopQueue: vi.fn() }))
+const { stopQueue, tickProgrammeFilm, pauseQueue, resumeQueue } = vi.hoisted(() => ({
+  stopQueue: vi.fn(),
+  tickProgrammeFilm: vi.fn(),
+  pauseQueue: vi.fn(),
+  resumeQueue: vi.fn(async () => {}),
+}))
 
 // AQU-1565 follow-up: the sound menu stops both players before it hands the
 // transport over. Spied, so a test can see the pause without real audio.
@@ -142,6 +154,30 @@ describe("MediaVideoPane", () => {
     Object.defineProperty(video, "duration", { value: 12, configurable: true })
     fireEvent.loadedMetadata(video)
     expect(onVideoDuration).toHaveBeenCalledWith("frontier-audio://imported.mp4", 12)
+  })
+
+  // The film bundle's browser pass (Nov 27): a film whose metadata is in
+  // before the pane is on screen (a cached or fast film: the element is made,
+  // with its address, while the workspace is still rendering) fires
+  // `loadedmetadata` when React is not yet listening, and the event never comes
+  // again. The film's length was then never told: the strip read the lines'
+  // 0:24 for the film's 1:00 and Play stopped with the lines.
+  it("tells the film's length it already knows when it comes on screen, with no event to say it", () => {
+    const proto = HTMLMediaElement.prototype
+    const ready = Object.getOwnPropertyDescriptor(proto, "readyState")
+    const dur = Object.getOwnPropertyDescriptor(proto, "duration")
+    Object.defineProperty(proto, "readyState", { get: () => 1, configurable: true })
+    Object.defineProperty(proto, "duration", { get: () => 60, configurable: true })
+    try {
+      const onVideoDuration = vi.fn()
+      renderPane({ onVideoDuration })
+      expect(onVideoDuration).toHaveBeenCalledWith("https://cdn/episode.webm", 60)
+    } finally {
+      if (ready) Object.defineProperty(proto, "readyState", ready)
+      else delete (proto as { readyState?: number }).readyState
+      if (dur) Object.defineProperty(proto, "duration", dur)
+      else delete (proto as { duration?: number }).duration
+    }
   })
 
   // so everything that used to ask it "what is sounding" and "is it playing"
@@ -306,6 +342,630 @@ describe("MediaVideoPane", () => {
       mockAudibility = { source: true, target: true }
       renderPane()
       expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+  })
+
+  // AQU-2253: following the recordings, the film is shown and runs on the
+  // programme's clock — the playhead's time is the film's time — and it keeps
+  // its own sound, which plays straight through with its picture.
+  describe("following the recordings", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0.5, endTime: 4, attachments: { a1: { url: "blob:x", type: "audio" } } }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 4.6, endTime: 8.8 }),
+    ]
+    const renderFollowing = (props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) =>
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings {...props} />)
+
+    it("follows the programme instead of driving, and keeps the film's own sound", () => {
+      renderFollowing()
+      expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("the Source audio mute silences it", () => {
+      mockAudibility = { source: false, target: true }
+      renderFollowing()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("goes to the programme's second, the same moment as the playhead", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.play = vi.fn(() => Promise.resolve())
+      sounding("s1", { progress: { currentTime: 12.5, duration: 20, rate: 1, volume: 1, programmeClock: true } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(12.5)
+    })
+
+    // AQU-2253 (Sam, Nov 9): a linked film plays on its own clock, so Play
+    // runs on past the last line to the film's end. The queue keeps its clock
+    // running there (still "playing", still on the last line, which is how it
+    // stays this file's), and the picture simply carries on.
+    describe("over the film's tail, after the last line", () => {
+      // A new element each time: the queue here is a mock the pane reads on render.
+      const following = () => <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />
+      const at = (sec: number, filmTail: boolean) =>
+        sounding("s2", { progress: { currentTime: sec, duration: 27, rate: 1, volume: 1, programmeClock: true, filmTail } })
+
+      it("the picture is left running: not stopped, not sent anywhere, as the clock runs on", () => {
+        vi.useFakeTimers()
+        try {
+          vi.setSystemTime(1_000_000)
+          const view = render(following())
+          const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+          Object.defineProperty(video, "duration", { value: 27, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          // The last line plays to its end at 9 s…
+          at(8.9, false)
+          view.rerender(following())
+          expect(video.currentTime).toBe(8.9)
+          // …and the clock runs on over the film, a beat at a time.
+          let seeks = 0
+          let sec = 8.9
+          Object.defineProperty(video, "currentTime", {
+            configurable: true,
+            get: () => sec,
+            set: (v: number) => { seeks++; sec = v },
+          })
+          for (const tick of [9.0, 9.1, 9.2, 9.3]) {
+            vi.setSystemTime(1_000_000 + Math.round((tick - 8.9) * 1000))
+            sec = tick // the film, playing on by itself
+            at(tick, true)
+            view.rerender(following())
+          }
+          expect(seeks).toBe(0)
+          expect(video.pause).not.toHaveBeenCalled()
+          expect(video.muted).toBe(false)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it("the last line's caption does not stay on the picture", () => {
+        const view = render(following())
+        at(8, false)
+        view.rerender(following())
+        expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Ligne deux")
+        at(9.2, true)
+        view.rerender(following())
+        expect(screen.queryByTestId("video-pane-caption")).toBeNull()
+      })
+    })
+
+    // AQU-2253 (review, Nov 9), finding 4: following the recordings the bottom
+    // strip's volume and mute are the queue's, and they did nothing to the
+    // film's own sound, which is part of what plays under the lines and all
+    // there is over the tail. The film takes the queue's volume, and is muted
+    // at zero (the strip's mute, and the part iPhone and iPad honour).
+    describe("the bottom strip's volume and mute reach the film's own sound", () => {
+      const following = (over: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => (
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings {...over} />
+      )
+      const volumeAt = (volume: number, filmTail = false) =>
+        sounding("s2", { progress: { currentTime: filmTail ? 12 : 6, duration: 27, rate: 1, volume, programmeClock: true, filmTail, filmClock: filmTail } })
+      const media = () => screen.getByTestId("video-pane-media") as HTMLVideoElement
+
+      it("under a line, the film's sound is at the strip's volume", () => {
+        volumeAt(0.4)
+        render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        expect(media().muted).toBe(false)
+      })
+
+      it("over the film's tail too, and it follows the slider as it is dragged", () => {
+        volumeAt(0.4, true)
+        const view = render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        volumeAt(0.15, true)
+        view.rerender(following())
+        expect(media().volume).toBeCloseTo(0.15, 5)
+      })
+
+      it("the strip's mute (volume zero) mutes the film, and unmuting brings it back", () => {
+        volumeAt(0, true)
+        const view = render(following())
+        expect(media().muted).toBe(true)
+        volumeAt(1, true)
+        view.rerender(following())
+        expect(media().muted).toBe(false)
+        expect(media().volume).toBe(1)
+      })
+
+      it("before anything plays, the volume already set on the strip is the film's", () => {
+        mockQueue = { ...mockQueue, progress: { ...mockQueue.progress, volume: 0.25 } }
+        render(following())
+        expect(media().volume).toBeCloseTo(0.25, 5)
+      })
+
+      it("the Source audio row's speaker still mutes it, whatever the volume", () => {
+        mockAudibility = { source: false, target: true }
+        volumeAt(0.8)
+        render(following())
+        expect(media().muted).toBe(true)
+      })
+
+      it("back following the source, the film has its own volume again", () => {
+        volumeAt(0.4)
+        const view = render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+        view.rerender(following({ followsRecordings: false }))
+        expect(media().volume).toBe(1)
+      })
+
+      it("following the source, the queue's volume is not the film's", () => {
+        mockQueue = { ...mockQueue, progress: { ...mockQueue.progress, volume: 0.4 } }
+        render(following({ followsRecordings: false }))
+        expect(media().volume).toBe(1)
+        expect(media().muted).toBe(false)
+      })
+    })
+
+    // AQU-2253 (review, Nov 9), finding 2: over the film's tail, and for the
+    // whole run when nothing is recorded, only the film plays, so the film is
+    // the clock (the queue says so: `filmClock`). The pane reports the film's
+    // own second, keeps the film wanted while the transport waits on it, and
+    // recovers it the way it does following the source.
+    describe("where only the film plays, the film is the clock", () => {
+      const following = () => <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />
+      type Kind = "playing" | "loading" | "paused"
+      const clockAt = (sec: number, kind: Kind = "playing", filmClock = true) =>
+        sounding("s2", {
+          kind,
+          playing: kind === "playing",
+          running: kind !== "paused",
+          progress: { currentTime: sec, duration: 27, rate: 1, volume: 1, programmeClock: true, filmTail: filmClock, filmClock },
+        })
+      /** The pane over a film at `filmSec`, with the queue's clock at `clockSec`. */
+      const mount = (filmSec: number, clockSec: number, kind: Kind = "playing", filmClock = true) => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        const film = { sec: filmSec, seeks: [] as number[] }
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        Object.defineProperty(video, "currentTime", {
+          configurable: true,
+          get: () => film.sec,
+          set: (v: number) => { film.seeks.push(v); film.sec = v },
+        })
+        video.play = vi.fn(() => Promise.resolve())
+        video.pause = vi.fn()
+        clockAt(clockSec, kind, filmClock)
+        view.rerender(following())
+        return { view, video, film }
+      }
+      beforeEach(() => {
+        tickProgrammeFilm.mockClear()
+        pauseQueue.mockClear()
+        resumeQueue.mockClear()
+      })
+
+      it("reports the film's own second to the queue as the film plays", () => {
+        const { video, film } = mount(9.2, 9.0)
+        film.sec = 9.45
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(9.45)
+      })
+
+      it("reports nothing under a line the queue plays: there the film follows the queue", () => {
+        const { video, film } = mount(4.0, 4.0, "playing", false)
+        film.sec = 4.25
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+      })
+
+      it("does not report a film that is somewhere else, or still on its way to a seek", () => {
+        const { video, film } = mount(9.0, 9.0)
+        // Where it was before a seek that has not landed yet.
+        film.sec = 20
+        fireEvent.timeUpdate(video)
+        Object.defineProperty(video, "seeking", { value: true, configurable: true })
+        film.sec = 9.2
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+      })
+
+      it("put back a little (Previous line on a short line), it goes back, and does not report from where it was first", () => {
+        const { video, film, view } = mount(10.2, 10.25)
+        // The queue's clock has gone back half a second; the pane has not rendered it yet.
+        clockAt(9.75)
+        film.sec = 10.45
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+        view.rerender(following())
+        expect(film.seeks).toEqual([9.75])
+      })
+
+      it("is not sent anywhere while it is near the clock, ahead or behind, from the first beat", () => {
+        const { film, view } = mount(8.4, 9.0)
+        clockAt(9.0, "loading")
+        view.rerender(following())
+        film.sec = 9.6
+        clockAt(9.0, "playing")
+        view.rerender(following())
+        expect(film.seeks).toEqual([])
+      })
+
+      it("is sent to the playhead when the playhead is put somewhere else", () => {
+        const { film, view, video } = mount(9.0, 9.0)
+        clockAt(20, "playing")
+        view.rerender(following())
+        expect(film.seeks).toEqual([20])
+        expect(video.pause).not.toHaveBeenCalled()
+      })
+
+      it("is kept playing, not paused, while the transport waits for it", () => {
+        const { video } = mount(9.0, 9.0, "loading")
+        expect(video.pause).not.toHaveBeenCalled()
+        expect(video.play).toHaveBeenCalled()
+      })
+
+      it("under a line that is still loading the film is paused, as before", () => {
+        const { video } = mount(4.0, 4.0, "loading", false)
+        expect(video.pause).toHaveBeenCalled()
+        expect(video.play).not.toHaveBeenCalled()
+      })
+
+      it("a film the browser will not start pauses the transport behind Click to start, and the click starts both", async () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        video.pause = vi.fn()
+        video.play = vi.fn(() => Promise.reject(new Error("NotAllowedError")))
+        clockAt(9.0)
+        view.rerender(following())
+        const overlay = await screen.findByTestId("video-pane-play-gesture")
+        expect(pauseQueue).toHaveBeenCalled()
+
+        // The queue paused, as asked. The click is the gesture: the film is
+        // started inside it, and the transport with it.
+        clockAt(9.0, "paused")
+        view.rerender(following())
+        video.play = vi.fn(() => Promise.resolve())
+        fireEvent.click(overlay)
+        expect(video.play).toHaveBeenCalled()
+        expect(resumeQueue).toHaveBeenCalled()
+      })
+
+      it("under a line, a film the browser will not start does not stop the lines", async () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        video.pause = vi.fn()
+        video.play = vi.fn(() => Promise.reject(new Error("NotAllowedError")))
+        clockAt(4.0, "playing", false)
+        view.rerender(following())
+        await screen.findByTestId("video-pane-play-gesture")
+        expect(pauseQueue).not.toHaveBeenCalled()
+      })
+
+      // AQU-2253 (review 2, Nov 9), finding 2: the transport waits for the
+      // film where it is the clock, so a film whose length has not come in
+      // must still be asked to play there, or the wait never ends.
+      it("a film whose length has not come in yet is asked to play where it is the clock", () => {
+        for (const kind of ["loading", "playing"] as const) {
+          const view = render(following())
+          const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+          Object.defineProperty(video, "duration", { value: Number.NaN, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          clockAt(9.0, kind)
+          view.rerender(following())
+          expect(video.play, kind).toHaveBeenCalled()
+          expect(video.pause, kind).not.toHaveBeenCalled()
+          view.unmount()
+        }
+      })
+
+      it("a YouTube film, its length not reported yet, is asked to play there too", () => {
+        const youTube = () => <MediaVideoPane src="https://youtu.be/dQw4w9WgXcQ" fileId="f1" cells={subs} followsRecordings />
+        const view = render(youTube())
+        const media = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        expect(media.tagName.toLowerCase()).toBe("youtube-video")
+        Object.defineProperty(media, "duration", { value: Number.NaN, configurable: true })
+        media.play = vi.fn(() => Promise.resolve())
+        media.pause = vi.fn()
+        clockAt(9.0, "loading")
+        view.rerender(youTube())
+        expect(media.play).toHaveBeenCalled()
+        expect(media.pause).not.toHaveBeenCalled()
+      })
+
+      it("under a line the queue plays, a film with no length yet is paused, as before", () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: Number.NaN, configurable: true })
+        video.play = vi.fn(() => Promise.resolve())
+        video.pause = vi.fn()
+        clockAt(4.0, "playing", false)
+        view.rerender(following())
+        expect(video.pause).toHaveBeenCalled()
+        expect(video.play).not.toHaveBeenCalled()
+      })
+
+      it("while the queue listens for a film it gave up waiting on, the film's second is reported as it follows the playhead", () => {
+        const { video, film, view } = mount(4.0, 4.0, "playing", false)
+        sounding("s2", { progress: { currentTime: 4.0, duration: 27, rate: 1, volume: 1, programmeClock: true, filmClock: false, filmQuiet: true } })
+        view.rerender(following())
+        film.sec = 4.25
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(4.25)
+      })
+
+      it("tells the queue the film is over when the clock is at the film's own last frame", () => {
+        // The stored length said more than the 27 s the film really has.
+        // The picture is put on its last frame, and says so.
+        mount(26.5, 26.9)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(26.75, true)
+      })
+
+      describe("a film that has stopped without saying so", () => {
+        beforeEach(() => vi.useFakeTimers())
+        afterEach(() => vi.useRealTimers())
+        const tick = (n = 1) => act(() => { vi.advanceTimersByTime(1000 * n) })
+        /** A film that claims to be running and whose clock does not move,
+         *  over film it has loaded. */
+        const wedge = (video: HTMLVideoElement) => {
+          Object.defineProperty(video, "duration", { value: 27, configurable: true })
+          Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 27 }, configurable: true })
+          Object.defineProperty(video, "readyState", { value: 4, configurable: true })
+          Object.defineProperty(video, "seeking", { value: false, configurable: true })
+          Object.defineProperty(video, "paused", { value: false, configurable: true })
+          Object.defineProperty(video, "ended", { value: false, configurable: true })
+          Object.defineProperty(video, "currentTime", { value: 9, writable: true, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          video.load = vi.fn()
+          return video
+        }
+
+        it("is put through the recovery it gets following the source, and the transport pauses when that runs out", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          clockAt(9.0, "loading")
+          view.rerender(following())
+          ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+          tick(3) // a baseline, two frozen samples: the nudge
+          expect(video.play).toHaveBeenCalled()
+          tick(2) // reopen the source
+          expect(video.load).toHaveBeenCalled()
+          tick(3) // rebuild the element
+          const rebuilt = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          expect(rebuilt).not.toBe(video)
+          expect(pauseQueue).not.toHaveBeenCalled()
+          tick(3) // still stuck: out of ideas
+          expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+          expect(pauseQueue).toHaveBeenCalled()
+          // The bar's spinner is the queue's here, not the picture's own.
+          expect(getVideoBuffering()).toBe(false)
+        })
+
+        it("is left alone under a line the queue plays, as before", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          clockAt(4.0, "playing", false)
+          view.rerender(following())
+          tick(10)
+          expect(video.load).not.toHaveBeenCalled()
+        })
+
+        // AQU-2253 (review, Nov 13): a film that loads nothing, where it is the
+        // clock: after a minute the transport pauses and the panel says why.
+        it("that loads nothing for a minute pauses the transport and says the film isn't arriving", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          Object.defineProperty(video, "buffered", { value: { length: 0, start: () => 0, end: () => 0 }, configurable: true })
+          clockAt(9.0, "loading")
+          view.rerender(following())
+          tick(30)
+          expect(pauseQueue).not.toHaveBeenCalled()
+          tick(32)
+          expect(pauseQueue).toHaveBeenCalled()
+          expect(screen.getByTestId("video-pane-not-arriving")).toHaveTextContent("The film isn't arriving. Check the connection, then press Play.")
+          expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+          expect(video.load).not.toHaveBeenCalled()
+        })
+      })
+    })
+
+    // AQU-2253 (review, Nov 9): the sound pick counts following the recordings
+    // too. A streamed film beside an uploaded recording starts on the
+    // recording (today's default), so the film is the quiet one in both
+    // timings; a YouTube film starts on its own sound until the person picks
+    // the recording.
+    describe("beside an uploaded recording", () => {
+      const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+      afterEach(() => {
+        localStorage.removeItem(playbackSourceKey("f1"))
+        __resetPlaybackSourceForTests()
+      })
+
+      it("a streamed film stays quiet: the recording is the sound, as it is following the source", () => {
+        renderFollowing({ cells: CELLS })
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+
+      it("a YouTube film keeps its own sound until the recording is picked, then goes quiet", async () => {
+        renderFollowing({ cells: CELLS, src: YT })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+        fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+        fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+    })
+
+    // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
+    // live on them) does not play its own recording lines, so the film's own
+    // sound is the original there, linked or imported.
+    describe("on a file that plays its heard lines", () => {
+      it("a streamed film beside an uploaded recording keeps its own sound", () => {
+        renderFollowing({ cells: CELLS, playsHeardLines: true })
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+      })
+
+      it("an imported film voices the original too, and the Source audio mute still silences it", () => {
+        const view = renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+        view.unmount()
+        mockAudibility = { source: false, target: true }
+        renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+    })
+
+    // AQU-2253 (review, Nov 9): a film that cannot play voices nothing, so the
+    // workspace is told and gives the lines' original its sound back.
+    it("tells the workspace when the film could not be loaded, and again when it is retried or leaves", () => {
+      const onFilmFailed = vi.fn()
+      const view = renderFollowing({ onFilmFailed })
+      expect(onFilmFailed).toHaveBeenLastCalledWith(false)
+      fireEvent.error(screen.getByTestId("video-pane-media"))
+      expect(onFilmFailed).toHaveBeenLastCalledWith(true)
+      view.unmount()
+      expect(onFilmFailed).toHaveBeenLastCalledWith(false)
+    })
+
+    it("a take played on its own clock leaves the film where it is", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.currentTime = 3
+      sounding("s1", { progress: { currentTime: 1.2, duration: 3.1, rate: 1, volume: 1, programmeClock: false } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(3)
+    })
+  })
+
+  // AQU-2253 (Sam, Oct 30): an IMPORTED film (a video uploaded through the
+  // importer) is picture only — its sound is the Source audio row's — and
+  // following the recordings it is cut into its lines' pieces.
+  describe("an imported film", () => {
+    const UPLOAD = "frontier-audio://f1/audio-f1-1-film.webm"
+    const lines = [
+      cell({ id: "a", original: "Line a", attachments: {}, startTime: 0.5, endTime: 4 }),
+      cell({ id: "b", original: "Line b", attachments: {}, startTime: 4.6, endTime: 8.8 }),
+    ]
+    // Line a fits its 3.5 s exactly; line b's recording is 6 s against 4.2 s
+    // of film, so its piece holds from 7.7 s to 9.5 s on the timeline.
+    const pieces = [
+      { cellId: "a", atSec: 0, lenSec: 3.5, filmStartSec: 0.5, filmEndSec: 4.0 },
+      { cellId: "b", atSec: 3.5, lenSec: 6, filmStartSec: 4.6, filmEndSec: 8.8 },
+    ]
+    const pane = (props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => (
+      <MediaVideoPane src={UPLOAD} fileId="f1" cells={lines} importedFilm {...props} />
+    )
+    const programmeAt = (sec: number, cellId: string, over: Partial<QueueForFile> = {}) =>
+      sounding(cellId, { progress: { currentTime: sec, duration: 9.5, rate: 1, volume: 1, programmeClock: true }, ...over })
+    const media = () => {
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.play = vi.fn(() => Promise.resolve())
+      video.pause = vi.fn() as unknown as HTMLVideoElement["pause"]
+      return video
+    }
+
+    it("is muted following the source, whatever the Source audio mute says", () => {
+      mockAudibility = { source: true, target: true }
+      render(pane())
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("is muted following the recordings too, where a linked film keeps its own sound", () => {
+      mockAudibility = { source: true, target: true }
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      // The same pane on a linked film plays its own sound (unchanged).
+      // AQU-2253 (review, Nov 9): on lines with no uploaded recording; beside
+      // one, the sound pick decides (see "beside an uploaded recording").
+      view.unmount()
+      const textLines = lines.map((l) => ({ ...l, medium: "text", attachments: undefined }) as unknown as CellData)
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={textLines} followsRecordings />)
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("following the recordings, shows the piece under the playhead: that line's own stretch", () => {
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(1, "a")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBe(1.5)
+      // 5 s on the timeline is 1.5 s into line b's piece: 6.1 s of the film,
+      // not 5 s (the film's own clock, which a linked film would show). A
+      // second later, past the seek cooldown.
+      const now = Date.now()
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 1000)
+      try {
+        programmeAt(5, "b")
+        view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+        expect(video.currentTime).toBeCloseTo(6.1, 6)
+        expect(video.play).toHaveBeenCalled()
+      } finally {
+        clock.mockRestore()
+      }
+    })
+
+    it("a recording longer than its line's original: the last frame of the line's stretch, held still", () => {
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(8.5, "b")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(8.76, 6)
+      expect(video.pause).toHaveBeenCalled()
+      ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+      programmeAt(9.2, "b")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(8.76, 6)
+      expect(video.play).not.toHaveBeenCalled()
+    })
+
+    it("an explicit seek lands in the piece under the timeline's second", () => {
+      const seeks = createVideoSeekStore()
+      render(pane({ followsRecordings: true, filmPieces: pieces, seek: seeks }))
+      const video = media()
+      act(() => seeks.request(4))
+      expect(video.currentTime).toBeCloseTo(5.1, 6)
+    })
+
+    it("opened following the recordings with nothing playing: the first line's piece, not the film's 0:00", () => {
+      render(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).currentTime).toBe(0.5)
+    })
+
+    it("switching timing while nothing plays puts the picture where the playhead's second is in the new timing", () => {
+      // Paused following the recordings at 5 s: line b's piece, 6.1 s of film.
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(5, "b", { playing: false, running: false, kind: "paused" })
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+      // The switch stops the queue; the playhead stays on 5, which following
+      // the source is 5 s of the film.
+      mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+      view.rerender(pane())
+      expect(video.currentTime).toBe(5)
+      // …and back: 5 s on the recordings' timeline is line b's piece again.
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+    })
+
+    it("following the source, the film's own clock: the recording's second is the film's", () => {
+      const view = render(pane())
+      const video = media()
+      sounding("b", { progress: { currentTime: 5, duration: 27, rate: 1, volume: 1, programmeClock: false } })
+      view.rerender(pane())
+      expect(video.currentTime).toBe(5)
+    })
+
+    it("a linked film following the recordings keeps the film's own clock, pieces or none", () => {
+      const view = render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      const video = media()
+      programmeAt(5, "b")
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      expect(video.currentTime).toBe(5)
     })
   })
 
@@ -510,9 +1170,33 @@ describe("MediaVideoPane", () => {
 
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "error")
     expect(screen.getByText("This film could not be loaded")).toBeInTheDocument()
-    expect(screen.getByText("https://cdn/episode.webm")).toBeInTheDocument()
+    // A reason in a sentence, not the raw address (import map X-D-youtube-film-card).
+    expect(screen.getByTestId("video-pane-error-reason")).toHaveTextContent(
+      "The film at cdn didn't play. Check that the link still works.")
+    expect(screen.queryByText("https://cdn/episode.webm")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Change film" }))
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
+  })
+
+  // Import map D#14: the card printed the address the film was fetched from,
+  // signed token and all. An imported film's card gives a reason, never it.
+  it("never shows an imported film's signed address when it will not load", async () => {
+    render(<MediaVideoPane
+      src="frontier-audio://imported.mp4"
+      projectId="p1" fileId="f1" cells={[]}
+      session={{ username: "dev", jwt: "identity" } as FrontierSession}
+    />)
+    await waitFor(() => expect(screen.getByTestId("video-pane-media").getAttribute("src")).toContain("picture-token"))
+    fireEvent.error(screen.getByTestId("video-pane-media"))
+    expect(screen.getByTestId("video-pane-error-reason")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-video-pane").textContent).not.toMatch(/picture-token|frontier-audio|\/audio\//)
+  })
+
+  it("offers only Retry when no way to change the film is given", () => {
+    renderPane()
+    fireEvent.error(screen.getByTestId("video-pane-media"))
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Change film" })).toBeNull()
   })
 
   // ── Round 6: waiting for the picture before starting it ──────────────────
@@ -822,17 +1506,20 @@ describe("a stalled picture is noticed, and gets out of it", () => {
 
   const mount = (o: { onVideoPlaying?: (playing: boolean) => void } = {}) => {
     const onVideoPlaying = o.onVideoPlaying ?? vi.fn()
+    const seeks = createVideoSeekStore()
     const props = {
       src: "https://cdn/episode.webm",
       fileId: "f1",
       cells: subs,
       onVideoTime: vi.fn(),
       onVideoPlaying,
+      seek: seeks,
     }
     const view = render(<MediaVideoPane {...props} />)
-    /** Make an element look like one that is running. */
+    /** Make an element look like one that is running, over film it has loaded. */
     const equip = (video: HTMLVideoElement, at = 12) => {
       Object.defineProperty(video, "readyState", { value: 4, configurable: true })
+      Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 60 }, configurable: true })
       Object.defineProperty(video, "seeking", { value: false, configurable: true, writable: true })
       Object.defineProperty(video, "paused", { value: false, configurable: true, writable: true })
       Object.defineProperty(video, "ended", { value: false, configurable: true, writable: true })
@@ -845,7 +1532,7 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     const element = () => equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
     const video = element()
     const press = (nonce: number) => view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce }} />)
-    return { video, press, view, onVideoPlaying, equip }
+    return { video, press, view, onVideoPlaying, equip, props }
   }
 
   beforeEach(() => {
@@ -882,6 +1569,116 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     expect(video.currentTime).toBe(12)
   })
 
+  // AQU-2253 (browser pass, Nov 11: 4-hls-stream in WebKit): a film that has
+  // played out what it loaded is waiting on the network. It shows the spinner
+  // and is nudged (asked to fetch again where it is), but what it has loaded is
+  // never thrown away to reopen or rebuild it, and it carries on when the
+  // network does.
+  it("waits with the spinner, nudged once, for a film that has played out what it loaded", () => {
+    const { video, press } = mount()
+    Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 12 }, configurable: true })
+    press(1)
+    const before = (video.play as ReturnType<typeof vi.fn>).mock.calls.length
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+    expect((video.play as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before)
+    tick(30)
+    expect(video.load).not.toHaveBeenCalled()
+    expect(screen.getByTestId("video-pane-media")).toBe(video)
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(true)
+    video.currentTime = 13
+    tick(1)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  // AQU-2253 (review, Nov 13; probes P4, P5): waiting on the network has a
+  // ceiling. A film that loads nothing for a minute stops, is paused, and the
+  // pane says why in place of "Click to start"; Play tries again from the start.
+  const EMPTY = { length: 0, start: () => 0, end: () => 0 }
+  it("P4: a film that loads nothing waits a minute with the spinner, then stops and says the film isn't arriving", () => {
+    const onVideoPlaying = vi.fn()
+    const { video, press } = mount({ onVideoPlaying })
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(30)
+    expect(getVideoBuffering()).toBe(true)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    tick(32)
+    expect(screen.getByTestId("video-pane-not-arriving")).toHaveTextContent("The film isn't arriving. Check the connection, then press Play.")
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(false)
+    expect(video.pause).toHaveBeenCalled()
+    expect(onVideoPlaying).toHaveBeenLastCalledWith(false)
+    expect(video.load).not.toHaveBeenCalled()
+    expect(screen.getByTestId("video-pane-media")).toBe(video)
+  })
+
+  it("Play after 'not arriving' tries again from the start of the ladder", () => {
+    const { video, press } = mount()
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(62)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+    press(2)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    expect(video.play).toHaveBeenCalled()
+    ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+    tick(3) // a baseline, two frozen samples: the nudge again
+    expect(getVideoBuffering()).toBe(true)
+    expect(video.play).toHaveBeenCalled()
+  })
+
+  // AQU-2253 (re-review, Nov 13): the message is about film not arriving, so
+  // it goes the moment film arrives. The connection came back and a click on
+  // the ruler loaded the frame there: the frame shows, not the dark message.
+  it("after the message, a scrub while stopped lands on film that has arrived: the message goes", () => {
+    const { video, press, props } = mount()
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(62)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    tick(10) // still nothing: it stays
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 60 }, configurable: true })
+    act(() => props.seek.request(20))
+    tick(2)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    // Stopped it stays: the frame is shown, nothing starts by itself.
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  it("P5: a wedge over loaded film climbs to a rebuild; a rebuilt player that loads nothing stops after a minute the same way", () => {
+    const m = mount()
+    m.press(1)
+    tick(STALL_TICKS) // nudge
+    tick(2) // reopen
+    expect(m.video.load).toHaveBeenCalled()
+    tick(3) // rebuild
+    const rebuilt = m.equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+    expect(rebuilt).not.toBe(m.video)
+    Object.defineProperty(rebuilt, "buffered", { value: EMPTY, configurable: true })
+    tick(30)
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(true)
+    tick(32)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+  })
+
+  it("P6: the same rebuilt player over loaded film still ends with 'Click to start'", () => {
+    const m = mount()
+    m.press(1)
+    tick(8)
+    const rebuilt = screen.getByTestId("video-pane-media") as HTMLVideoElement
+    expect(rebuilt).not.toBe(m.video)
+    m.equip(rebuilt)
+    tick(3)
+    expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+  })
+
   it("says nothing about a film the user paused", () => {
     const { video, press } = mount()
     press(1)
@@ -895,8 +1692,47 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     const { video, press } = mount()
     press(1)
     Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    // Over film it has loaded (the mount's), a seek has SEEK_STUCK_MS to land
+    // before it counts as stuck: the next tests.
+    tick(4)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  /** What the element says it has loaded, as `TimeRanges`. */
+  const loaded = (...ranges: Array<[number, number]>) => ({
+    length: ranges.length,
+    start: (i: number) => ranges[i]![0],
+    end: (i: number) => ranges[i]![1],
+  })
+
+  // AQU-2253 (browser pass, Nov 9; review, Nov 9): in WebKit, a click ahead of
+  // what the film had loaded and then Play left the seek unfinished for good
+  // while the film went on to load all of it: seeking, not paused, enough
+  // data, a still clock. Read as a seek still landing, the watchdog never
+  // looked. After SEEK_STUCK_MS over loaded film it is a stall, and its ladder
+  // starts at reopening the film, never a second seek on top of the first
+  // (MediaVideoPane.stuckSeek.test.tsx has the rest).
+  it("treats a seek that never lands, though the film has loaded where it was sent, as a stall after five seconds", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    Object.defineProperty(video, "buffered", { value: loaded([0, 40]), configurable: true })
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(false)
+    tick(5)
+    expect(getVideoBuffering()).toBe(true)
+    expect(video.load).toHaveBeenCalled()
+    expect(video.currentTime).toBe(12)
+  })
+
+  it("still waits on a seek whose place in the film has not loaded yet", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    Object.defineProperty(video, "buffered", { value: loaded([0, 5]), configurable: true })
     tick(10)
     expect(getVideoBuffering()).toBe(false)
+    expect(video.load).not.toHaveBeenCalled()
   })
 
   it("says nothing at the end of the film", () => {
@@ -1034,6 +1870,21 @@ describe("a YouTube link", () => {
     const config = (media as HTMLElement & { config?: { origin?: string; cc_load_policy?: number } }).config
     expect(config?.cc_load_policy).toBe(0)
     expect(config?.origin).toBe(window.location.origin)
+  })
+
+  // Import map X-D-youtube-film-card (Nov 2): the card printed the watch
+  // address and said nothing a person could act on.
+  it("says what YouTube's player said when it fails, not the address", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement & { error?: unknown }
+    // The real element keeps the iframe player's error on `error`.
+    media.error = { code: 150, message: "YouTube iframe player error #150" }
+    fireEvent.error(media)
+    expect(screen.getByTestId("video-pane-error-reason")).toHaveTextContent(
+      "The video's owner doesn't let it play on other sites.")
+    expect(screen.queryByText(/youtu/)).toBeNull()
+    expect(screen.getByTestId("video-pane-open-youtube"))
+      .toHaveAttribute("href", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
   })
 
   // Walk r2 (2026-10-05): the element's shadow :host carries min-width 300px,

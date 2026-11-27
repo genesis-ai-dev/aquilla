@@ -31,6 +31,26 @@ export function estimateZeroShotCredits(
   return creditsFor(rawCents, "llm", { markup, agentMarkup: markup })
 }
 
+/** The GPU the CTC model runs on (spec §1; its A10G fallback costs more). */
+export const CTC_GPU: keyof typeof OMNI_GPU_CENTS_PER_SEC = "L4"
+/** GPU-seconds per audio-second for CTC when `/status` does not say: the
+ *  conservative value from the same spike (spec §8). */
+export const CTC_EST_GPU_SEC_PER_AUDIO_SEC_FALLBACK = 0.1
+
+/**
+ * AQU-2426 (review, Nov 9): credits an Omnilingual CTC run over `audioSec`
+ * seconds should cost: a source recording that goes to Omnilingual goes to
+ * CTC, never zero-shot, so its estimate uses CTC's own GPU and speed.
+ */
+export function estimateCtcCredits(
+  audioSec: number,
+  gpuSecPerAudioSec: number = CTC_EST_GPU_SEC_PER_AUDIO_SEC_FALLBACK,
+  markup: number = DEFAULT_CREDIT_MARKUP,
+): number {
+  const rawCents = audioSec * gpuSecPerAudioSec * OMNI_GPU_CENTS_PER_SEC[CTC_GPU] * OMNI_ASR_AMORTIZATION
+  return creditsFor(rawCents, "llm", { markup, agentMarkup: markup })
+}
+
 /**
  * The estimate as a whole percentage of the credits left, or null when there
  * is no positive balance to measure against (the caller then shows credits).

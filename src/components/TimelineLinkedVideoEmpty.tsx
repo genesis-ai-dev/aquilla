@@ -216,8 +216,12 @@ export function TimelineLinkedVideoEmpty({
               />
             </Button>
             <Button variant="link" size="sm" className={cn("mt-2", QUIET_LINK)}
+              data-testid="linked-video-recording-back"
               onClick={() => { setRecordingStep(false); setError(null) }}>
-              {t("editor.media.linkedVideoBackToCaptions")}
+              {/* Import map D#28: "Back to captions" only to someone the first
+                  step offers captions to; a project lead below that gets a
+                  plain Back to the step they came from. */}
+              {t(captionAction ? "editor.media.linkedVideoBackToCaptions" : "common.back")}
             </Button>
           </>
         ) : (

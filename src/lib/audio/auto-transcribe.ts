@@ -14,8 +14,7 @@ import { usesHostedTranscription } from "./transcription-preference"
 // (the manual Transcribe affordances remain; nothing re-prompts per cell).
 
 import { requestAiModelConsent, WHISPER_MODEL } from "./ai-consent"
-import { runTranscribeAll } from "./batch-audio"
-import { getTranscribeStatus } from "./transcribe-status"
+import { runTranscribeAll, type TranscribeRunReport } from "./batch-audio"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -114,8 +113,16 @@ export interface AutoTranscribeArgs {
    *  transcript emits queue there) and revalidates so text appears promptly.
    *  AQU-1917: only runs when the batch actually produced transcripts — a run
    *  the ASR backend rejected goes to `onFailed` instead, so a caller may
-   *  report success from here. */
-  onDone?: () => void | Promise<void>
+   *  report success from here. AQU-2375: and only when EVERY row landed; a
+   *  run where some did not goes to `onPartial`. */
+  onDone?: (report: TranscribeRunReport | undefined) => void | Promise<void>
+  /** AQU-2375: some rows landed and some did not (failed, or never reached).
+   *  Their transcripts still need the same flush as `onDone`'s. Without it,
+   *  such a run goes to `onDone`. */
+  onPartial?: (report: TranscribeRunReport) => void | Promise<void>
+  /** AQU-2375: the recording's name. Given, the run is kept so a page reload
+   *  does not end it (transcribe-runs.ts). */
+  fileName?: string
   /** Sam, 2026-08-18: "it takes a minute to transcribe everything so there
    *  should be a toast that shows that it's loading." Stays silent for a
    *  consent denial or a file with nothing to do, so no toast ever appears for
@@ -125,28 +132,10 @@ export interface AutoTranscribeArgs {
    *  (epoch ms), or null when it carries on — so a progress toast can say so
    *  instead of looking stuck for up to a quarter of an hour. */
   onWaiting?: (untilMs: number | null) => void
-  /** The batch threw. Only matters to a caller that put something on screen in
-   *  `onProgress` and now has to take it back down. */
-  onFailed?: (message: string) => void
-}
-
-/**
- * The error the batch left on the seeded rows' audio, or null if it left none.
- *
- * AQU-1917: an imported media file's rows all share ONE source-clip audioId,
- * so transcribe status is per CLIP, not per row. That is enough to tell "the
- * run produced nothing" from "the run produced transcripts" — the distinction
- * the post-import report got wrong — and deliberately not used to count
- * individual failed rows, which this status cannot support.
- */
-function batchLeftAnError(cells: CellData[]): string | null {
-  for (const cell of cells) {
-    const audioId = cell.selectedAudioId
-    if (!audioId) continue
-    const status = getTranscribeStatus(audioId)
-    if (status.kind === "error") return status.message
-  }
-  return null
+  /** The batch threw, or (AQU-1917) no row of it transcribed. Only matters to
+   *  a caller that put something on screen in `onProgress` and now has to take
+   *  it back down. `report` is there when the batch ran to its end. */
+  onFailed?: (message: string, report?: TranscribeRunReport) => void
 }
 
 /**
@@ -159,7 +148,7 @@ export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Pro
       ? true
       : await requestAiModelConsent(WHISPER_MODEL)
     if (!consented) return
-    await runTranscribeAll({
+    const report = await runTranscribeAll({
       cells: args.seed.cells,
       projectId: args.projectId,
       session: args.session,
@@ -167,18 +156,26 @@ export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Pro
       targetLanguage: args.targetLanguage,
       onProgress: args.onProgress,
       ...(args.onWaiting ? { onWaiting: args.onWaiting } : {}),
-    })
-    // AQU-1917: a row whose ASR call failed sets an error status and
-    // RESOLVES — `runTranscribeAll` only throws when the batch itself dies.
-    // So a run in which the ASR endpoint rejected everything still reached
-    // `onDone` and was reported as a success ("Transcribed N sections of
-    // …"), telling the user text had landed when none had.
-    const failure = batchLeftAnError(args.seed.cells)
-    if (failure !== null) {
-      args.onFailed?.(failure)
+      ...(args.fileName !== undefined ? { keep: { fileId: args.seed.fileId, fileName: args.fileName, kind: "import" as const } } : {}),
+    }) as TranscribeRunReport | undefined
+    // Nothing ran (every row already had text, or the cost was declined):
+    // nothing to report.
+    if (report && !report.started) return
+    // AQU-1917: a row whose ASR call failed RESOLVES — `runTranscribeAll` only
+    // throws when the batch itself dies — so a run in which the ASR endpoint
+    // rejected everything once reached `onDone` and said "Transcribed N
+    // sections of …" over a file that had gained no text. AQU-2375: the batch
+    // now counts each row, so a run where SOME failed is said as well; the
+    // shared clip status (one per recording, not per row) could not.
+    if (report && report.failed.length > 0 && report.transcribed === 0) {
+      args.onFailed?.(report.failed[0]!.message, report)
       return
     }
-    await args.onDone?.()
+    if (report && (report.failed.length > 0 || report.transcribed < report.total) && args.onPartial) {
+      await args.onPartial(report)
+      return
+    }
+    await args.onDone?.(report)
   } catch (e) {
     console.warn("[auto-transcribe] post-import batch failed:", e)
     args.onFailed?.(e instanceof Error ? e.message : String(e))

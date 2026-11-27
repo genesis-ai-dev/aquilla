@@ -44,15 +44,37 @@ export interface LaneShown {
   storeLane: string
   /** The open language's lines and takes have loaded. */
   loaded: boolean
+  /** AQU-2426 (review, Nov 9): the open language's own read of the file's
+   *  recordings has answered. Absent: not asked. */
+  recordingsLoaded?: boolean
 }
 
 /**
  * Whether `lane` is on screen with its lines and takes: its rows sorted for it
  * too, so loaded flags left over from the language before cannot count
- * (review, Oct 29).
+ * (review, Oct 29). With `needsRecordings` (a step that reads them,
+ * `stepReadsRecordings`), its recordings too.
  */
-export function laneShownReady(lane: string, shown: LaneShown): boolean {
+export function laneShownReady(lane: string, shown: LaneShown, needsRecordings = false): boolean {
   return shown.open === lane && shown.storeLane === lane && shown.loaded
+    && (!needsRecordings || shown.recordingsLoaded !== false)
+}
+
+/** Step kinds whose undo or redo reads the file's recordings: a kind, or a
+ *  family of kinds when it ends in a dot. */
+const READS_RECORDINGS = ["take.", "track.", "vote.audio", "lines.split"] as const
+
+/**
+ * AQU-2426 (review, Nov 9, finding 3): does undoing or redoing a step of these
+ * kinds (a group's, all of them) read the language's recordings? A take step,
+ * a track step (it brings takes back), an audio vote, and Split into lines…
+ * (it writes the text back onto the line's recording) do. A text edit, a text
+ * vote, a row, a label or a film link does not, and opening its language
+ * never waits for recordings it does not need: in the Text view on a slow
+ * connection that wait could refuse the step after 15 s.
+ */
+export function stepReadsRecordings(kinds: readonly string[]): boolean {
+  return kinds.some((kind) => READS_RECORDINGS.some((k) => (k.endsWith(".") ? kind.startsWith(k) : kind === k)))
 }
 
 /**

@@ -81,3 +81,14 @@ describe("deriveCellAreaState", () => {
     }
   })
 })
+
+describe("an empty time-ordered file someone may add media to (import map, Nov 8)", () => {
+  const settled = { activeFileId: "f1", cellCount: 0, syncStatus: "live" as const, cellsLoading: false, cellsError: false }
+  it("opens on its media card, not the generic empty screen", () => {
+    expect(deriveCellAreaState({ ...settled, offersMediaCard: true }).kind).toBe("ready")
+  })
+  it("someone who may not add media still sees the generic empty screen", () => {
+    expect(deriveCellAreaState({ ...settled, offersMediaCard: false }).kind).toBe("ready-empty")
+  })
+})
+

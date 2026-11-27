@@ -24,6 +24,7 @@ import {
   type ImportSessionRecord,
 } from "./import-session"
 import { v7 as uuidv7 } from "uuid"
+import { t } from "../i18n/standalone"
 import type { CaptionRowsPromotion, ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
   MAX_IMPORT_REQUEST_BODY_BYTES,
@@ -520,9 +521,7 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     if (response) {
       if (response.ok) return
       const detail = await response.text().catch(() => "")
-      lastError = new Error(
-        `Import publication failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
+      lastError = new Error(importRefusalMessage("Import publication failed", response.status, detail))
       if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
         const refreshed = await args.getToken(args.fileId)
         if (refreshed) {
@@ -537,6 +536,21 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     }
   }
   throw lastError ?? new Error("Import publication failed")
+}
+
+/** The sync worker's own word for a film it won't store: neither a YouTube
+ *  video's link nor a film uploaded with this file. */
+const FILM_REFUSAL = "invalid linked picture publication"
+
+/**
+ * What a refused import says to a person. A refusal the app knows gets a plain
+ * sentence (import map X-D-film-refusal-text: the film refusal read "Upload
+ * failed (HTTP 400): invalid linked picture publication"); any other keeps the
+ * server's own words after the status, as before.
+ */
+export function importRefusalMessage(prefix: string, status: number, detail: string): string {
+  if (status === 400 && detail.trim() === FILM_REFUSAL) return t("importExport.errors.filmRefused")
+  return `${prefix} (HTTP ${status})${detail ? `: ${detail.slice(0, 200)}` : ""}`
 }
 
 /**
@@ -667,9 +681,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
         }
 
         const detail = await response.text().catch(() => "")
-        lastError = new Error(
-          `Upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-        )
+        lastError = new Error(importRefusalMessage("Upload failed", response.status, detail))
 
         // Large imports can outlive their original file token. Refresh it and
         // retry the exact same idempotent chunk once the server returns 401.

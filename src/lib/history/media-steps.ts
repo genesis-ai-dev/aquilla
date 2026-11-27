@@ -98,8 +98,9 @@ export interface TimingStepContext {
   /** The switch's own role rule: whether this person may switch a file's timing. */
   mayChangeTiming(): boolean
   /** Whether the file can follow `mode` now: what the file's timing resolver
-   *  says (`fileMayFollowTiming`). Today's resolver keeps a file timed to a
-   *  film on its source, and a file with nothing to follow on its recordings. */
+   *  says (`fileMayFollowTiming`). Today's resolver keeps a file with nothing
+   *  to follow on its recordings; a file timed to a film follows its own
+   *  choice (AQU-2227). */
   offersTiming(fileId: string, mode: FileTiming): boolean
   /** Write it; false when the write was refused. */
   writeTiming(fileId: string, mode: FileTiming): Promise<boolean>

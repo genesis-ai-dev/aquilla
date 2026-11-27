@@ -26,8 +26,11 @@ export function parseCueRange(ts: string): { start: number; end: number } | null
 /** Anything shaped like a cue's timestamp line, however malformed — the
  *  denominator for a caller's "how many cues did the parser refuse" report.
  *  Deliberately looser than `TIMESTAMP_VTT`: its whole job is to notice the
- *  lines that matcher turns away. */
-const LOOSE_CUE_LINE = /^[\d:.,]+\s*-->\s*[\d:.,]+/
+ *  lines that matcher turns away. A typo in a time (`00:00:xx.000 -->`) is
+ *  still a cue's time line, so letters may stand where digits belong, as long
+ *  as the start holds a digit and a colon (import map X-D-silent-cue-drop: such
+ *  a cue vanished with its words, and nothing counted it). */
+const LOOSE_CUE_LINE = /^(?=\S*\d)(?=\S*:)[\w:.,]+\s*-->\s*[\w:.,]+/
 
 /** A single VTT timestamp, with the hours field optional and either field
  *  allowed to be a single digit (`1:03.209`, `01:03.209`, `0:01:03.209`). */

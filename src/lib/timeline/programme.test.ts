@@ -8,9 +8,12 @@ import {
   cellStartProgrammeSec,
   leadSecForMove,
   MIN_TARGET_LEAD_SEC,
+  playStartLineId,
+  playsHeardLines,
   programmeLines,
   programmeToSource,
   programmeToTarget,
+  recordingsLines,
   slotAtProgrammeSec,
   slotForCell,
   sourceFileSecToProgramme,
@@ -18,6 +21,7 @@ import {
   withoutHiddenTakes,
   type Programme,
 } from "./programme"
+import { standInEstimator } from "./stand-in"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -72,10 +76,45 @@ describe("buildProgramme — laying the verses out", () => {
     expect(prog.slots[1].startSec).toBe(4)
   })
 
-  it("a line with no take takes its stand-in length, not its original's (AQU-2204)", () => {
+  // Nov 8 (the film bundle): what plays on a line nobody has recorded is its
+  // original, so the line lasts the original's length and the original plays
+  // whole. A stand-in cut it at a reading-time guess, and an imported film's
+  // pieces read "cut 2.4 s" on every unrecorded line.
+  it("a line with no take and its own original lasts the original's length, played whole", () => {
     const prog = buildProgramme([verse("v1", 0, 9), verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
-    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 2.5, clock: "source", standIn: true })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 9, sourceLenSec: 9, clock: "source" })
+    expect(prog.slots[0].standIn).toBeUndefined()
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 9 })
+    expect(prog.slots[1].startSec).toBe(9)
+  })
+
+  it("a timed line with no take and nothing to hear still takes its stand-in length (AQU-2204)", () => {
+    const silent = verse("v1", 0, 9, undefined, { attachments: {} })
+    const prog = buildProgramme([silent, verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 0, standIn: true })
     expect(prog.slots[1].startSec).toBe(2.5)
+  })
+
+  // Nov 5 (group D): a line with no take and no words has nothing to read a
+  // stand-in from, so it keeps its own span. A film imported as one section,
+  // not yet transcribed, was laid out at the reading time of its file's name.
+  it("a line with no take and no words keeps its own length, so a film imported as one section isn't cut", () => {
+    const film = verse("s1", 0, 29, undefined, { original: "Film without subtitles.mp4" })
+    const prog = buildProgramme([film], { standInLenSec: standInEstimator([film]) })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 29, sourceLenSec: 29, cardLenSec: 29, clock: "source" })
+    expect(prog.slots[0].standIn).toBeUndefined()
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 29 })
+    expect(prog.totalSec).toBe(29)
+  })
+
+  it("a transcribed section with no take keeps its own length too: its words set no stand-in over its original", () => {
+    // 55 characters at 14 a second would be a 3.9 s stand-in against its 3.18 s.
+    const words = "Line one. The boat leaves the harbour at dawn tomorrow."
+    const line1 = verse("l1", 1.08, 4.26, undefined, { original: "Imported film.mp4", transcription: words })
+    const prog = buildProgramme([line1], { standInLenSec: standInEstimator([line1]) })
+    expect(prog.slots[0].slotLenSec).toBeCloseTo(3.18, 5)
+    expect(prog.slots[0].sourceLenSec).toBeCloseTo(3.18, 5)
+    expect(prog.slots[0].standIn).toBeUndefined()
   })
 
   it("the TRANSLATION clocks the slot when it is the longer side", () => {
@@ -551,5 +590,93 @@ describe("moving a take inside its line (AQU-2215)", () => {
       const prog = buildProgramme([cell], { standInLenSec: () => 2 })
       expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(false)
     })
+  })
+})
+
+// Group D (Nov 5): the lines a file is laid out and played from following its
+// recordings — the ONE answer the timeline and the transport both ask.
+describe("recordingsLines (group D)", () => {
+  const own = [verse("s1", 0, 4, undefined, { medium: "text" })]
+  const heard = [verse("cue1", 1, 4, undefined, { medium: undefined }), verse("cue2", 5, 8, undefined, { medium: undefined })]
+
+  it("a file with an audio cue file follows its heard lines, where its takes live", () => {
+    expect(recordingsLines(own, heard, true)).toBe(heard)
+  })
+
+  it("following the source, and on every other file, its own lines", () => {
+    expect(recordingsLines(own, heard, false)).toBe(own)
+    expect(recordingsLines(own, null, true)).toBe(own)
+    expect(recordingsLines(own, [], true)).toBe(own)
+  })
+
+  // AQU-2227 (review, Nov 9): the heard lines are handed over only where the
+  // file's takes live on them (an uploaded recording with a linked film and
+  // an audio cue file; heard lines that already hold takes). Laid out from
+  // the recording's own sections there, no heard line had a place and every
+  // take vanished from the timeline and from playback.
+  it("a file with recording sections of its own still follows its heard lines, where its takes live", () => {
+    const sections = [verse("m1", 0, 4)]
+    const withTake = [verse("cue1", 1, 4, { durationMs: 6_000 }, { medium: undefined })]
+    expect(recordingsLines(sections, withTake, true)).toBe(withTake)
+    const played = buildProgramme(recordingsLines(sections, withTake, true))
+    expect(played.byCellId.get("cue1")?.targetWindow).toEqual({ start: 0, end: 6 })
+    expect(playsHeardLines(withTake, true)).toBe(true)
+  })
+
+  it("with no heard lines handed over (takes on its own lines), a recording's sections stay its lines", () => {
+    const sections = [verse("m1", 0, 4)]
+    expect(recordingsLines(sections, null, true)).toBe(sections)
+    expect(recordingsLines(sections, heard, false)).toBe(sections)
+    expect(playsHeardLines(null, true)).toBe(false)
+    expect(playsHeardLines(heard, false)).toBe(false)
+  })
+})
+
+// AQU-2253 (Nov 13): following the recordings, a file with an audio cue file
+// plays its heard lines, so a subtitle row has no place of its own in what
+// plays. Its Play, Space and the strip's Play with it selected start from the
+// heard line that performs it.
+describe("playStartLineId", () => {
+  const heard = [
+    verse("cue1", 1, 4, undefined, { medium: undefined }),
+    verse("cue2", 5, 8, undefined, { medium: undefined }),
+    verse("cue3", 9, 12, undefined, { medium: undefined }),
+  ]
+  const s1 = verse("s1", 0, 3, undefined, { medium: "text" })
+  const s2 = verse("s2", 6, 7, undefined, { medium: "text" })
+  const late = verse("s9", 20, 21, undefined, { medium: "text" })
+  // s2 is performed by cue3 AND cue2, handed over in no order: the first in
+  // film order is the one it starts from, as the mic picks.
+  const cuesForText = new Map([["s2", ["cue3", "cue2"]]])
+
+  it("a subtitle row starts from the first heard line that performs it", () => {
+    expect(playStartLineId(s2, heard, true, cuesForText)).toBe("cue2")
+  })
+
+  it("a row no heard line performs starts from the first heard line at or after its start", () => {
+    expect(playStartLineId(s1, heard, true, cuesForText)).toBe("cue1")
+    expect(playStartLineId(verse("s5", 4.5, 5, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+    expect(playStartLineId(verse("s6", 5, 6, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+  })
+
+  // AQU-2253 (review, Nov 13): with no link to go on (links still loading,
+  // failed, or the row unlinked by hand), a heard line still sounding at the
+  // row's start is where it starts, not the next one.
+  it("a row no heard line performs, inside a heard line, starts from that heard line", () => {
+    expect(playStartLineId(verse("s7", 5.2, 5.4, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+  })
+
+  it("a row after the last heard line has nowhere to start", () => {
+    expect(playStartLineId(late, heard, true, cuesForText)).toBeNull()
+  })
+
+  it("a heard line starts from itself", () => {
+    expect(playStartLineId(heard[2], heard, true, cuesForText)).toBe("cue3")
+  })
+
+  it("following the source, and with no heard lines, every row starts from itself", () => {
+    expect(playStartLineId(s2, heard, false, cuesForText)).toBe("s2")
+    expect(playStartLineId(s2, null, true, cuesForText)).toBe("s2")
+    expect(playStartLineId(s2, [], true, cuesForText)).toBe("s2")
   })
 })

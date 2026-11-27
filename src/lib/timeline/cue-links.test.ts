@@ -66,6 +66,50 @@ describe("dominantScript", () => {
 })
 
 describe("planCueLinks", () => {
+  it("pairs an imported film's lines on their words, not on the file name they all carry", () => {
+    const line = (id: string, start: number, end: number, words: string) => ({
+      ...cue(id, start, end, "Episode 101.mov"), medium: "media", transcription: words,
+    })
+    const plans = autoLinkable(planCueLinks({
+      textCells: [line("l1", 10, 12, "I see him."), line("l2", 14, 16, "Where is she going?")],
+      audioCues: [cue("cue-1", 10.1, 11.9, "I see him."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+    }))
+    expect(plans.map((p) => [p.textCellId, p.cueCellId])).toEqual([["l1", "cue-1"], ["l2", "cue-2"]])
+  })
+
+  // AQU-2460 (review, Nov 9): a line of an imported film that has not been
+  // transcribed has no words, never the file name every line carries. It
+  // pairs with nothing until it has a transcription.
+  describe("an imported film's lines with no transcription yet", () => {
+    const bare = (id: string, start: number, end: number, name = "Episode 101.mov") => ({
+      ...cue(id, start, end, name), medium: "media",
+    })
+
+    it("the file name is never read as the line's words, even when a heard line says them", () => {
+      const plans = planCueLinks({
+        textCells: [bare("film", 0, 60, "The Shepherd.mov")],
+        audioCues: [cue("cue-1", 10.1, 11.9, "The shepherd."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+      })
+      expect(plans).toEqual([])
+    })
+
+    it("a transcribed line beside it still pairs on its words", () => {
+      const plans = planCueLinks({
+        textCells: [{ ...bare("l1", 0, 12), transcription: "I see him." }, bare("l2", 12, 24)],
+        audioCues: [cue("cue-1", 10.1, 11.9, "I see him."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+      })
+      expect(plans.map((p) => [p.textCellId, p.cueCellId, p.basis])).toEqual([["l1", "cue-1", "words"]])
+    })
+  })
+
+  it("a text line keeps pairing on its own text", () => {
+    const plans = autoLinkable(planCueLinks({
+      textCells: [{ ...cue("sub-1", 10, 12, "I see him."), medium: "text", transcription: "ignored words" }],
+      audioCues: [cue("cue-1", 10.1, 11.9, "I see him.")],
+    }))
+    expect(plans).toHaveLength(1)
+  })
+
   it("pairs a plain one-to-one line", () => {
     const plans = planCueLinks({
       textCells: [cue("sub-1", 10, 12, "I see him.")],
@@ -557,5 +601,20 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     const forHebrew = plans.filter((p) => p.cueCellId === hebrew.id)
     expect(forHebrew).toHaveLength(1)
     expect(texts.find((t) => t.id === forHebrew[0].textCellId)?.original).toContain("Messiah")
+  })
+})
+
+describe("pairedLineCounts (import map X-avtt-paired-count)", () => {
+  it("counts the heard lines and subtitle lines joined, not the pairings", async () => {
+    const { pairedLineCounts } = await import("./cue-links")
+    // Heard line q1 performs two subtitle lines; q2 and q3 share one.
+    const plans = [
+      { textCellId: "s1", cueCellId: "q1" },
+      { textCellId: "s2", cueCellId: "q1" },
+      { textCellId: "s3", cueCellId: "q2" },
+      { textCellId: "s3", cueCellId: "q3" },
+    ]
+    expect(pairedLineCounts(plans)).toEqual({ heardLines: 3, subtitleLines: 3 })
+    expect(pairedLineCounts([])).toEqual({ heardLines: 0, subtitleLines: 0 })
   })
 })

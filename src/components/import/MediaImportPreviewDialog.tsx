@@ -15,6 +15,7 @@ import { parseTimecode } from "@/lib/timeline/timecode"
 import { cn } from "@/lib/utils"
 import { createMediaCueSpecs, type MediaTextSource, type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { FramesAsHundredthsNotice, useFramesAsHundredths } from "./FramesAsHundredthsNotice"
 
 interface Props {
   mediaName: string
@@ -26,6 +27,11 @@ interface Props {
   confirmLabel?: string
   canConfirm?: boolean
   busy?: boolean
+  /** Run the frame-number check (AQU-2197) on the chosen captions: their times
+   *  may be video frame numbers written as hundredths. The rate comes from the
+   *  film the captions go with, a link or the file being imported. A caller
+   *  that runs the check itself leaves this out. */
+  frameCheck?: { filmUrl?: string | null; filmFile?: Blob | null }
   children?: ReactNode
   onConfirm(source: MediaTextSource | undefined): void
   onCancel(): void
@@ -83,14 +89,22 @@ function caretOffsetAt(x: number, y: number, within: HTMLElement): number | null
 export function MediaImportPreviewDialog({
   mediaName, sources, durationMs, onConfirm, onCancel,
   allowAutomatic = true, title, description, confirmLabel,
-  canConfirm = true, busy = false, children,
+  canConfirm = true, busy = false, frameCheck, children,
 }: Props) {
   const t = useT()
   const [selectedId, setSelectedId] = useState(sources[0]?.id ?? "automatic")
   const [edits, setEdits] = useState<Record<string, MediaTextSource>>({})
   const [editing, setEditing] = useState<number | null>(null)
   const selected = sources.find(source => source.id === selectedId)
-  const source = selected ? edits[selected.id] ?? selected.source : undefined
+  // The captions as the frame check reads them: converted at the film's rate
+  // unless the person keeps them. Each reading keeps its own edits, so a
+  // change of rate never applies to times someone typed.
+  const frames = useFramesAsHundredths(frameCheck ? selected?.source.cues : undefined, frameCheck ?? {})
+  const converted = frames.finding !== null && frames.choice !== "keep"
+  const editKey = selected ? (converted ? `${selected.id}@${frames.choice}` : selected.id) : ""
+  const base = useMemo(() => (selected && converted
+    ? { ...selected.source, cues: [...frames.cues] } : selected?.source), [selected, converted, frames.cues])
+  const source = selected ? edits[editKey] ?? base : undefined
   const cues = source?.cues
   const issues = useMemo(() => cues?.map(cue => cueIssue(cue, durationMs)) ?? [], [cues, durationMs])
   const invalidCount = issues.filter(Boolean).length
@@ -108,13 +122,12 @@ export function MediaImportPreviewDialog({
   // Stable for as long as the chosen source is, so a memoised line never
   // re-renders because a neighbour changed.
   const editCues = useCallback((change: (cues: readonly Cue[]) => Cue[]) => {
-    const option = sources.find(candidate => candidate.id === selectedId)
-    if (!option) return
+    if (!base || !editKey) return
     setEdits(previous => {
-      const current = previous[option.id] ?? option.source
-      return { ...previous, [option.id]: { ...current, cues: change(current.cues) } }
+      const current = previous[editKey] ?? base
+      return { ...previous, [editKey]: { ...current, cues: change(current.cues) } }
     })
-  }, [sources, selectedId])
+  }, [base, editKey])
   const updateCue = useCallback((index: number, patch: CuePatch) => {
     editCues(list => list.map((cue, i) => i === index ? { ...cue, ...patch } : cue))
   }, [editCues])
@@ -167,6 +180,7 @@ export function MediaImportPreviewDialog({
                 </ToggleGroupItem>}
               </ToggleGroup>
             </Field>
+            {source && frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
             {source ? <div className="flex flex-col gap-2">
               <p role="status" data-testid="media-preview-summary" className="text-sm">
                 {t("importExport.mediaPreview.captionCount", { count: source.cues.length })}

@@ -35,6 +35,7 @@ vi.mock("@/lib/import", () => ({
   importParatextProject: vi.fn(),
   importParatextAsTarget: vi.fn(),
   parseFile: vi.fn(async () => []),
+  probeMediaDurationMs: vi.fn(async () => 60_000),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({ filesToProjectEntries: vi.fn(async () => []) }))
@@ -74,6 +75,8 @@ async function dropMp3() {
   const inputs = document.querySelectorAll('input[type="file"]')
   expect(inputs.length).toBeGreaterThan(0)
   fireEvent.change(inputs[0], { target: { files: [file] } })
+  // AQU-2426: a recording with no subtitle file ends on whole or transcribed.
+  fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
 }
 
 describe("ImportDialog — IMPORT_FAILED instrumentation (silent-mp3-failure fix)", () => {

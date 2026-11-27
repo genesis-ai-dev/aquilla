@@ -369,8 +369,9 @@ branches cut from `dev`; `main` is retired.
    `git cherry-pick -x` and pushes it on the hour, after every production
    deploy's tag push, or when a person presses its button
    (`e2e/journeys/RELEASE-CUT.md`).
-2. The push runs `release-verify` (the full suite) and smart Jev on the
-   branch; QA reads the branch's preview as needed.
+2. The push runs `release-verify` (the production build and the
+   auth-worker and sync-worker type-checks) and smart Jev on the branch;
+   QA reads the branch's preview as needed.
 3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below as
    soon as both reported on the branch HEAD with no FAIL (it looks when
    `release-verify` finishes and every ten minutes), then watches the

@@ -100,8 +100,9 @@ nothing is ready still names each one in its summary.
 
 The workflow does not start Jev and does not read its result. The push that
 creates `plan.branch`, and every later push onto that branch, is what starts
-the one Hetzner run and the `release-verify` workflow (the full suite:
-typecheck, lint, every unit and worker test, the production build).
+the one Hetzner run and the `release-verify` workflow (the production
+build and the auth-worker and sync-worker type-checks; lint and the test
+suites ran on each PR in `ci.yml`).
 `release-deploy.yml` reads both for the branch's current HEAD when
 `release-verify` finishes and every ten minutes
 (`scripts/release-deploy-check.mjs`) and deploys when `release-verify`

@@ -17,7 +17,7 @@ itself, and what is still open. The code it describes:
 | Planner (cherry-pick model, walk policy) | `scripts/release-plan.mjs`, `scripts/release-plan-walk.mjs` |
 | Cut (builds the branch by pick) | `scripts/release-cut.mjs`, `.github/workflows/release-cut.yml` (hourly at :05, on tag, on button) |
 | Hold nudge | `scripts/release-hold-nudge.mjs` (a step of the cut workflow) |
-| Full suite on a release branch | `.github/workflows/release-verify.yml` (check name `release-verify`) |
+| Build and type-check on a release branch | `.github/workflows/release-verify.yml` (check name `release-verify`) |
 | Deploy | `.github/workflows/release-deploy.yml` (when verify finishes, and every ten minutes) → `scripts/release-deploy-check.mjs` |
 | Rollback watch and line halt | `scripts/release-rollback.mjs`, the `release:halt` issue label |
 | Walk status on a PR | `.github/workflows/walk-status.yml` → `scripts/release-walk-status.mjs`; the walker is `docs/routines/WALK-PRS.md` |
@@ -160,7 +160,7 @@ PR → dev            risk-label.yml labels it risk:<areas> and runs the gate of
                     walk-status.yml reports the walk as the `qa-walk` status; ci.yml runs the suites its diff touches
 merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
 :05 every hour      release-cut.yml: plan, nudge on PRs held past 4 h, cut, push release/YYYY/MM/DD-NN
-   push             release-verify.yml (typecheck, lint, all unit, all workers in shards, build) + smart Jev (Hetzner)
+   push             release-verify.yml (production build, auth-worker and sync-worker type-checks; §7) + smart Jev (Hetzner)
                     — fires only because the cut pushes as RELEASE_BOT_TOKEN; a GITHUB_TOKEN push starts nothing
 verify finishes     release-deploy.yml (when on; also every ten minutes): if no `release:halt` issue is open,
                     release-verify=success and Jev≠FAIL on HEAD → apply additive migrations (when on) → deploy:aquilla → tag
@@ -424,11 +424,18 @@ pick (#1752, built on held #1750) behind a real conflict (#1744 on held
 comment with the picked table and the held line. None of this changes who
 deploys or the `release:approved` sign-off.
 
-**Verify.** The push runs the whole suite (`release-verify`) and smart
-Jev. This is where "a ready PR that depended on a held one and still
-applied as a patch" is caught: it fails to compile, fails a test, or fails
-a journey. The fix is the same as today: a person adds the held PR's
-approval or reverts the pick on the branch; a new HEAD re-verifies.
+**Verify.** The push runs `release-verify` and smart Jev. Since 2026-11-27
+`release-verify` is the production build and the auth-worker and
+sync-worker type-checks, not the whole suite (§7). This is where "a ready
+PR that depended on a held one and still applied as a patch" is caught
+when it fails to compile: on its first day the reduced check held
+release/2026/11/27-08, where #2242 was picked without the held #2240 it
+imports from. A pick that compiles and fails only a test is no longer
+caught here (the suites ran on the PR in `ci.yml`), and one that fails a
+journey is reported by Jev, not held (§7). The fix is the same as today: a
+person picks the held PR onto the branch or reverts the pick there, and
+the new HEAD re-verifies. The held PR's approval alone does not reach a
+branch already in flight, because no new cut starts while one is open.
 
 **Deploy.** `release-deploy-check.mjs` reads, for the branch HEAD only,
 the `release-verify` check conclusion and the newest Jev marker comment's
@@ -571,7 +578,10 @@ broken gate, not a week of risky changes.
   vitest failures and a red sync-worker pair were on dev as of 2026-10-06;
   `release-verify` runs the full suite, so a red baseline blocks every
   hourly deploy until it is green. That is the intended pressure, but it
-  means the first switch-on is a cleanup, not a flag flip.
+  means the first switch-on is a cleanup, not a flag flip. Since
+  2026-11-27 `release-verify` is the build and the type-checks (§7), so a
+  red test on dev no longer blocks the line; only a baseline that does not
+  compile does.
 - **Jev verdict provenance: done.** `release-deploy-check.mjs` counts a
   marker comment only from a trusted login (`JEV_TRUSTED_LOGINS` in
   `release-deploy.yml`, default the runbook's reporting identity), and any
@@ -585,7 +595,10 @@ broken gate, not a week of risky changes.
   superseded and the deploy waits.
 - **PR-level test trimming** (meeting: many PR tests belong on the
   release). `release-verify` now carries the full suite; what to drop
-  from `ci.yml` on PRs is a separate change with its own review.
+  from `ci.yml` on PRs is a separate change with its own review. Reversed
+  2026-11-27 (§7): `release-verify` no longer runs the suites, so `ci.yml`
+  on the PR is the only place they run, and this argument no longer
+  supports dropping any of them from it.
 - **Kieran** has not seen this yet.
 
 ## 6. 2026-11-19: why the line did one to three releases a day

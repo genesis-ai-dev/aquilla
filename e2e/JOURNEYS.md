@@ -138,8 +138,9 @@ accept, import-and-edit, …) stay hermetic per-test.
 | Rules create / edit / delete / org / dialogs | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
 | Share invite link chrome (role / expiry / copy / email) | `e2e/specs/projects/share-invite.smoke.spec.ts` (chrome session only; join/accept tests stay per-test) |
 
-`teams.smoke.spec.ts` is **not** a surface session — create/delete/member/
-attach mutations conflict across steps, so it keeps hermetic per-test resets.
+`access-folders.smoke.spec.ts` (folders on People & access, which replaced the
+Teams pages in AQU-2778) is **not** a surface session — create/member/move
+mutations conflict across steps, so it keeps hermetic per-test resets.
 
 `violation.smoke.spec.ts` stays separate from `rules-crud` (editor-side effect).
 

@@ -5388,7 +5388,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10761,7 +10763,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -16118,7 +16122,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -21504,7 +21510,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -28164,7 +28172,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -34826,7 +34836,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -41556,7 +41568,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -48337,7 +48351,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -55030,7 +55046,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -63671,7 +63689,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -72316,7 +72336,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -90060,7 +90082,9 @@
     "importExport.recordingChoice.findsLines": "0030166cbc7b2306",
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
-    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86"
+    "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed"
   },
   "ha": {
     "common.save": "1509f561f2416598",

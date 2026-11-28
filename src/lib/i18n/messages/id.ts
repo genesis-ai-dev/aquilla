@@ -379,6 +379,8 @@ export const id: Catalog = {
   "error.monday.sync": "Tidak dapat mengirim proyek ini ke Monday.",
   "error.airtable.loadConnection": "Tidak dapat memuat status koneksi Airtable.",
   "error.airtable.connect": "Tidak dapat menghubungkan Airtable. Coba lagi.",
+  "error.airtable.tokenRejected": "Airtable tidak menerima token ini. Pastikan Anda menyalinnya secara lengkap dan token tersebut belum dihapus.",
+  "error.airtable.missingScopes": "Token ini memerlukan izin akses tambahan di Airtable: tambahkan {scopes} ke token tersebut, lalu tempelkan kembali.",
   "error.airtable.unreachable": "Tidak dapat mengakses Airtable. Coba lagi dalam satu menit.",
   "error.airtable.disconnect": "Tidak dapat memutuskan koneksi Airtable.",
   "error.airtable.loadBases": "Tidak dapat memuat basis Airtable Anda.",

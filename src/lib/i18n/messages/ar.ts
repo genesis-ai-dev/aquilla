@@ -387,6 +387,8 @@ export const ar: Catalog = {
   "error.monday.sync": "تعذّر رفع هذا المشروع إلى Monday.",
   "error.airtable.loadConnection": "تعذّر تحميل حالة الاتصال بـAirtable.",
   "error.airtable.connect": "تعذّر ربط Airtable. حاول مرة أخرى.",
+  "error.airtable.tokenRejected": "لم يقبل Airtable هذا الرمز. تأكّد من نسخه بالكامل ومن أنه لم يُحذف.",
+  "error.airtable.missingScopes": "يحتاج هذا الرمز إلى صلاحيات إضافية في Airtable: أضف إليه {scopes}، ثم الصقه مرة أخرى.",
   "error.airtable.unreachable": "تعذّر الوصول إلى Airtable. حاول مرة أخرى بعد دقيقة.",
   "error.airtable.disconnect": "تعذّر إلغاء ربط Airtable.",
   "error.airtable.loadBases": "تعذّر تحميل قواعد بياناتك في Airtable.",

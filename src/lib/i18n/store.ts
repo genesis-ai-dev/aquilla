@@ -11,14 +11,24 @@ import { isSupportedLocale, LOCALE_ALIASES, normalizeLocale } from "./locales"
 
 export const LOCALE_STORAGE_KEY = "aquilla-locale"
 
+interface LocaleStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+/** Read through globalThis rather than the `window` global, so this module
+ *  also type-checks in the sync-worker (no DOM lib), which bundles the import
+ *  normalizer that reaches it (the Drive folder sync). */
+function localeStorage(): LocaleStorage | null {
+  return (globalThis as { window?: { localStorage: LocaleStorage } }).window?.localStorage ?? null
+}
+
 export function readStoredLocale(): string | null {
-  if (typeof window === "undefined") return null
-  return window.localStorage.getItem(LOCALE_STORAGE_KEY)
+  return localeStorage()?.getItem(LOCALE_STORAGE_KEY) ?? null
 }
 
 export function writeStoredLocale(code: string): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(LOCALE_STORAGE_KEY, code)
+  localeStorage()?.setItem(LOCALE_STORAGE_KEY, code)
 }
 
 /**

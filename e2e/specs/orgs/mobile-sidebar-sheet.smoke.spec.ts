@@ -8,7 +8,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * contract.
  *
  * This spec: set a just-under-lg viewport → land on Projects → open the sheet →
- * navigate to Teams from it → the sheet closes on the destination.
+ * navigate to People & access from it → the sheet closes on the destination.
  */
 test("mobile org sidebar opens in a sheet from the header", async ({ alice }) => {
   await alice.setViewportSize({ width: 1023, height: 768 })
@@ -31,10 +31,11 @@ test("mobile org sidebar opens in a sheet from the header", async ({ alice }) =>
   expect(triggerBox!.x).toBeLessThan(crumbBox!.x)
 
   const sheet = await dash.openMobileSidebar()
-  await expect(sheet.getByRole("link", { name: "Teams" })).toBeVisible({ timeout: 10_000 })
-  await sheet.getByRole("link", { name: "Teams" }).click()
+  const accessLink = sheet.getByRole("link", { name: "People & access" })
+  await expect(accessLink).toBeVisible({ timeout: 10_000 })
+  await accessLink.click()
 
-  await expect(alice).toHaveURL(/\/teams(?:[/?#].*)?$/, { timeout: 10_000 })
-  await expect(alice.getByRole("heading", { name: /Teams/i })).toBeVisible({ timeout: 10_000 })
+  await expect(alice).toHaveURL(/\/access(?:[/?#].*)?$/, { timeout: 10_000 })
+  await expect(alice.getByRole("heading", { name: "People & access" })).toBeVisible({ timeout: 10_000 })
   await expect(alice.getByRole("dialog", { name: "Navigation" })).toHaveCount(0)
 })

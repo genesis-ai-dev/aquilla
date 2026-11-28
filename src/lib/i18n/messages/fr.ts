@@ -683,6 +683,8 @@ export const fr: Catalog = {
   "editor.milestone.label.story": "Histoire {number}",
   "editor.milestone.label.part": "Partie {number}",
   "editor.column.target": "Cible",
+  "editor.column.resizeSplit": "Redimensionner les colonnes Source et Cible",
+  "editor.column.splitValue": "Source {source} %, Cible {target} %",
   "editor.view.settings": "Paramètres de l'éditeur",
   "editor.view.showLineNumbers": "Afficher les numéros de ligne",
   "editor.view.showCellLabels": "Afficher les libellés de cellule",

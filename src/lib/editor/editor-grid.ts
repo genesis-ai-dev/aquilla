@@ -14,17 +14,25 @@
 // `extraTracks` is every text track beyond Source and Target: the Bible
 // columns, plus one when the Back-translation column is open. The
 // back-translation track is always the LAST one, after Target.
+//
+// AQU-2678: Target reads the draggable split (editor-split.ts) as
+// `--editor-tgt-fr`, and Source and each Bible column read `--editor-rest-fr`;
+// both fall back to 1fr (today's equal tracks) when none is set. The
+// Back-translation track stays 1fr.
 
 import type { CSSProperties } from "react"
 
+const REST_TRACK = "minmax(0,var(--editor-rest-fr,1fr))"
+const TARGET_TRACK = "minmax(0,var(--editor-tgt-fr,1fr))"
+
 export type EditorGridCols =
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
   | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[var(--editor-grid-cols)]"
 
 export type EditorHeaderGridCols =
-  | "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
-  | "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+  | "md:grid-cols-[132px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
   | "md:grid-cols-[var(--editor-grid-cols)]"
 
 export function editorGutterPx(castGutter: boolean): number {
@@ -35,16 +43,16 @@ export function editorGutterPx(castGutter: boolean): number {
 export function editorGridCols(castGutter: boolean, extraTracks: number): EditorGridCols {
   if (extraTracks > 0) return "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[var(--editor-grid-cols)]"
   return castGutter
-    ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-    : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+    ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+    : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
 }
 
 /** The column headers' md+ template (their phone layout is their own). */
 export function editorHeaderGridCols(castGutter: boolean, extraTracks: number): EditorHeaderGridCols {
   if (extraTracks > 0) return "md:grid-cols-[var(--editor-grid-cols)]"
   return castGutter
-    ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-    : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+    ? "md:grid-cols-[132px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+    : "md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
 }
 
 /**
@@ -60,7 +68,12 @@ export function editorHeaderGridCols(castGutter: boolean, extraTracks: number): 
 export function editorGridStyle(castGutter: boolean, extraTracks: number, trailingColumn: boolean | number = false): CSSProperties | undefined {
   if (extraTracks <= 0) return undefined
   const count = extraTracks + 2
-  const tracks = Array.from({ length: count }, () => "minmax(0,1fr)").join(" ")
+  const targetIndex = count - 1 - (trailingColumn ? 1 : 0)
+  const tracks = Array.from({ length: count }, (_, index) => {
+    if (index < targetIndex) return REST_TRACK
+    if (index === targetIndex) return TARGET_TRACK
+    return "minmax(0,1fr)"
+  }).join(" ")
   const style: Record<string, string> = { "--editor-grid-cols": `${editorGutterPx(castGutter)}px ${tracks}` }
   const trailingTracks = typeof trailingColumn === "number" ? Math.max(0, trailingColumn) : trailingColumn ? 1 : 0
   if (trailingTracks > 0) {

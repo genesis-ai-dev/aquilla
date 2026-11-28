@@ -688,6 +688,8 @@ export const ms: Catalog = {
   "editor.milestone.label.part": "Bahagian {number}",
   "editor.column.source": "Sumber",
   "editor.column.target": "Sasaran",
+  "editor.column.resizeSplit": "Ubah saiz lajur Sumber dan Sasaran",
+  "editor.column.splitValue": "Sumber {source}%, Sasaran {target}%",
   "editor.view.settings": "Tetapan penyuntingan",
   "editor.view.showLineNumbers": "Tunjuk nombor baris",
   "editor.view.showCellLabels": "Tunjuk label sel",

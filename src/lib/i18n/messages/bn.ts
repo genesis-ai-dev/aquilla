@@ -750,6 +750,8 @@ export const bn: Catalog = {
   "editor.milestone.label.part": "খণ্ড {number}",
   "editor.column.source": "উৎস",
   "editor.column.target": "লক্ষ্য",
+  "editor.column.resizeSplit": "উৎস ও লক্ষ্য কলামের আকার বদলান",
+  "editor.column.splitValue": "উৎস {source}%, লক্ষ্য {target}%",
   "editor.view.settings": "সম্পাদকের সেটিংস",
   "editor.view.showLineNumbers": "লাইন নম্বর দেখান",
   "editor.view.showCellLabels": "সেলের লেবেল দেখান",

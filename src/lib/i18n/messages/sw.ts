@@ -750,6 +750,8 @@ export const sw: Catalog = {
   "editor.milestone.label.part": "Kipande {number}",
   "editor.column.source": "Chanzo",
   "editor.column.target": "Lengo",
+  "editor.column.resizeSplit": "Badilisha ukubwa wa safu za Chanzo na Lengo",
+  "editor.column.splitValue": "Chanzo {source}%, Lengo {target}%",
   "editor.view.settings": "Mipangilio ya kihariri",
   "editor.view.showLineNumbers": "Onyesha nambari za mistari",
   "editor.view.showCellLabels": "Onyesha lebo za seli",

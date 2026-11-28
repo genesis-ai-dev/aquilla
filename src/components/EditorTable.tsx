@@ -298,6 +298,7 @@ import {
   editorHeaderGridCols,
   type EditorGridCols,
 } from "@/lib/editor/editor-grid"
+import { EditorSplitDivider } from "./EditorSplitDivider"
 import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
 import {
   AddBibleMenu as AddBibleMenuImpl,
@@ -2125,6 +2126,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     parentRef.current = node instanceof HTMLElement ? node : null
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
+  // AQU-2678: LegendList's react build hands refScrollView a control object,
+  // not the node, so parentRef stays empty; its handle names the real scroller.
+  const getListScrollElement = useCallback(() => listRef.current?.getScrollableNode() ?? null, [])
 
   /** Every rendered row's display index and vertical bounds, live from the
    *  DOM — the chapter heading reads it on scroll and AQU-2153's lens switch
@@ -2913,6 +2917,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   // usable width); otherwise they stack under the source text and the grid
   // stays three tracks.
   const tableRootRef = useRef<HTMLDivElement | null>(null)
+  const columnHeadersRef = useRef<HTMLDivElement | null>(null)
   // The rows in view, and a margin either side so the next rows' chapters are
   // already loading — their chapters are what the Bible columns fetch.
   const visibleBibleRows = useMemo(() => {
@@ -3030,6 +3035,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
     const target = event.target
+    // AQU-2678: Home on the Source/Target divider resets the divider; it is not list navigation.
+    if (target instanceof Element && target.closest("[role='separator']")) return
     if (
       target instanceof HTMLElement
       && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))
@@ -3938,8 +3945,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             of the marks and heading. Both reserve the same gutter instead — this one as an
             overflow-hidden scroll container; every popup here portals. */}
         {!hideColumnHeaders && (
-        <div data-testid="table-column-headers" className={cn(
-            "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
+        <div ref={columnHeadersRef} data-testid="table-column-headers" className={cn(
+            // relative: the AQU-2678 header grip is positioned on the Target track.
+            "relative grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
               ? editorHeaderGridCols(true, extraTrackCount)
               : editorHeaderGridCols(false, extraTrackCount),
@@ -4124,7 +4132,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       {displayCellIds.length > 0 ? (
         <div
           ref={listRootRef}
-          className="flex min-h-0 flex-1"
+          // relative: the Source/Target divider's overlay (AQU-2678) fills it.
+          className="relative flex min-h-0 flex-1"
           onPointerDownCapture={handleChapterListPointerDownCapture}
           onWheelCapture={() => {
             userScrolledRef.current = true
@@ -4167,6 +4176,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             />
             </RowUiStateContext.Provider>
           </BibleDataProvider>
+          {/* AQU-2678: the draggable line before Target (with a grip in the
+              column headings). */}
+          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} getScrollElement={getListScrollElement} gridCols={gridCols} bibleTracks={bibleTrackCount} />
         </div>
       ) : isTimeOrdered ? (
         // Shared with the Smart Extensions editor surface (AQU-1565/1566).

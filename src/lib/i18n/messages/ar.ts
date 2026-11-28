@@ -690,6 +690,8 @@ export const ar: Catalog = {
   "editor.milestone.label.part": "الجزء {number}",
   "editor.column.source": "المصدر",
   "editor.column.target": "الهدف",
+  "editor.column.resizeSplit": "تغيير حجم عمودي المصدر والهدف",
+  "editor.column.splitValue": "المصدر {source}%، الهدف {target}%",
   "editor.view.settings": "إعدادات المحرّر",
   "editor.view.showLineNumbers": "إظهار أرقام الأسطر",
   "editor.view.showCellLabels": "إظهار تسميات الخلايا",

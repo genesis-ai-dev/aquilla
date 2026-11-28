@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen, cleanup, within } from "@testing-library/react"
+import { render, screen, cleanup, within, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -38,19 +38,29 @@ vi.mock("@legendapp/list/react", async () => {
       data,
       renderItem,
       keyExtractor,
+      refScrollView,
     }: {
+      refScrollView?: React.Ref<unknown>
       data: string[]
       renderItem: (props: { item: string; index: number }) => ReactNode
       keyExtractor?: (item: string, index: number) => string
     }, ref) {
+      // Like @legendapp/list's react build, neither ref gets the DOM node:
+      // both get control objects whose getScrollableNode() returns it.
+      const scrollerRef = React.useRef<HTMLDivElement | null>(null)
       React.useImperativeHandle(ref, () => ({
         getState: () => ({ scroll: 0, positionAtIndex: (i: number) => i * 140, sizeAtIndex: () => 140 }),
+        getScrollableNode: () => scrollerRef.current,
         scrollToIndex: async () => undefined,
         scrollToOffset: async () => undefined,
       }))
+      React.useImperativeHandle(refScrollView, () => ({
+        getScrollableNode: () => scrollerRef.current,
+        scrollBy: (x: number, y: number) => scrollerRef.current?.scrollBy({ left: x, top: y }),
+      }))
       return React.createElement(
         "div",
-        null,
+        { ref: scrollerRef, "data-testid": "list-scroller" },
         data.map((item, index) =>
           React.createElement(
             React.Fragment,
@@ -508,7 +518,7 @@ describe("EditorTable — Bible columns", () => {
     expect(row.className).toContain("md:grid-cols-[var(--editor-grid-cols)]")
     expect(headers.className).toContain("md:grid-cols-[var(--editor-grid-cols)]")
     expect((headers.parentElement?.closest("[style]") as HTMLElement).style.getPropertyValue("--editor-grid-cols"))
-      .toBe("84px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)")
+      .toBe("84px minmax(0,var(--editor-rest-fr,1fr)) minmax(0,var(--editor-rest-fr,1fr)) minmax(0,var(--editor-tgt-fr,1fr))")
     expect(screen.getByTestId("bible-column-header-BSB").textContent).toContain("Berean Standard Bible · License")
     // Source, Bible, Target in that order.
     const tracks = Array.from(row.children).map((el) => el.getAttribute("data-showcase") ?? el.getAttribute("data-testid"))
@@ -523,7 +533,7 @@ describe("EditorTable — Bible columns", () => {
     expect(await within(stack).findByText("In the beginning God created")).toBeInTheDocument()
     expect(stack.closest("[data-showcase='editor.source']")).not.toBeNull()
     expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
-    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
   })
 
   it("offers no Bible columns without versions chosen, beyond the Add Bible control", async () => {
@@ -532,7 +542,7 @@ describe("EditorTable — Bible columns", () => {
     await screen.findByText("hello")
     expect(screen.getByRole("button", { name: "Add Bible" })).toBeInTheDocument()
     expect(screen.queryByTestId("bible-stack")).toBeNull()
-    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
   })
 
   it.each([
@@ -556,5 +566,57 @@ describe("EditorTable — Bible columns", () => {
     expect(screen.queryByRole("button", { name: "Add Bible" })).toBeNull()
     expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
     expect(screen.queryByTestId("bible-stack")).toBeNull()
+  })
+  // AQU-2678: the draggable Source/Target line lies over the rows in a grid
+  // with the rows' own template, padding and scrollbar gutter, and moving it
+  // only rewrites two variables on the table root that the rows and headers
+  // both read — so the two cannot drift apart.
+  it("lays the Source/Target divider over the rows on their template, and keeps headers and rows on the same split", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: [] })
+    const row = (await screen.findByText("hello")).closest("[data-grid-row]") as HTMLElement
+    const headers = screen.getByTestId("table-column-headers")
+    const overlay = screen.getByTestId("editor-split-overlay")
+    const template = "md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+    for (const el of [row, headers, overlay]) expect(el.className).toContain(template)
+    for (const cls of ["ps-2.5", "md:pe-4"]) expect(row.className).toContain(cls)
+    for (const cls of ["ps-2.5", "pe-4", "[scrollbar-gutter:stable]"]) expect(overlay.className).toContain(cls)
+
+    const root = headers.parentElement!.parentElement as HTMLElement
+    expect(root.contains(row) && root.contains(overlay)).toBe(true)
+    expect(root.style.getPropertyValue("--editor-rest-fr")).toBe("")
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the Source and Target columns" }), { key: "ArrowLeft" })
+    expect(root.style.getPropertyValue("--editor-rest-fr")).not.toBe("")
+    // The row element itself is untouched: same class, nothing per-row to update.
+    expect(row.className).toContain(template)
+  })
+
+  // Browser pass on 1fd9ed676: the line's layer is beside the scroller, so a
+  // wheel turn over it scrolled nothing.
+  it("scrolls the list when the mouse wheel turns over the row line", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: [] })
+    await screen.findByText("hello")
+    const scroller = screen.getByTestId("list-scroller")
+    const scrollBy = vi.fn()
+    scroller.scrollBy = scrollBy as never
+    fireEvent.wheel(screen.getByRole("separator", { name: "Resize the Source and Target columns" }), { deltaY: 100 })
+    expect(scrollBy).toHaveBeenCalledWith({ top: 100, left: 0 })
+  })
+
+  it("keeps the divider before Target while Bible columns are shown, with its grip in the headings", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: ["BSB"] })
+    await screen.findByTestId("bible-cell-BSB")
+    const headers = screen.getByTestId("table-column-headers")
+    const grip = within(headers).getByTestId("editor-split-header-grip")
+    // Gutter, Source, BSB, then Target: the grip sits on Target's track.
+    expect(grip.style.gridColumn).toBe("4")
+    const root = headers.parentElement!.parentElement as HTMLElement
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the Source and Target columns" }), { key: "ArrowLeft" })
+    expect(root.style.getPropertyValue("--editor-tgt-fr")).not.toBe("")
+    // Source and the Bible read the same share of what Target leaves.
+    expect(root.style.getPropertyValue("--editor-grid-cols"))
+      .toBe("84px minmax(0,var(--editor-rest-fr,1fr)) minmax(0,var(--editor-rest-fr,1fr)) minmax(0,var(--editor-tgt-fr,1fr))")
   })
 })

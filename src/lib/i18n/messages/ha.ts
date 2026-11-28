@@ -749,6 +749,8 @@ export const ha: Catalog = {
   "editor.milestone.label.part": "Ɓangare {number}",
   "editor.column.source": "Asali",
   "editor.column.target": "Manufa",
+  "editor.column.resizeSplit": "Ku canza girman ginshiƙan Asali da Manufa",
+  "editor.column.splitValue": "Asali {source}%, Manufa {target}%",
   "editor.view.settings": "Saitunan edita",
   "editor.view.showLineNumbers": "Nuna lambobin layi",
   "editor.view.showCellLabels": "Nuna alamomin ƙwaya",

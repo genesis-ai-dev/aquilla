@@ -560,6 +560,8 @@ export const editor = defineNamespace({
     // — Column names, reused wherever the two sides are named ——————————
     "editor.column.source": "Source",
     "editor.column.target": "Target",
+    "editor.column.resizeSplit": "Resize the Source and Target columns",
+    "editor.column.splitValue": "Source {source}%, Target {target}%",
 
     // — View-settings popover ————————————————————————————————————————
     "editor.view.settings": "Editor settings",
@@ -6523,6 +6525,23 @@ export const editor = defineNamespace({
           "search filter that looks only at translated text, as the badge marking a search " +
           "hit as target-language, and interpolated into other strings. Must pair " +
           "contrastively with editor.column.source.",
+      },
+      "editor.column.resizeSplit": {
+        description:
+          "Screen-reader name of the drag handle on the line between the editing table's " +
+          "Source and Target columns; dragging it widens one column and narrows the other. " +
+          "Imperative. Source and Target should match editor.column.source and editor.column.target.",
+      },
+      "editor.column.splitValue": {
+        description:
+          "What a screen reader announces as the position of the drag handle between the Source " +
+          "and Target columns: each column's share of the table's width. {source} and {target} " +
+          "are whole numbers; keep the percent sign as your language writes it. Source and Target " +
+          "should match editor.column.source and editor.column.target.",
+        placeholders: {
+          source: "The Source column's share of the width, a whole number from 0 to 100.",
+          target: "The Target column's share of the width, a whole number from 0 to 100.",
+        },
       },
       "editor.view.settings": {
         description:

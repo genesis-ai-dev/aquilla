@@ -690,6 +690,8 @@ export const zh_Hans: Catalog = {
   "editor.milestone.label.part": "第 {number} 部分",
   "editor.column.source": "来源",
   "editor.column.target": "目标",
+  "editor.column.resizeSplit": "调整来源列和目标列的宽度",
+  "editor.column.splitValue": "来源 {source}%，目标 {target}%",
   "editor.view.settings": "编辑器设置",
   "editor.view.showLineNumbers": "显示行号",
   "editor.view.showCellLabels": "显示单元格标签",

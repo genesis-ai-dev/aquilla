@@ -750,6 +750,8 @@ export const pa: Catalog = {
   "editor.milestone.label.part": "ਹਿੱਸਾ {number}",
   "editor.column.source": "ਸਰੋਤ",
   "editor.column.target": "ਟੀਚਾ",
+  "editor.column.resizeSplit": "ਸਰੋਤ ਅਤੇ ਟੀਚਾ ਕਾਲਮਾਂ ਦਾ ਆਕਾਰ ਬਦਲੋ",
+  "editor.column.splitValue": "ਸਰੋਤ {source}%, ਟੀਚਾ {target}%",
   "editor.view.settings": "ਐਡੀਟਰ ਸੈਟਿੰਗਾਂ",
   "editor.view.showLineNumbers": "ਲਾਈਨ ਨੰਬਰ ਵਿਖਾਓ",
   "editor.view.showCellLabels": "ਸੈੱਲ ਲੇਬਲ ਵਿਖਾਓ",

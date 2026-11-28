@@ -1,18 +1,20 @@
 // Decides whether the open release branch may deploy itself, from what is
-// recorded on its HEAD: the `release-verify` check (release-verify.yml) and
-// smart Jev's commit comment (docs/runbooks/smart-testing-webhook.md). The
-// hourly deploy workflow (release-deploy.yml) acts on this JSON and judges
-// nothing itself. Deterministic and read-only.
+// recorded on its HEAD: the `release-verify` check (release-verify.yml).
+// The hourly deploy workflow (release-deploy.yml) acts on this JSON and
+// judges nothing itself. Deterministic and read-only.
 //
-// Both signals are required, and both are for this exact sha: a result on
-// an older commit of the branch never decides a newer HEAD (RELEASE-CUT.md).
+// The signal is for this exact sha: a result on an older commit of the
+// branch never decides a newer HEAD (RELEASE-CUT.md).
 //   release-verify   must have concluded `success`
-//   Jev              must have posted; a FAIL holds, PASS / INCONCLUSIVE /
-//                    HARNESS UNAVAILABLE do not (same rule as the manual
-//                    deploy). No comment yet means wait: the hour's deploy
-//                    goes by, the next one reads it again.
 //   no halt          an open issue labelled `release:halt` stops every
 //                    deploy until it is closed (HALT_LABEL below).
+//
+// Smart Jev's commit comment (docs/runbooks/smart-testing-webhook.md) is
+// advisory since 2026-11-27. Until then the deploy waited for it and a FAIL
+// held. On the 87 release HEADs it reported on, it said INCONCLUSIVE 78
+// times and HARNESS UNAVAILABLE 9 times: never PASS, never FAIL. A check
+// that has made no decision only added its run time to every release. The
+// newest verdict is still read, best effort, and named in the reason.
 //
 // Usage: node scripts/release-deploy-check.mjs
 //   GITHUB_TOKEN   contents: read
@@ -91,9 +93,7 @@ export const HALT_LABEL = "release:halt"
 export function decide({ verify, jev, halt }) {
   if (halt) return { deploy: false, reason: `the line is halted by #${halt} (${HALT_LABEL}); close it to resume` }
   if (verify !== "success") return { deploy: false, reason: `${VERIFY_CHECK_NAME} is ${verify ?? "missing"}` }
-  if (jev === null) return { deploy: false, reason: "Jev has not reported on this HEAD yet" }
-  if (jev === "fail") return { deploy: false, reason: "Jev FAIL on this HEAD" }
-  return { deploy: true, reason: `${VERIFY_CHECK_NAME} success, Jev ${jev}` }
+  return { deploy: true, reason: `${VERIFY_CHECK_NAME} success (Jev, advisory: ${jev ?? "not reported"})` }
 }
 
 const git = (args) => execFileSync("git", args, { encoding: "utf8" }).trim()
@@ -152,11 +152,17 @@ async function main() {
   const halt = Array.isArray(halts) && halts.length ? halts[0].number : undefined
   const checks = await githubApi(`/commits/${sha}/check-runs?check_name=${VERIFY_CHECK_NAME}&per_page=100`, token)
   const verify = verifyState(checks?.check_runs)
-  const comments = await commitComments(sha, token)
-  const jev = jevDecision(
-    comments.map((comment) => ({ body: comment.body, login: comment.user?.login })),
-    jevTrustedLogins(),
-  )
+  // Advisory only: a comment read that fails must not stop a deploy.
+  let jev = null
+  try {
+    const comments = await commitComments(sha, token)
+    jev = jevDecision(
+      comments.map((comment) => ({ body: comment.body, login: comment.user?.login })),
+      jevTrustedLogins(),
+    )
+  } catch (error) {
+    console.error(`Jev comment not read: ${error.message}`)
+  }
   console.log(JSON.stringify({ branch, sha, ...decide({ verify, jev, halt }) }))
 }
 

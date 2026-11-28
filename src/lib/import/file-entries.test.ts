@@ -112,3 +112,24 @@ describe("filesToProjectEntries Paratext preservation", () => {
       .toEqual(new Uint8Array(await reversed.sourceArtifact!.bytes()))
   })
 })
+
+// AQU-2344: a whole episode dropped on Upload files was refused by the caps
+// that guard a project folder's text; a film is uploaded in parts, up to 2 GB.
+describe("filesToProjectEntries — films don't count against the text caps", () => {
+  const sized = (name: string, bytes: number) => {
+    const f = new File(["x"], name)
+    Object.defineProperty(f, "size", { value: bytes })
+    return f
+  }
+  const MB = 1024 * 1024
+
+  it("takes a 1.8 GB film", async () => {
+    await expect(filesToProjectEntries([sized("TheChosen_101_720p.mov", 1800 * MB)])).resolves.toHaveLength(1)
+    await expect(filesToProjectEntries([sized("episode.mp4", 600 * MB), sized("episode.wav", 300 * MB)])).resolves.toHaveLength(2)
+  })
+
+  it("still refuses a text file over 128 MB", async () => {
+    await expect(filesToProjectEntries([sized("huge.txt", 130 * MB)])).rejects.toThrow(/128 MB/)
+  })
+})
+

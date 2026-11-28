@@ -8,7 +8,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { membersPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
+import { orgAccessPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsShell } from "./OrgSettingsShell"
@@ -53,13 +53,13 @@ export function OrgSettingsIndex() {
       />
       <div className="flex flex-col gap-12">
         <NavList label={t("onboarding.apiTokens.orgLabel")}>
-          <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title={t("settings.orgSettingsIndex.navIdentity")} hint={hintFor("identity", activeOrg?.name ?? "Untitled")} />
-          <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint={hintFor("security", "Visibility & permissions")} />
+          <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title={t("settings.orgSettingsIndex.navIdentity")} hint={hintFor("identity", activeOrg?.name ?? t("projectSettings.hint.untitled"))} />
+          <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint={hintFor("security", t("settings.orgSettingsIndex.hintSecurity"))} />
           {/* AQU-688: the hint used to read "Field Plan" for every org, including
               the ones that have never been on it. It names the destination, not a
               plan the org may not hold. */}
-          <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Plan & AI usage" />
-          <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint={hintFor("providers", "Org keys")} />
+          <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint={t("settings.orgSettingsIndex.hintBilling")} />
+          <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint={hintFor("providers", t("settings.orgSettingsIndex.hintProviders"))} />
           {/* AQU-1131: rules sit beside the Knowledge Base — both are the
               org-wide context an org should see on arrival, not something
               buried inside one project's Living Memory. */}
@@ -75,7 +75,7 @@ export function OrgSettingsIndex() {
             title={t("knowledgeBase.title")}
             hint={hintFor("knowledge", t("knowledgeBase.orgDescription"))}
           />
-          <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint={hintFor("monday", "Board sync")} />
+          <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint={hintFor("monday", t("settings.orgSettingsIndex.hintMonday"))} />
           <NavRow
             to={orgSettingsPath(activeOrgId, "airtable")}
             icon={Table2}
@@ -86,9 +86,8 @@ export function OrgSettingsIndex() {
 
         <NavList label={t("billing.settings.peopleProjects")}>
           {canViewRoster && (
-            <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title={t("editor.navTitle.members")} hint="Roles & invites" />
+            <NavRow to={orgAccessPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title={t("org.access.page.title")} hint={t("settings.orgSettingsIndex.hintAccess")} />
           )}
-          <NavRow to={orgPath(activeOrgId, "/teams")} icon={NAV_PAGE_ICONS.teams} title={t("editor.navTitle.teams")} hint="Groups" />
           {/* AQU-1083: values a project follows unless it sets its own. Here
               rather than on Security, whose every other control is about who
               may see or do something. */}
@@ -96,9 +95,9 @@ export function OrgSettingsIndex() {
             to={orgSettingsPath(activeOrgId, "project-defaults")}
             icon={SlidersHorizontal}
             title={ORG_SETTINGS_SECTION_TITLES["project-defaults"]}
-            hint={hintFor("project-defaults", "Inherited by every project")}
+            hint={hintFor("project-defaults", t("settings.orgSettingsIndex.hintProjectDefaults"))}
           />
-          <NavRow to={orgPath(activeOrgId, "/archived")} icon={Archive} title={t("editor.navTitle.archivedProjects")} hint="Restore" />
+          <NavRow to={orgPath(activeOrgId, "/archived")} icon={Archive} title={t("editor.navTitle.archivedProjects")} hint={t("common.restore")} />
         </NavList>
       </div>
     </OrgSettingsShell>

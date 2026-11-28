@@ -26,6 +26,10 @@ import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artif
 import { safeAudioContentType } from "./audio-content-type"
 import { handleAudioMultipart, parseAudioMultipartPhase } from "./audio-multipart"
 import { adminBearerMatches } from "./lib/admin-secret"
+import {
+  digestsOf, fileScopeRefusal, firstWriteRefusal, isDerivedSidecar, isPeaksSidecarBody,
+  removalRefusal, siblingOwner, siblingRefusal, storedBytesMatch,
+} from "./audio-write-guard"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
@@ -34,6 +38,9 @@ export interface AudioEnv {
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
+  /** AQU-2682: the lane wall switch, so a removal follows the same lane rules
+   *  the events route does. */
+  LANE_READ_WALL?: string
 }
 
 export { safeAudioContentType }
@@ -208,6 +215,18 @@ export async function handleAudioRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return withAudioCors(new Response("insufficient role", { status: 403 }))
     }
+    // AQU-2682: within the caller's files, and only a recording no take has
+    // ever named (the cleanup of an upload whose attach failed).
+    const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
+    if (outOfScope) return withAudioCors(new Response(outOfScope, { status: 403 }))
+    if (!env.AQUILLA_PG) {
+      return withAudioCors(new Response("AQUILLA_PG binding not configured", { status: 500 }))
+    }
+    const refused = await removalRefusal(
+      env.AQUILLA_PG, env.SNAPSHOTS, (name) => audioObjectKey(env, projectId, fileId, name),
+      projectId, fileId, audioId,
+    )
+    if (refused) return withAudioCors(new Response(refused, { status: 403 }))
     await env.SNAPSHOTS.delete(key)
     return withAudioCors(Response.json({ ok: true }))
   }
@@ -243,6 +262,14 @@ export async function handleAudioRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return withAudioCors(new Response("insufficient role", { status: 403 }))
     }
+    // AQU-2682: the rules below read the database; without it, refuse rather
+    // than weaken (as a removal does).
+    if (!env.AQUILLA_PG) {
+      return withAudioCors(new Response("AQUILLA_PG binding not configured", { status: 500 }))
+    }
+    // Within the caller's files.
+    const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
+    if (outOfScope) return withAudioCors(new Response(outOfScope, { status: 403 }))
     const artifactId = request.headers.get("X-Artifact-Id")?.trim()
     if (artifactId && !UUID_RE.test(artifactId)) {
       return withAudioCors(new Response("invalid artifact id", { status: 400 }))
@@ -283,6 +310,11 @@ export async function handleAudioRequest(
     if (body.byteLength > MAX_AUDIO_BYTES) {
       return tooLarge()
     }
+    // AQU-2682: a `.peaks` sidecar is a real one (AQPK, 16 KB at most), so
+    // the name can never carry a recording.
+    if (isDerivedSidecar(audioId) && !isPeaksSidecarBody(body)) {
+      return withAudioCors(new Response("not a peaks sidecar", { status: 400 }))
+    }
     const contentType = safeAudioContentType(request.headers.get("Content-Type"))
     const digest = artifactId ? await crypto.subtle.digest("SHA-256", body) : null
     const sha256 = digest
@@ -302,9 +334,37 @@ export async function handleAudioRequest(
       }
       existing = checked.existing
     }
-    await env.SNAPSHOTS.put(key, body, {
-      httpMetadata: { contentType },
-    })
+    // AQU-2682: a recording is written ONCE. The same bytes again are a retry
+    // (nothing to write); other bytes under a stored name are refused. A first
+    // write may not take a name a take has named, and an AI voice's WAV is
+    // its owner's. A `.peaks` sidecar is derived and may be rewritten.
+    const digests = digestsOf(body)
+    const keyOf = (name: string) => audioObjectKey(env, projectId, fileId, name)
+    const pg = env.AQUILLA_PG
+    if (!isDerivedSidecar(audioId)) {
+      // Whose WAV this is, worked out once for the upload.
+      const owned = await siblingOwner(pg, env.SNAPSHOTS, keyOf, projectId, fileId, audioId)
+      const notTheirs = await siblingRefusal(pg, verified.claims, projectId, owned, env.LANE_READ_WALL)
+      if (notTheirs) return withAudioCors(new Response(notTheirs.reason, { status: notTheirs.status }))
+    }
+    const stored = isDerivedSidecar(audioId) ? null : await env.SNAPSHOTS.head(key)
+    if (stored && !storedBytesMatch(stored, digests, body.byteLength)) {
+      return withAudioCors(new Response("audio already stored under this id", { status: 409 }))
+    }
+    if (!stored && !isDerivedSidecar(audioId)) {
+      const taken = await firstWriteRefusal(pg, projectId, fileId, audioId)
+      if (taken) return withAudioCors(new Response(taken.reason, { status: taken.status }))
+    }
+    if (!stored) {
+      await env.SNAPSHOTS.put(key, body, {
+        httpMetadata: { contentType },
+        // Who uploaded it: an AI voice's WAV beside it is theirs to write.
+        customMetadata: {
+          sha256: digests.sha256,
+          ...(verified.claims.username ? { uploadedBy: verified.claims.username } : {}),
+        },
+      })
+    }
     if (artifactId) {
       const written = await writeAudioArtifactRows({
         env,

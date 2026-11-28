@@ -83,9 +83,17 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   await popover.getByLabel("Search org members").fill("bob")
   await popover.getByRole("button", { name: /^bob$/i }).click()
   await pickSelectOption(alice, popover.getByRole("combobox", { name: "Role" }), /^contributor/i)
-  await popover.getByRole("button", { name: /^Add to / }).click()
-  // Confirming refreshes the roster and remounts the popover, so the
-  // "is now…" line does not stay. The lane's people cell is the record.
+  // AQU-2322: the popover writes nothing. Its Add hands off to Give access,
+  // pre-filled with Bob, the role and this lane, and that dialog's dry run
+  // has to come back before Give access can be pressed.
+  await popover.getByTestId("staff-lane-give-access").click()
+  const giveAccess = alice.getByTestId("give-access-dialog")
+  await expect(giveAccess.getByTestId("give-sentence")).toContainText(/bob/i, { timeout: 15_000 })
+  const give = giveAccess.getByTestId("give-access-submit")
+  await expect(give).toBeEnabled({ timeout: 15_000 })
+  await give.click()
+  await expect(giveAccess).toBeHidden({ timeout: 15_000 })
+  // The lane's people cell is the record that the grant landed.
   await expect(esRow.getByText("BO", { exact: true })).toBeVisible({ timeout: 15_000 })
 
   await bob.goto(`/project/${projectId}/editor/file/${fileId}`)
@@ -198,6 +206,9 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   const sourceRow = aliceWs.cellRow(0)
   await sourceRow.getByLabel("Source text").click({ button: "right" })
   await alice.getByTestId("cell-menu-edit-source").click()
+  // AQU-2101: with two target lanes the source is shared, so the editor asks
+  // before it opens.
+  await alice.getByTestId("source-edit-lane-warning-confirm").click()
   const sourceEditor = alice.getByRole("textbox", { name: "Edit source text" })
   await sourceEditor.fill(nextSource)
   await sourceEditor.blur()

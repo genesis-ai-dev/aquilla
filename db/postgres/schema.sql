@@ -369,6 +369,10 @@ CREATE TABLE project_settings (
     -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
     -- The events route reads this column instead of the settings blob.
     wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
+    -- AQU-2647 (0212): who may edit source text, hide a cell, and split a line
+    -- at quotes. Absent reads as maintainer (db/shared/source-text-floor.ts).
+    -- The events route reads this column instead of the settings blob.
+    wp_source_text_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'sourceTextFloor') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -393,6 +397,30 @@ CREATE TABLE project_settings (
     auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
+
+-- 0210 (AQU-2719): the authored living-memory entries, moved OFF the blob
+-- above and onto rows — the same move terminology made onto `concepts` in
+-- 0084, and for the same reasons: a whole-array key can only ever express
+-- "here is the entire list", so every save rewrote it from the writer's stale
+-- snapshot, and every unrelated settings read paid to parse it. Keyed on the
+-- entry's own client-minted id, so the move and the save path are idempotent
+-- without a lock. `sort_index` carries the array order the blob expressed.
+--
+-- Readers never assume these rows exist: the settings read merges them with
+-- whatever is still under the blob key, so an un-migrated project, a
+-- half-migrated one, and an entry the move refused to carry all read
+-- correctly (db/shared/living-memory-entries.ts).
+CREATE TABLE project_living_memory_entries (
+    entry_id   TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'standard',
+    text       TEXT NOT NULL,
+    author     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    sort_index INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX project_living_memory_entries_project_idx
+    ON project_living_memory_entries (project_id, sort_index);
 
 -- 0158 (AQU-1846): the react watcher's per-project bookmark and its
 -- round-robin stamp. Deliberately NOT in the settings blob: persisting the
@@ -1160,6 +1188,17 @@ CREATE TABLE cell_audio (
     gain_db            REAL,
     fade_in_ms         BIGINT,
     fade_out_ms        BIGINT,
+    -- AQU-2664 (0211): the recording's loudness (LUFS, -70 = silent) and true
+    -- peak (dBTP), measured once by cell.audio.measure (fill-only); and the
+    -- loudness it is evened out to, only by cell.audio.even (NULL = not evened;
+    -- its own stage before gain_db and the fades, which it never writes).
+    -- The correction is worked out from these; the recording never changes.
+    loudness_lufs      REAL,
+    true_peak_db       REAL,
+    -- the window of the recording the reading measured (to NULL = the end)
+    loudness_from_ms   BIGINT,
+    loudness_to_ms     BIGINT,
+    even_target_lufs   REAL,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 
@@ -1256,7 +1295,7 @@ CREATE TABLE file_revisions (
     PRIMARY KEY (project_id, file_id, revision_n)
 );
 
--- A Google Drive folder kept in sync with a project (migration 0208). The
+-- A Google Drive folder kept in sync with a project (migration 0214). The
 -- sync-worker DriveFolderPoller writes each changed Drive file as one file
 -- revision, as `user_id` with that user's live role. drive_folder_files is the
 -- cursor: Drive file → Aquilla file, last applied Drive version and sha256.
@@ -1520,6 +1559,11 @@ CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE delete
 -- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
 -- per-file audio read and the progress audio CTE both filter on the lane now.
 CREATE INDEX idx_cell_audio_lane ON cell_audio(project_id, file_id, lane_id) WHERE deleted = 0;
+-- AQU-2682 (0206, 0207): has any take, live or removed, named this recording?
+-- By its id, and by the stored recording its url plays (only `frontier-audio://`
+-- urls name one, so an outside link of any length is never in the index).
+CREATE INDEX idx_cell_audio_name ON cell_audio(project_id, file_id, audio_id);
+CREATE INDEX idx_cell_audio_stored_url ON cell_audio(project_id, file_id, url) WHERE url LIKE 'frontier-audio://%';
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);

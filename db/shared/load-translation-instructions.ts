@@ -17,6 +17,8 @@ import {
 } from './translation-instructions'
 
 /** The slice of the D1-compatible executor this module needs. */
+import { withLivingMemoryEntries } from './living-memory-entries'
+
 export interface InstructionsDb {
   prepare(query: string): {
     bind(...params: unknown[]): {
@@ -162,10 +164,15 @@ export async function loadTranslationInstructions(
   if (storedTranslationInstructions(blob) !== null) {
     return { text: resolveTranslationInstructions(blob), stored: true }
   }
-  // AQU-2422: one lookup decides which stored `systemPrompt` migrates on read,
-  // so no caller can resolve a different one by handing over a differently
-  // pre-chewed blob.
-  const resolvable = { ...blob, systemPrompt: legacySystemPromptSetting(blob) }
+  // AQU-2719: only THIS branch reads `livingMemoryEntries`, and the blob above
+  // no longer carries it once the project's entries moved to rows — whether
+  // this function read the blob itself or a caller handed one over. Merge the
+  // rows in here, where the one lookup is already paid for by the composed
+  // path, so a legacy Living Memory instruction keeps reaching every drafting
+  // prompt. The stored-instructions branch above never reads the key, so it
+  // stays a pure read.
+  const withEntries = await withLivingMemoryEntries(db, projectId, blob ?? {})
+  const resolvable = { ...withEntries, systemPrompt: legacySystemPromptSetting(blob) }
   const projectBriefText = await readLegacyServerInstructions(db, projectId)
   return { text: resolveTranslationInstructions(resolvable, { projectBriefText }), stored: false }
 }

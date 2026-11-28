@@ -57,6 +57,23 @@ describe("scanSql", () => {
     expect(scanSql(sql).statements).toHaveLength(2)
   })
 
+  // Where Postgres ends a literal is where this must end it: the migration
+  // gate classifies these statements and Postgres runs the file's own text.
+  it("ends an escape string at the quote Postgres ends it at", () => {
+    const { statements, code } = scanSql("COMMENT ON TABLE t IS E'\\''; DELETE FROM t; --';\nSELECT e'a\\\\' AS x; SELECT 1;")
+    expect(statements).toEqual(["COMMENT ON TABLE t IS E'\\'';", "DELETE FROM t;", "--';\nSELECT e'a\\\\' AS x;", "SELECT 1;"])
+    expect(code).toContain("DELETE FROM t")
+  })
+
+  it("takes a quote after a name that merely ends in e as a plain string", () => {
+    expect(scanSql("SELECT name'\\'; SELECT 2;").statements).toEqual(["SELECT name'\\';", "SELECT 2;"])
+  })
+
+  it("does not open a dollar-quoted body on a $ inside an identifier", () => {
+    const { statements } = scanSql("CREATE TABLE t$x$ (id int); DELETE FROM t; CREATE TABLE u$x$ (id int);")
+    expect(statements).toEqual(["CREATE TABLE t$x$ (id int);", "DELETE FROM t;", "CREATE TABLE u$x$ (id int);"])
+  })
+
   it("does not count a trailing comment as a statement", () => {
     expect(scanSql("SELECT 1;\n-- done\n").statements).toEqual(["SELECT 1;"])
   })

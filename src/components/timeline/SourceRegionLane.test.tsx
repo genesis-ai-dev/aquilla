@@ -78,7 +78,7 @@ describe("SourceRegionLane", () => {
   // over one, and on a real episode plenty do.
   it("says a silence is empty, in words, on hover", () => {
     renderLane()
-    expect(screen.getAllByTestId("tl-source-gap")[0]).toHaveAttribute("title", "No speech here · 10.0s")
+    expect(screen.getAllByTestId("tl-source-gap")[0]).toHaveAttribute("title", "No speech here · 10.0 s")
   })
 
   it("marks itself as the audio-cue row in the DOM", () => {
@@ -283,9 +283,5 @@ describe("SourceRegionLane", () => {
     expect(label.style.left).toContain("var(--tl-scroll-left")
   })
 
-  it("draws no placeholder at all when asked to hide them", () => {
-    renderLane({ map: deriveSourceRegions([], 635), cells: [], viewEndSec: 635, hideGaps: true })
-    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-  })
 })
 

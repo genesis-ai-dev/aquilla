@@ -4540,17 +4540,20 @@ pure move costs double its line count in `git diff --stat` and the budget is ~30
   doing, but as its own slice. *Proof it would need*: the same two byte-diffs as above, plus
   a check that each type is still exported from `lane-batch-backfill.ts` (the ops script
   imports `LaneBatchPlan`/`LaneBatchSnapshot` from there).
-- **The apply preconditions** — `LANE_BATCH_MIGRATIONS` (`:37`), `LANE_BATCH_READ_ONLY_OPTIONS`,
+- **The apply preconditions** — **done 2026-11-25**, see that run's entry at the bottom of
+  this file. `LANE_BATCH_MIGRATIONS` (`:37`), `LANE_BATCH_READ_ONLY_OPTIONS`,
   `laneBatchClientConfig`, `LaneBatchColumnPresence`, `laneBatchApplyRefusal` and
   `LANE_BATCH_SQL` (through `:127`), ~91 lines. These are about connecting and refusing, not
   planning: each one's only in-file occurrences are its own declaration (and, for two of
-  them, one internal use), so the planner does not read them either. *Why deferred*: ~180
-  changed lines on top of this run's 235. *Proof it would need*: the existing
+  them, one internal use), so the planner does not read them either. *Why it was deferred in
+  2026-11-20*: ~180 changed lines on top of that run's 235. *Proof it needed*: the existing
   `describe("lane batch apply gate")` block (already covers `laneBatchApplyRefusal` and
-  `laneBatchClientConfig`) plus `pnpm build`.
+  `laneBatchClientConfig`) plus `pnpm build` — both produced, plus two extra byte-diffs the
+  entry below records.
 
 Taking both would put the file near ~880 lines. Doing all three at once was never in budget;
-doing them one per run is the point.
+doing them one per run is the point. **One of the two is now taken** — the report shapes are
+the one left, and `lane-batch-backfill.ts` is 1,038 lines.
 
 ### Themes surveyed and rejected this run, with the reason
 
@@ -4828,3 +4831,252 @@ The 2026-11-16/18/20 notes all still hold and were all needed again. Two refinem
   restoring the lockfiles afterwards, `git checkout -- <paths>` **fails as a whole** if one
   listed path does not exist (`worker/package-lock.json` does not), silently restoring none of
   them — list only the three that exist, and re-check `git status` before committing.
+
+## 2026-11-25 — oversized-file split: the apply preconditions leave the planner
+
+Second run of **theme 5**, taking the smaller of the two seams the 2026-11-20 entry deferred,
+on that entry's own terms: *"These are about connecting and refusing, not planning: each
+one's only in-file occurrences are its own declaration (and, for two of them, one internal
+use), so the planner does not read them either."*
+
+- **Done this run** (2 files, 120 insertions / 91 deletions, no test file touched):
+  `src/lib/lanes/lane-batch-backfill.ts` 1,117 → 1,038 lines; the six apply-precondition
+  symbols now live in **`src/lib/lanes/lane-batch-apply.ts`** (107 lines), which the
+  planner's module re-exports beside the `renderLaneBatchReport` re-export the 2026-11-20
+  run added: `export { LANE_BATCH_MIGRATIONS, LANE_BATCH_READ_ONLY_OPTIONS, LANE_BATCH_SQL,
+  laneBatchApplyRefusal, laneBatchClientConfig, type LaneBatchColumnPresence } from
+  "./lane-batch-apply"`.
+- **Zero importer churn.** The only two importers are
+  `scripts/neon-backfill-lane-batch.ts:23-32` and
+  `src/lib/lanes/lane-batch-backfill.test.ts:4-7`, and both import these names from
+  `./lane-batch-backfill` (resp. `../src/lib/lanes/lane-batch-backfill`). The re-export keeps
+  those paths resolving; neither file is in the diff.
+- **No runtime import cycle, in either direction.** Unlike `lane-batch-report.ts`, the new
+  module imports *nothing at all* — the block's only dependencies are `Set`, `Array.filter`
+  and string literals, so there is not even an erased `import type` edge back to the planner.
+  The split script asserts this: it fails if the moved block mentions any of the planner's
+  twelve imported names.
+- **`LANE_BATCH_MIGRATIONS` has no external reader** (its only use anywhere is
+  `laneBatchApplyRefusal`'s own `.filter`), so it is a dead-export candidate for a future
+  theme-1 run. Left exported and re-exported here on purpose: narrowing the public surface
+  is a different theme, and this run's whole claim is that the surface did not move.
+
+### Proof of preservation
+
+The 2026-11-20 entry asked for *"the existing `describe("lane batch apply gate")` block
+(already covers `laneBatchApplyRefusal` and `laneBatchClientConfig`) plus `pnpm build`."*
+Both were produced, plus two mechanical byte-diffs that are stronger than either:
+
+1. **The moved block is byte-identical.** `git show origin/dev:…/lane-batch-backfill.ts |
+   sed -n '37,127p'` diffed against the new file minus its 16-line header is **empty**.
+   Nothing inside the block was reworded, reordered or reformatted.
+2. **The planner's runtime export surface is byte-identical at 2,972 bytes.** A scratchpad
+   `tsx` script (never committed) dynamically imports
+   `<tree>/src/lib/lanes/lane-batch-backfill.ts` and prints the sorted `Object.keys` of the
+   module namespace with each value's `typeof`, then `LANE_BATCH_MIGRATIONS`,
+   `LANE_BATCH_READ_ONLY_OPTIONS`, the whole `LANE_BATCH_SQL` map as indented JSON,
+   `laneBatchClientConfig` for both `readOnly` values, and `laneBatchApplyRefusal` over five
+   column/migration combinations chosen to hit every `return` it has (no migrations; one
+   migration; both migrations with three schema gaps; both migrations with all three
+   later-columns missing; fully ready → `null`). Run against a `git worktree` at pristine
+   `origin/dev` and against the working tree, the two outputs `diff` **empty**. All nine
+   runtime exports are present with the same types and the same values, every refusal string
+   included.
+3. **The module still never reaches the SPA bundle.** After a green `pnpm build`, a `grep`
+   for `laneBatchApplyRefusal`, `LANE_BATCH_READ_ONLY` and `planLaneBatch` over all **419**
+   built `dist/assets/*.js` chunks finds nothing — the same check the 2026-10-12 and
+   2026-11-20 entries ran. The planner and its new sibling are reached only by the ops script
+   and the test, so a browser-visible regression is not merely unlikely, it is unreachable.
+4. **The file's own 15 tests pass in isolation** (15/15, 622 ms), and the full root suite is
+   identical before and after — see the table below.
+5. **`pnpm run check:doc-pins` → `✓ 204 doc pins resolve across 420 docs`.** No pin named a
+   symbol that moved (`grep -rn lane-batch docs/decisions/` was already empty).
+6. **The edit was rehearsed in a `git worktree` at pristine `origin/dev` first**, per the
+   2026-11-23 note: the split script ran there, its diff was read line by line, and only then
+   did it touch the real checkout. The script derives its block boundaries from content
+   (`export const LANE_BATCH_MIGRATIONS = [` … the next `} as const`) rather than from line
+   numbers, asserts the block is exactly 91 lines, asserts a blank line on each side and
+   `export interface LaneBatchLane` immediately after, and asserts that none of the six
+   symbols appears anywhere in the file outside the block before moving it.
+
+### Baseline and final gate — 2026-11-25 (`origin/dev` `1f2a5f21`)
+
+All gates run **serially** (never lint alongside build or vitest — see the sandbox note
+below, which this run learned the hard way again), with `rm -rf packages/*/dist` before both
+lints so the two logs are comparable.
+
+| Gate | Baseline (clean tree, before any edit) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1076 problems (0 errors, 1076 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2553 files passed / **1 failed** / 2 skipped (2556); 30250 tests passed / **1 failed** / 1 expected fail / 23 skipped (30275), 1125.62s | exit 1 — **identical counts, identical single failure** (2553 / 1 / 2; 30250 / 1 / 1 / 23), 1155.93s |
+| `pnpm test:e2e:smoke` | the documented pre-existing set below | exit 1 — **s1 42 passed / 3 failed, s2 33 passed, s3 38 passed**; the 3 are that set |
+
+Worker suites were **not** run and are not required: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+**The one root-suite failure is pre-existing and environmental** — the same one the
+2026-11-09/18/20/23 entries recorded, now **six consecutive runs**:
+`scripts/release-cut.test.ts` → *"fails loud when the pick cannot commit, and leaves nothing
+in progress"*. It sets `commit.gpgsign=true` with a deliberately bogus `gpg.program` and
+expects `buildReleaseBranch` to throw; in this container git commits anyway, so nothing is
+thrown. Identical before and after, `scripts/` is nowhere near this run's files, and that
+file is frozen by the routine's own rule. Out of scope — **not fixed**. It still wants a
+human, because the fix has to touch the test file.
+
+**The 3 smoke failures are the documented pre-existing set, and this is the eighth
+consecutive run failing exactly this way on clean `dev`**: all three are
+`editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a `locator.click` timeout on
+`Play all`. The three shard counts match the 2026-11-23 entry exactly (42/3, 33/0, 38/0), and
+the `projects/admin-console-billing.smoke.spec.ts:51` `ENOENT … scandir` harness artifact did
+not reproduce again — two runs clean now, so treat it as settled noise. Nothing a caption
+import spec touches can reach a module that proof 3 shows is absent from every built chunk.
+
+### Sandbox notes — 2026-11-25
+
+The 2026-11-16/18/20/23 notes all still hold and were all needed again. Two refinements:
+
+- **"Serialize lint and vitest" is too narrow — serialize lint and `pnpm build` too.** This
+  run started the baseline `pnpm lint` and `pnpm build` in parallel to save wall-clock and
+  the kernel OOM-killed eslint (**exit 137**) while the build survived. `pnpm lint` runs with
+  `--max-old-space-size=8192` and `vite build` is not cheap; they do not fit together. Run
+  **one gate at a time, always**, and re-run lint on its own after a build so the
+  `packages/*/dist` state is the one you controlled.
+- The Playwright revision gap is unchanged from 2026-11-23 (`playwright-core` wants chromium
+  **1254** / chromium-headless-shell **1254** / ffmpeg **1013**; the image carries
+  1243/1243/1011), and the three symlinks were needed again. Still read the wanted revisions
+  out of `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
+  every run rather than trusting any entry's numbers, this one included.
+
+---
+
+## 2026-11-27 run — dead code: the AQU-2778 Members/Teams removal left orphans behind
+
+**Theme**: dead code deletion (routine theme 1). PR #2221 (merged 2026-11-26, one day before
+this run) deleted `src/pages/MembersPage.tsx`, `src/components/org/TeamDetail.tsx`,
+`src/components/org/TeamsList.tsx` and `src/components/org/access/PlacesLens.tsx` when
+"People & access" became one folder tree. Three modules those four pages were the *only*
+consumers of survived the removal, plus one cascading export pair.
+
+**Files touched (4 — three deletions, one edit; 337 lines removed, 1 changed)**
+
+| File | Why dead |
+| --- | --- |
+| `src/components/org/TeamLaneChecks.tsx` (deleted, 67 lines) | Only importer was `TeamDetail.tsx`. Zero references anywhere in `src`, `e2e`, `scripts`, `parity` or the four worker packages — not even a comment. No test file of its own. |
+| `src/components/RemoveOrgMemberDialog.tsx` (deleted, 136 lines) | Only importer was `MembersPage.tsx`. Remaining hits were a comment in `src/lib/i18n/namespaces/org.ts` and one in `auth-worker/src/routes/orgs.ts`. No test file of its own. |
+| `src/hooks/useOrgInvites.ts` (deleted, 90 lines) | Only importer was `MembersPage.tsx`; its own doc comment said "Used by the operational PM Members page's 'Pending invitations' section". Remaining hit was a checkbox in an unfinished 2026-05-22 plan doc. No test file of its own. |
+| `src/lib/frontier/orgs.ts` (edited, −44/+1) | Cascade: deleting `useOrgInvites` left `listPendingOrgInvites()` and `interface PendingOrgInvite` with zero consumers (self-references only, and `orgs.test.ts` never touched either). Also fixed one comment pointer — `OrgMember.lastActiveAt`'s doc named the deleted Members page as the surface that renders it; the live consumers are the admin views and `PeopleLens`. |
+
+**Checked and deliberately kept**: `revokeProjectInvite` (still used by
+`src/components/org/access/edit-access-data.ts`), `OrgMemberProject` (still used by
+`src/hooks/useOrg.ts`), `TargetLaneOption` (still used by `LaneAccessFields` and
+`MultiProjectInviteDialog`), `listMemberProjects`/`listOrgMemberProjects`,
+`removeProjectMember`, `RoleLabel`, `TeamValidationList`, `TeamWithAvatar`,
+`OrgLaneAssignModal`.
+
+**Note for whoever reviews**: the auth-worker route `GET /api/v2/orgs/:orgId/project-invites`
+is untouched and now has no browser client. That is intentional — the route is part of the
+frozen API surface and a future "pending invites" surface can re-add a client. The route's
+shape is documented in `auth-worker/src/routes/orgs.ts`.
+
+### Candidates this run found and could not fit
+
+#### `src/hooks/useTeamDirectory.ts` + `src/components/org/TeamRoleSelect.tsx` — alive only for their own tests
+
+- **Found**: 2026-11-27 run, same AQU-2778 debris sweep.
+- **Friction**: both have **zero production importers** after PR #2221 (`useTeamDirectory` was
+  `TeamsList.tsx`'s directory hook; `TeamRoleSelect` was `TeamDetail.tsx`'s per-member role
+  picker — its own header still says "a member's team-scope role on TeamDetail"). Each is
+  referenced only by its own spec: `src/hooks/useTeamDirectory.test.tsx` (4003 bytes) and
+  `src/components/org/TeamRoleSelect.test.tsx` (2507 bytes).
+- **Why deferred**: deleting either module requires deleting its spec, and this routine's
+  core invariant forbids touching any test file. "Anything you'd have to modify a test to
+  accomplish" is explicitly out of scope.
+- **Proof needed**: a human decision that the Teams-detail UI is not coming back, then the
+  module *and* its spec go together in one commit. Cheap once that call is made — the
+  deletion itself is mechanical and `pnpm build` proves it.
+
+#### `src/lib/frontier/team-seed.ts` — a cache with writers and no readers
+
+- **Found**: 2026-11-27 run.
+- **Friction**: `readTeamDetailSeed()` and `readTeamNameSeed()` have **zero callers** —
+  `TeamDetail.tsx` was the only one. `src/lib/frontier/teams.ts` still calls
+  `rememberTeamSummaries()` (twice) and `rememberTeamDetail()` (once) on every
+  `listTeams`/`getTeam`, so the module is now a write-only in-memory cache: it fills a `Map`
+  nothing ever reads.
+- **Why deferred**: the honest fix is to delete the whole module *and* the four call sites in
+  `teams.ts`, which means editing a live API-client module that `OrgAccessPage`,
+  `TeamSettingsIndex`, `give-access-data`, `edit-access-data`, `move-project-data`,
+  `useTeamDirectory` and `lib/frontier/admin.ts` all import. Removing a `remember*()` call is
+  a statement deletion, not a comment change, so it needs more than the zero-reference proof
+  this run used — and `teams.ts` has no spec of its own to lean on.
+- **Proof needed**: confirm no dynamic/deferred reader (the seed is keyed by
+  `jwt|orgId|groupId`, so a grep for the key format is worth doing too), then a full
+  `pnpm build` + `pnpm test` pass; ideally run the org-access e2e journeys, since the seed's
+  original purpose was to avoid a loading flash on navigation.
+
+#### `src/lib/i18n/namespaces/org.ts` — i18n keys orphaned by PR #2221
+
+- **Found**: 2026-11-27 run.
+- **Friction**: with `MembersPage`/`TeamDetail`/`TeamsList`/`RemoveOrgMemberDialog` gone, at
+  least five comment-delimited key blocks in `org.ts` have no reader left:
+  `// -- RemoveOrgMemberDialog: …` (line ~1426), `// -- TeamsList: org's list of teams --`
+  (~605), `// -- Shared team-form fields (TeamsList create dialog + TeamDetail edit dialog) --`
+  (~640), `// -- TeamDetail: a single team's page --` (~644) and
+  `// -- MembersPage (AQU-538): org-level Members page --` (~1055). Plus the two
+  `projectSettings.share.laneChoice*` keys that `TeamLaneChecks` (deleted this run) was the
+  only consumer of.
+- **Why deferred**: this is the shape the i18n-key-deletion runs take (PRs #2175, #1944,
+  #1619, #1492, #1467, #1271) and it is a run of its own: every key has to come out of
+  `namespaces/org.ts` **and** all 17 `messages/*.ts` locale files **and**
+  `source-hashes.json`, which blows the ≤8-file budget many times over. It also wants a
+  careful read of which keys the new `access/` folder-tree components reused — PR #2221 added
+  151 lines to `org.ts` and some of it is the old keys moved, not new ones.
+- **Proof needed**: `pnpm i18n:check` green plus `pnpm build`/`pnpm test`, and a grep per key
+  (not per block) across `src`, `e2e` and `scripts` — the block comments are not reliable
+  ownership markers, as the 2026-11-18 run's notes on comment drift show.
+
+#### Comment drift from PR #2221 — ~20 pointers to the deleted pages
+
+- **Found**: 2026-11-27 run, while verifying the deletions above.
+- **Friction**: non-test source still names the deleted pages as live surfaces. A partial
+  list: `src/components/admin/AdminTenantsSection.tsx:20` ("jumps straight to an org's
+  Members page"), `src/components/org/access/GiveAccessDialog.tsx:89` ("as in PlacesLens'
+  PLACE_KIND"), `src/components/org/AssignedToMe.tsx:81` ("Layout matches TeamsList"),
+  `src/components/org/TeamRoleSelect.tsx:2`, `src/components/ProjectSettings/MembersSection.tsx:49`,
+  `src/hooks/useAccessibleProjects.ts:13,20`, `src/lib/navigation/org-paths.ts:88`
+  ("`?place=type:id`, which PlacesLens selects"), `src/lib/navigation/recent-visits.ts:3`
+  ("Teams list"), `src/lib/frontier/orgs.ts:330`, `src/lib/frontier/roles.ts:3,156,267`,
+  `src/lib/sync/invites.ts:12` ("Used by MembersPage → MultiProjectInviteDialog"),
+  `src/lib/time/relative.ts:3`, `src/lib/i18n/namespaces/settings.ts:368`.
+- **Why deferred**: this run's theme was deletion, and mixing a 15-file comment sweep into it
+  would break the one-theme-per-run rule and the ≤8-file budget. Only the one pointer inside
+  the file this run was already editing got fixed.
+- **Proof needed**: nothing beyond the standard gate — comments only, zero statements. But it
+  needs real reading per site, not a sed: several are *partially* right (`org-paths.ts:88`
+  describes a `?place=` query param that may still be parsed even though `PlacesLens` is
+  gone), and the 2026-11-18 run's rule applies — do not put a correct comment above code
+  that contradicts it.
+
+#### 🔴 BLOCKING, NEEDS A HUMAN — `e2e/specs/orgs/teams.smoke.spec.ts` is orphaned and `dev`'s smoke suite is red
+
+- **Found**: 2026-11-27 run, at the final gate. **Proved against clean `origin/dev` with a zero
+  diff** (`git stash` → re-run → `git stash pop`), so it is in no way this run's doing.
+- **What's wrong**: PR #2221 (AQU-2778) deleted the Teams routes from `src/App.tsx` and the
+  "Teams" link from `OrgSidebar`, but left `e2e/specs/orgs/teams.smoke.spec.ts` (10 tests) in
+  place. All 10 fail — `getByRole('button', { name: /New team|Create team/i })` is never found
+  because `/teams` no longer renders. `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts:13`
+  fails for the same reason: it asserts a `Teams` link inside the mobile nav sheet.
+- **Why this matters now**: the **pre-push hook runs the smoke suite**, so every push from a
+  clean `dev` hits a red hook until this is resolved. Measured on this container, clean dev:
+  **11 failed / 0 passed of the 11 tests in those two specs**; in the full 3-shard run,
+  s1 43 passed / 2 failed, s2 32 passed / 1 failed, s3 28 passed / 10 failed.
+- **Why this routine could not fix it**: the fix *is* a test-file change — delete
+  `teams.smoke.spec.ts` and drop the `Teams` assertion from the mobile-sidebar spec (or
+  restore the pages). The code-health routine's core invariant forbids touching any test,
+  spec, page object or journey file, and `e2e/` is a frozen path for its diff.
+- **A Linear issue could not be filed**: this session has **no Linear MCP tooling** (searched;
+  `save_issue`/`get_issue` are absent), so `/issue debug` could not create the ticket. **A
+  human needs to open it in `Triage`** against AQU-2778's area. Also check
+  `e2e/JOURNEYS.md` and `e2e/specs/partner-integrations/` for other `Teams`/`Members`
+  assertions the same PR stranded.

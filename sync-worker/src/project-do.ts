@@ -54,6 +54,7 @@ import {
   resolveTokenRefresh,
   selectStaleConnections,
   stripPresenceDraft,
+  deliverableToWalledSocket,
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
@@ -858,6 +859,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     for (const [ws, conn] of this.connections) {
       if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
       if (this.presence.get(conn.connId)?.currentFileId !== fileId) continue
+      if (conn.rowsWalled && !deliverableToWalledSocket(msg)) continue
       try {
         ws.send(payload)
       } catch {

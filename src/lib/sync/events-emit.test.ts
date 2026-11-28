@@ -408,7 +408,25 @@ describe("events-emit", () => {
       expect(ev.payload.valueHtml).toBeUndefined()
     })
 
-    it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {
+    it("an extension data-file commit is not the source text, so the floor does not apply", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.PROJECT_LEAD })
+      try {
+        await emitSourceCellCommit({
+          projectId: "p",
+          fileId: "ext-data",
+          cellId: "c",
+          parentId: null,
+          value: "{\"v\":1}",
+          author: "u",
+          sourceTextExempt: true,
+        })
+        expect(await outboxPendingCount()).toBe(1)
+      } finally {
+        setCqrsOutboxBridge(null)
+      }
+    })
+
+    it("refuses to enqueue below the source-text floor (default Maintainer) — never reaches the outbox", async () => {
       setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.CONTRIBUTOR })
       try {
         await expect(

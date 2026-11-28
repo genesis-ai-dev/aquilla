@@ -3,6 +3,7 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { callTool, UNKNOWN_TOOL, type McpToolResult } from './mcp-handlers'
 import { CHATGPT_TOOLS, CHATGPT_OPERATIONS, CHATGPT_COMMAND_KINDS,
   CHATGPT_INSTRUCTIONS, type ObjectSchema } from './mcp-chatgpt-tools'
+import { CLIENT_ONLY_FORMATS, SERVER_PARSEABLE_FILE_TYPES } from './import-parse-formats'
 import { loadChangeset } from './store'
 import type { Command } from './commands'
 import type { ExternalEnv } from './types'
@@ -44,6 +45,18 @@ export async function callChatGptTool(
       apiVersion: capabilities.apiVersion, credentialMode: cred.mode, credentialAccess: cred.access,
       orgIds: cred.orgIds, limits: capabilities.limits, errorCodes: capabilities.errorCodes,
       operations: CHATGPT_TOOLS.map(t => t.name),
+      // This connection's capabilities used to carry no format list, so the
+      // only statement an agent could read was a stale tool hint, and it told
+      // a user Aquilla cannot import .docx. Same tables as the parse route.
+      importing: {
+        serverParseableFormats: SERVER_PARSEABLE_FILE_TYPES,
+        clientOnlyFormats: CLIENT_ONLY_FORMATS,
+        note: 'upload_artifact (or create_upload_url for larger files) stores the ORIGINAL ' +
+          'bytes; preview_import and prepare_import parse every format in ' +
+          'serverParseableFormats on the server. Do not convert a file to another format ' +
+          'first: that loses round-trip export. Formats in clientOnlyFormats are imported ' +
+          'through the Import dialog in the Aquilla app.',
+      },
       quickstart: CHATGPT_INSTRUCTIONS,
       humanValidation: 'Saving does not establish human translation validation.',
     })

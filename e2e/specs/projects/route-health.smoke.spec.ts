@@ -34,8 +34,10 @@ test("all org-level routes render without errors", async ({ alice }) => {
     "/projects",
     orgRoute(alice, "/archived"),
     orgRoute(alice, "/assigned"),
+    // /teams and /members now open People & access.
     orgRoute(alice, "/teams"),
     orgRoute(alice, "/members"),
+    orgRoute(alice, "/access"),
     orgRoute(alice, "/settings"),
     "/preferences",
   ]

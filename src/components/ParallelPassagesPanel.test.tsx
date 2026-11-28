@@ -72,7 +72,7 @@ describe("ParallelPassagesPanel — smoke", () => {
   it("renders the dialog open without crashing", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { level: 1, name: "Search and replace" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Find & replace" })).toBeInTheDocument()
   })
 
   it("puts the replace field with the notes under it, and does not add a second diff list", () => {
@@ -307,7 +307,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "XX" },
     })
 
-    expect(screen.getByText(/1 match.*skipped.*html tag boundary/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 match.*skipped.*crosses formatting tags/i)).toBeInTheDocument()
   })
 
   it("does not show skip note when no HTML-spanning matches exist", () => {
@@ -321,7 +321,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "hi" },
     })
 
-    expect(screen.queryByText(/html tag boundary/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/formatting tags/i)).not.toBeInTheDocument()
   })
 })
 

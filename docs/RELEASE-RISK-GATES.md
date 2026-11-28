@@ -17,7 +17,7 @@ itself, and what is still open. The code it describes:
 | Planner (cherry-pick model, walk policy) | `scripts/release-plan.mjs`, `scripts/release-plan-walk.mjs` |
 | Cut (builds the branch by pick) | `scripts/release-cut.mjs`, `.github/workflows/release-cut.yml` (hourly at :05, on tag, on button) |
 | Hold nudge | `scripts/release-hold-nudge.mjs` (a step of the cut workflow) |
-| Full suite on a release branch | `.github/workflows/release-verify.yml` (check name `release-verify`) |
+| Build and type-check on a release branch | `.github/workflows/release-verify.yml` (check name `release-verify`) |
 | Deploy | `.github/workflows/release-deploy.yml` (when verify finishes, and every ten minutes) → `scripts/release-deploy-check.mjs` |
 | Rollback watch and line halt | `scripts/release-rollback.mjs`, the `release:halt` issue label |
 | Walk status on a PR | `.github/workflows/walk-status.yml` → `scripts/release-walk-status.mjs`; the walker is `docs/routines/WALK-PRS.md` |
@@ -34,8 +34,8 @@ Four more repository variables are the switches of the 2026-11-19 changes
 
 | Variable | Unset | Set |
 | --- | --- | --- |
-| `WALK_POLICY` | Only a failed walk holds a PR (`fail-only`). | `strict`: anything but a PASS walk holds, as before 2026-11-19. |
-| `AUTO_ROLLBACK` | The rollback watch reports what it would do. | `on`: it promotes the previous versions back and halts the line. |
+| `WALK_POLICY` | No walk verdict holds a PR (`advisory`, §7). | `fail-only`: a failed walk holds. `strict`: anything but a PASS walk holds, as before 2026-11-19. |
+| `AUTO_ROLLBACK` | The rollback watch reports what it would do. | Not read since 2026-11-27: `release-deploy.yml` passes `off` (§7). |
 | `AUTO_MIGRATE` | A migration holds for a person; the deploy stops at a pending one. | `on`: a green `migration-gate` lifts the hold, and the deploy applies additive pending migrations itself. |
 | `ROLLBACK_WATCH_MINUTES` | 10 | How long the watch runs after a deploy. |
 
@@ -160,10 +160,10 @@ PR → dev            risk-label.yml labels it risk:<areas> and runs the gate of
                     walk-status.yml reports the walk as the `qa-walk` status; ci.yml runs the suites its diff touches
 merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
 :05 every hour      release-cut.yml: plan, nudge on PRs held past 4 h, cut, push release/YYYY/MM/DD-NN
-   push             release-verify.yml (typecheck, lint, all unit, all workers in shards, build) + smart Jev (Hetzner)
+   push             release-verify.yml (production build, auth-worker and sync-worker type-checks; §7) + smart Jev (Hetzner)
                     — fires only because the cut pushes as RELEASE_BOT_TOKEN; a GITHUB_TOKEN push starts nothing
 verify finishes     release-deploy.yml (when on; also every ten minutes): if no `release:halt` issue is open,
-                    release-verify=success and Jev≠FAIL on HEAD → apply additive migrations (when on) → deploy:aquilla → tag
+                    release-verify=success on HEAD (Jev is advisory; §7) → apply additive migrations (when on) → deploy:aquilla → tag
    tag              release-cut.yml again (dispatched; a GITHUB_TOKEN tag does not chain on its own)
    +10 minutes      rollback watch: failed invocations against the hour before, then a live check;
                     a bad release is promoted back and the line halted (when on; otherwise reported)
@@ -269,7 +269,9 @@ today:
   they review. Same honesty rules as the replay gate: GitHub Actions runs
   only, and the matrix's own chain (both `permission-matrix/`, both
   harnesses, auth-worker's test helpers, setup file and vitest/tsconfig/
-  dependency set, `db/shared/test-lane-fill.ts`) is `infra`.
+  dependency set, `db/shared/test-lane-fill.ts`, and
+  `db/shared/test-pg-harness.ts`, the template both harness databases are
+  copied from) is `infra`.
 
   **`events/membership.ts` fails open on purpose, and the matrix pins it.**
   The write-perimeter re-check reports `ok` for a project with no row and
@@ -302,14 +304,42 @@ today:
   Three legs. *Additive*: every statement the PR's new migration files run
   is on a short list production's current code cannot notice (a new table,
   a new nullable or defaulted column, a new index, a new type), with the
-  forms that rewrite or lock `events` and `cells` taken off it. *Schema*:
+  forms that rewrite or lock `events` and `cells` taken off it. The list
+  is also what keeps a migration from running anything else as it applies
+  (2026-11-27): `CREATE TABLE … AS` is a query and is off it, and an
+  expression Postgres evaluates over existing rows (an `ADD COLUMN`
+  default, check or generated column, an index expression or `WHERE`) may
+  call only the built-ins in `APPLY_TIME_FUNCTIONS`, because `CREATE
+  FUNCTION` is additive and those are the places a migration could call
+  what it had just created. The gate reads a file through `scanSql`
+  (`scripts/neon-migration-file.ts`) and Postgres runs the file's own
+  text, so the scanner ends a literal where Postgres does: an `E'\''`
+  escape string and a `$` inside an identifier used to hide the statement
+  after them from the list. *Schema*:
   the base commit's `schema.sql` plus the new files is, catalog for
   catalog, the PR's `schema.sql`, which is the drift that answers 500 with
   every test green. *Old code, new schema*: the BASE commit's replay
   corpus and both permission matrices still answer their goldens on the
   PR's `schema.sql`. That is the state production is in between the
-  migration and the deploy. An edited or removed migration file, or a
-  statement off the list, is a person's call. Measured on the four
+  migration and the deploy. The replay in this leg hashes only the columns
+  the BASE commit's `schema.sql` has for each projection table
+  (`REPLAY_BASELINE_SCHEMA`, the base schema the job keeps beside the
+  PR's; `baselineColumns` in the harness). The harness hashes whole rows
+  and the base golden was written from the base columns, so a column the
+  PR adds, NULL or defaulted on every row, changed every hash of its
+  table and failed this leg for exactly the migration the additive leg
+  allows; no change inside the PR could turn it green (first seen on
+  AQU-2664, five nullable columns on `cell_audio`). An added column is
+  now left out and named in the job log. What the base commit's code can
+  know about is still compared: a different value in a column the base
+  has, a different row count, and a base column the PR dropped or renamed
+  (an error by name, even on a table with no rows) all fail, pinned in
+  `sync-worker/src/__tests__/replay-corpus-baseline.test.ts`. The
+  `replay-gate` and `deps-gate` runs set no baseline and hash every
+  column, as `golden.json` was written. The harness is the base
+  commit's, so a PR gets this once its base has it. An edited or removed
+  migration file, or a statement off the list, is a person's call.
+  Measured on the four
   migrations merged 2026-11-12 to 2026-11-18 (0201, 0202, 0203, 0205): all
   four pass the first two legs.
 - **`release-tooling` → `plan-diff`** (`risk-label.yml`,
@@ -394,17 +424,26 @@ pick (#1752, built on held #1750) behind a real conflict (#1744 on held
 comment with the picked table and the held line. None of this changes who
 deploys or the `release:approved` sign-off.
 
-**Verify.** The push runs the whole suite (`release-verify`) and smart
-Jev. This is where "a ready PR that depended on a held one and still
-applied as a patch" is caught: it fails to compile, fails a test, or fails
-a journey. The fix is the same as today: a person adds the held PR's
-approval or reverts the pick on the branch; a new HEAD re-verifies.
+**Verify.** The push runs `release-verify` and smart Jev. Since 2026-11-27
+`release-verify` is the production build and the auth-worker and
+sync-worker type-checks, not the whole suite (§7). This is where "a ready
+PR that depended on a held one and still applied as a patch" is caught
+when it fails to compile: on its first day the reduced check held
+release/2026/11/27-08, where #2242 was picked without the held #2240 it
+imports from. A pick that compiles and fails only a test is no longer
+caught here (the suites ran on the PR in `ci.yml`), and one that fails a
+journey is reported by Jev, not held (§7). The fix is the same as today: a
+person picks the held PR onto the branch or reverts the pick there, and
+the new HEAD re-verifies. The held PR's approval alone does not reach a
+branch already in flight, because no new cut starts while one is open.
 
 **Deploy.** `release-deploy-check.mjs` reads, for the branch HEAD only,
-the `release-verify` check conclusion and the newest Jev marker comment's
-decision line, and whether an issue labelled `release:halt` is open. Deploy
-iff none is open, verify succeeded and Jev reported anything but FAIL. No
-Jev comment yet means wait for the next look. The workflow looks when
+the `release-verify` check conclusion and whether an issue labelled
+`release:halt` is open. Deploy iff none is open and verify succeeded.
+Since 2026-11-27 smart Jev is advisory (§7): the newest Jev marker
+comment's decision line is still read, best effort, and named in the
+reason, but the deploy neither waits for it nor holds on a FAIL. The
+workflow looks when
 Release verify finishes green and every ten minutes; the stall report for
 a red verify stays hourly, at :45. Until 2026-11-19 it looked only at :45
 and the worker suites ran back to back in one job (23 minutes of
@@ -541,21 +580,30 @@ broken gate, not a week of risky changes.
   vitest failures and a red sync-worker pair were on dev as of 2026-10-06;
   `release-verify` runs the full suite, so a red baseline blocks every
   hourly deploy until it is green. That is the intended pressure, but it
-  means the first switch-on is a cleanup, not a flag flip.
+  means the first switch-on is a cleanup, not a flag flip. Since
+  2026-11-27 `release-verify` is the build and the type-checks (§7), so a
+  red test on dev no longer blocks the line; only a baseline that does not
+  compile does.
 - **Jev verdict provenance: done.** `release-deploy-check.mjs` counts a
   marker comment only from a trusted login (`JEV_TRUSTED_LOGINS` in
   `release-deploy.yml`, default the runbook's reporting identity), and any
   FAIL from it holds even if a later comment says PASS. A GitHub App for
   the runner replaces the login list when it exists.
   The comments on the HEAD are read across every page, and `release-verify`
-  counts only as a check run GitHub Actions produced.
+  counts only as a check run GitHub Actions produced. Since 2026-11-27 the
+  verdict is advisory (§7): the same rule now picks the verdict the deploy
+  names in its reason, and it holds nothing.
 - **Jev cadence.** One Hetzner stack, one suite at a time, queued. A
   cut whose Jev run is slow simply deploys at a later ten-minute look; two cuts can not race because one release is in flight at
   a time. If the queue backs up, the Jev run on an older HEAD is
-  superseded and the deploy waits.
+  superseded and the deploy waits. Since 2026-11-27 the deploy does not
+  wait for Jev at all (§7).
 - **PR-level test trimming** (meeting: many PR tests belong on the
   release). `release-verify` now carries the full suite; what to drop
-  from `ci.yml` on PRs is a separate change with its own review.
+  from `ci.yml` on PRs is a separate change with its own review. Reversed
+  2026-11-27 (§7): `release-verify` no longer runs the suites, so `ci.yml`
+  on the PR is the only place they run, and this argument no longer
+  supports dropping any of them from it.
 - **Kieran** has not seen this yet.
 
 ## 6. 2026-11-19: why the line did one to three releases a day
@@ -604,3 +652,29 @@ The principle this section is here to keep: when the line holds most PRs
 for the same reason, the reason is a gate to build or a gate that broke,
 and the answer is a test that proves the specific outcome, not a label.
 
+
+## 7. 2026-11-27: the holds that never decided are advisory
+
+An audit of the 1,234 PRs merged to dev from 2026-10-01, their 7,962
+workflow runs and 6,700 comments, asked of each check: did it keep a real
+problem from production, or only delay good work. Sections 1 to 6 describe
+the line as it was built; where they disagree with this section, this
+section is the line as it runs.
+
+| Check | What the record shows | Now |
+| --- | --- | --- |
+| Smart Jev on a release HEAD | 87 runs: 78 INCONCLUSIVE, 9 HARNESS UNAVAILABLE, no PASS, no FAIL | Advisory. `release-deploy-check.mjs` `decide` no longer waits for it or holds on it; the verdict is named in the reason. |
+| Walk | 68 PRs with a FAIL: 17 fixed and walked to PASS, 51 merged with no later PASS. 74 BLOCKED, 18 FLAKY | Advisory. `WALK_POLICY` unset is `advisory`: no verdict holds. `fail-only` and `strict` are the switches back. |
+| `release-verify` | 82 runs, 2 failures, one a runner setup fault | Build and type-check only (`pnpm run build`, each worker's `type-check`). The PRs ran their suites in `ci.yml`. |
+| Adversarial Jev on PRs | 2,041 runs, 234 runner-hours; all 170 red checks were the harness; one attack made 93 of 150 "failure found" comments | Nightly only. |
+| Rollback watch | One rollback, of a strings-only release, on a reconnect burst; the line stopped 32 hours (#2212) | Report only: `release-deploy.yml` passes `AUTO_ROLLBACK: "off"` whatever the variable says. |
+
+What still holds a PR: a holding area with no green gate (`replay-gate`,
+`auth-matrix`, `offline-gate`, `migration-gate`, `plan-diff`, `deps-gate`,
+and `infra` with no gate), until the gate is green or a person adds
+`release:approved`. Those are the outcomes of §1 that cannot be fixed
+forward. Everything else ships on the next cut and is fixed forward: in the
+same eight weeks dev took no revert of a bad merge.
+
+The line still stops on an open `release:halt` issue, which a person can
+open; the watch no longer opens one.

@@ -92,13 +92,24 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
   if (status.kind === "loading") {
     const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
     return (
-      <NoteOnClick note={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}>
+      <NoteOnClick note={pct != null ? t("workspace.transcribeBadge.downloadingModelNote", { percent: pct }) : t("workspace.transcribeBadge.loadingModelNote")}>
         <Badge
           variant="secondary"
           className={cn(PILL, "text-amber-700 dark:text-amber-300")}
         >
           {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
           {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>{t("workspace.transcribeBadge.loadShort")}</span>}
+        </Badge>
+      </NoteOnClick>
+    )
+  }
+
+  if (status.kind === "transcribing" && status.waiting === "limit") {
+    return (
+      <NoteOnClick note={t("workspace.transcribeBadge.waitingForLimitTooltip")}>
+        <Badge variant="secondary" className={cn(PILL, "text-amber-700 dark:text-amber-300")}>
+          <Spinner className="size-2.5" />
+          <span>{t("workspace.transcribeBadge.waitingForLimitPill")}</span>
         </Badge>
       </NoteOnClick>
     )

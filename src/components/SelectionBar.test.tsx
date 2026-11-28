@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 /** AQU-2260 (Sam, Oct 29): a text button carries its own words, so no hover. */
 async function expectNoHover(el: Element) {
@@ -32,7 +33,9 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
-import { setQueueTargetSlots, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
+import { setProgrammeFilm, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -63,12 +66,20 @@ vi.mock("@/lib/sync/events-emit", async (importActual) => ({
 }))
 
 // AQU-2123: spy on startQueue while keeping the rest of the play queue real —
-// `hasPlayableAudio` decides the Play-selected button's own enablement, so a
-// blanket mock would prove nothing about which lines it found.
+// its answer for which lines playback stops at (`linesPlaybackStopsAt`, the
+// film counted since Nov 12) decides the Play-selected button's own count and
+// enablement, so a blanket mock would prove nothing about which lines it found.
 vi.mock("@/lib/audio/play-queue", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/audio/play-queue")>()),
   startQueue: vi.fn(),
 }))
+// The layout itself, watched (and kept), so a test can count how often the
+// bar lays a file's lines out.
+vi.mock("@/lib/timeline/programme", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/programme")>()
+  return { ...actual, playedProgramme: vi.fn(actual.playedProgramme) }
+})
+import { playedProgramme } from "@/lib/timeline/programme"
 
 function makeProject(roleLevel: number | null): ProjectRecord {
   const base: ProjectRecord = {
@@ -353,7 +364,7 @@ describe("SelectionBar — copy the selection", () => {
  */
 describe("SelectionBar — bulk Validate eligibility messaging", () => {
   function validateButton() {
-    return screen.getByRole("button", { name: /^Validate text/i })
+    return screen.getByRole("button", { name: /^Validate text cells/i })
   }
 
   it("enables Validate for a translated, human-touched, not-yet-validated cell", async () => {
@@ -432,7 +443,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    expect(btn).toHaveTextContent(/Validate text\s*5/)
+    expect(btn).toHaveTextContent(/Validate text cells\s*5/)
     await expectNoHover(btn)
     fireEvent.click(btn)
     expect(emitCellValidate).toHaveBeenCalledTimes(5)
@@ -493,7 +504,7 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
     const onValidationCommitted = vi.fn()
     renderWithCommitted(onValidationCommitted, [makeCell({ id: "cell-1", translated: "bonjour" })])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(1)
     expect(onValidationCommitted).toHaveBeenCalledTimes(1)
@@ -529,7 +540,7 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
       makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
     ])
 
-    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    const btn = screen.getByRole("button", { name: /^Validate text cells/i })
     expect(btn).toBeDisabled()
     fireEvent.click(btn)
 
@@ -566,7 +577,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
@@ -590,9 +601,9 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
       makeCell({ id: "empty", context: "B8", translated: "" }),
     ])
-    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    const btn = screen.getByRole("button", { name: /^Validate text cells/i })
     await expectNoHover(btn)
-    const note = await noteBeside("Validate text", "Validate 2 of 4 selected cells: B4 and B5")
+    const note = await noteBeside("Validate text cells", "Validate 2 of 4 selected cells: B4 and B5")
     expect(note).toMatch(/2 will be skipped — .*still needs? a translation.*already validated/i)
     vi.restoreAllMocks()
   })
@@ -604,7 +615,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
       makeCell({ id: "mine", context: "D1", translated: "deja", activeValidators: ["alice"] }),
     ])
-    await noteBeside("Validate text", "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more")
+    await noteBeside("Validate text cells", "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more")
     vi.restoreAllMocks()
   })
 
@@ -616,7 +627,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
     ])
     // …so they go by the table's # column instead: their place in the file.
-    const note = await noteBeside("Validate text", "Validate 2 of 3 selected cells: rows 1 and 2")
+    const note = await noteBeside("Validate text cells", "Validate 2 of 3 selected cells: rows 1 and 2")
     expect(note).not.toContain("B4")
     vi.restoreAllMocks()
   })
@@ -627,7 +638,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1"]))
     renderFor([makeCell({ id: "ok-1", translated: "bonjour" })])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     const call = added.mock.calls.at(-1)?.[0]
     expect(call?.type).toBe("success")
@@ -646,7 +657,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     // The surface used to emit NOTHING of its own, which is why the original
     // repro could only be argued from an absence of events.
@@ -681,7 +692,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ], [], "fr", { onValidationCommitted: vi.fn() })
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => [input.cellId, input.surface, input.auto]))
@@ -875,7 +886,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
     renderBar(makeProject(ROLE.REVIEWER), UNTRANSLATED)
     const btn = translateButton()
     expect(btn).toBeDisabled()
-    await expectDisabledNote(btn, "You need contributor role to draft translations")
+    await expectDisabledNote(btn, "You need the contributor role to draft translations")
     vi.restoreAllMocks()
   })
 
@@ -898,7 +909,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
   it("leaves the reviewer's own validate actions alone", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.REVIEWER), [makeCell({ id: "cell-1", translated: "bonjour" })])
-    expect(screen.getByRole("button", { name: /^Validate text/i })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /^Validate text cells/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /remove my text validations/i })).toBeDisabled()
     vi.restoreAllMocks()
   })
@@ -946,7 +957,7 @@ describe("SelectionBar — a write that never queued", () => {
       makeCell({ id: "ok-2", translated: "salut" }),
     ], [], "", { onValidationCommitted: vi.fn() })
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)), { timeout: STALL_WATCHDOG_MS })
     warn.mockRestore()
@@ -964,7 +975,7 @@ describe("SelectionBar — a write that never queued", () => {
 describe("SelectionBar — the project's text validation rules (AQU-1571)", () => {
   const strict = (level: number = ROLE.CONTRIBUTOR, over: Partial<ProjectRecord> = {}) =>
     ({ ...makeProject(level), allowSelfValidation: false, ...over })
-  const validateButton = () => screen.getByRole("button", { name: /^Validate text/i })
+  const validateButton = () => screen.getByRole("button", { name: /^Validate text cells/i })
 
   it("counts and validates only the lines somebody else changed last", () => {
     vi.mocked(emitCellValidate).mockClear()
@@ -1072,7 +1083,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     ])
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    await noteBeside("Validate text", "Validate 1 of 2 selected cells")
+    await noteBeside("Validate text cells", "Validate 1 of 2 selected cells")
     fireEvent.click(btn)
     expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["their-draft"])
     vi.restoreAllMocks()
@@ -1392,6 +1403,262 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
   })
 
+  // Sam, Nov 12 (question 44): on a file with a linked film a line nobody has
+  // recorded has the film to play, so it is counted (and the run plays it:
+  // play-queue.film-tail.test.ts). With no film, the count above is unchanged.
+  /** A file with a linked film, following its recordings, as the workspace
+   *  has it: the lines Play plays, with their audio, and the film's word. */
+  function filmFile(audio: Map<string, CellAudioEntry>, endSec: number) {
+    setQueueTimingMode("audioFirst")
+    act(() => setProgrammeFilm({ endSec, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    return mergeCellsWithAudio(THREE, audio)
+  }
+  afterEach(() => {
+    act(() => setProgrammeFilm(null))
+    setQueueTimingMode("dubbing")
+  })
+
+  it("on a file with a linked film, counts a line nobody has recorded, and follows the film's word", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    // Verse 2 was never recorded.
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    setQueueTimingMode("audioFirst")
+    const lines = mergeCellsWithAudio(THREE, audio)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+    expect(playButton().textContent).toContain("2")
+
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    expect(playButton().textContent).toContain("3")
+
+    await userEvent.setup().click(playButton())
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
+  })
+
+  // The review (Nov 12), SHOULD 1: the count is what the run plays. A line
+  // laid out past the film's end has nothing to play, and the run skips it.
+  it("\"Play selected 3\" plays 3, or says 2: a line past the film's end is not counted", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    // cell-1 recorded 1 s [0, 1); cell-2 a stand-in [1, 2.5), the film's to
+    // 2 s; cell-3 a stand-in [2.5, 4), past the film's end.
+    const audio = audioMapFor(["cell-1"])
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: filmFile(audio, 2),
+    })
+    expect(playButton().textContent).toContain("2")
+    expect(playButton().textContent).not.toContain("3")
+  })
+
+  it("on a file with a linked film, plays the chosen lines as a run of the file's lines, so the film follows it", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-3", "cell-1"]))
+    const audio = audioMapFor(["cell-1"])
+    const lines = filmFile(audio, 60)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx, fromIndex, explicit] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect(ctx.snapshot).toBeUndefined()
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+    expect(fromIndex).toBe(0)
+    expect(explicit).toBe(true)
+  })
+
+  // The check of the q44 fixes (Nov 12), SHOULD B: the film runs only when
+  // every chosen line is among the lines Play plays. A selection reaching
+  // past them (a book's other chapter, say) plays every chosen line, as on a
+  // file with no film: its recordings back to back, the picture still. No
+  // chosen line is left out of the count or the run.
+  it("the film runs only when every chosen line is among the lines Play plays", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    // The chapter on the timeline holds cell-1 and cell-2; cell-3 is in another.
+    const lines = filmFile(audio, 60).slice(0, 2)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+    expect(playButton().textContent).toContain("2")
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.snapshot).toBe(true)
+    expect(ctx.only).toBeUndefined()
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
+  })
+
+  // The check of the q44 fixes (Nov 12), NOTE C: where a run of chosen lines
+  // starts is the queue's to say, from the order it plays them (a book's
+  // sequence, a timed file's times), which neither the table's order nor the
+  // list's need be. The bar hands it no start of its own.
+  it("on a film file, hands the queue the run with no start of its own", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    const [one, two, three] = filmFile(audio, 60)
+    const lines = [two!, three!, one!]
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx, fromIndex] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+    expect(fromIndex).toBe(0)
+  })
+
+  // The check of the q44 fixes (Nov 12), SHOULD A: the count is the queue's
+  // own answer, which turns on the file's timing, its added tracks and "Skip
+  // lines with nothing to play". The bar reads the setting itself and is
+  // handed the file's timing and tracks, as the strip is, so a change to
+  // either moves the count at once.
+  describe("the count follows the timing and \"Skip lines with nothing to play\"", () => {
+    beforeEach(() => {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    })
+    afterEach(() => {
+      act(() => setSkipSilentLinesPref(true))
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    })
+    const bar = (freeTiming: boolean, audio: Map<string, CellAudioEntry>) => (
+      <SelectionBar
+        project={makeProject(ROLE.CONTRIBUTOR)} cellStore={STORE} session={SESSION} username="alice" activeLane=""
+        myScopes={[]} completeBatch={vi.fn()} audioMode audioByCellId={audio}
+        playbackLines={mergeCellsWithAudio(THREE, audio)} freeTiming={freeTiming} programmeTracks={NO_TRACKS}
+      />
+    )
+    const STORE = makeStore(THREE)
+    const NO_TRACKS = { layerSlots: [], layerTrackSlots: [] }
+
+    it("no film, following the recordings, Skip off: two unrecorded lines are two lines to play", () => {
+      setSkipSilentLinesPref(false)
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+      renderWithTooltips(bar(true, new Map()))
+      expect(playButton()).not.toBeDisabled()
+      expect(playButton().textContent).toContain("2")
+    })
+
+    it("Skip turned off with three lines chosen, one recorded: the count follows, 1 to 3", () => {
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      renderWithTooltips(bar(true, audioMapFor(["cell-1"])))
+      expect(playButton().textContent).toContain("1")
+      act(() => setSkipSilentLinesPref(false))
+      expect(playButton().textContent).toContain("3")
+    })
+
+    it("the file switched to follow its source with lines chosen: the count follows, 3 to 1", () => {
+      setSkipSilentLinesPref(false)
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      const audio = audioMapFor(["cell-1"])
+      const view = renderWithTooltips(bar(true, audio))
+      expect(playButton().textContent).toContain("3")
+      view.rerender(<TooltipProvider delay={0}>{bar(false, audio)}</TooltipProvider>)
+      expect(playButton().textContent).toContain("1")
+    })
+  })
+
+  // The second check of the q44 fixes (Nov 13), NOTE 2: the stops of the
+  // lines Play plays are worked out only when they can be asked: a film
+  // behind the lines and something chosen in the Media view. Not on every
+  // file that follows its recordings, with nothing chosen, or in the Text view.
+  describe("the lines Play plays are laid out only when a film covers them and something is chosen", () => {
+    const MANY = Array.from({ length: 50 }, (_, i) => makeCell({ id: `m${i}` }))
+    const STORE = makeStore(MANY)
+    const bar = (lines: CellData[], audioMode: boolean) => (
+      <TooltipProvider delay={0}>
+        <SelectionBar project={makeProject(ROLE.CONTRIBUTOR)} cellStore={STORE} session={SESSION} username="alice" activeLane=""
+          myScopes={[]} completeBatch={vi.fn()} audioMode={audioMode} audioByCellId={new Map()} playbackLines={lines} freeTiming />
+      </TooltipProvider>
+    )
+    const fileLayouts = () => vi.mocked(playedProgramme).mock.calls.filter(([cells]) => cells.length === 50).length
+    beforeEach(() => { vi.mocked(playedProgramme).mockClear() })
+
+    it("no film: nothing chosen, the Text view, a selection, the lines changing: never", () => {
+      const spy = vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set())
+      const view = render(bar(MANY, false))
+      view.rerender(bar([...MANY], false))
+      spy.mockReturnValue(new Set(["m3"]))
+      view.rerender(bar(MANY, true))
+      spy.mockReturnValue(new Set(["m3", "m4"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(0)
+      // And nothing chosen lays out nothing at all.
+      expect(vi.mocked(playedProgramme).mock.calls.filter(([cells]) => cells.length === 0)).toHaveLength(0)
+    })
+
+    it("a film behind the lines: once when something is chosen, not again for another click", () => {
+      act(() => setProgrammeFilm({ endSec: 600, cellIds: new Set(MANY.map((c) => c.id)) }, "file-1"))
+      const spy = vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set())
+      const view = render(bar(MANY, true))
+      expect(fileLayouts()).toBe(0)
+      spy.mockReturnValue(new Set(["m3"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(1)
+      spy.mockReturnValue(new Set(["m3", "m4"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(1)
+    })
+  })
+
+  // The second check of the q44 fixes (Nov 13), NOTE 3 (aquilla-media's
+  // pick): a chosen row that is not on the timeline at all (a chapter heading
+  // while "Count headings" is off, an unrecorded hidden line) cannot play
+  // anyway, so it is left out of the question; it no longer takes the film
+  // away from the rest of the range. The film's word names every line the
+  // timeline draws, in every chapter.
+  it("a chosen row that is not on the timeline at all does not take the film away from the rest", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    setQueueTimingMode("audioFirst")
+    // cell-2 is a heading the timeline does not draw: not among the film's
+    // lines, nor the lines Play plays.
+    const lines = mergeCellsWithAudio([THREE[0]!, THREE[2]!], audio)
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(["cell-1", "cell-3"]) }, "file-1"))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+    expect(playButton().textContent).toContain("2")
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+  })
+
+  it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]), freeTiming: true, playbackLines: THREE,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.snapshot).toBe(true)
+    expect(ctx.only).toBeUndefined()
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
+  })
+
+  it("on a file with a linked film and nothing recorded, Play selected is offered for the film", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const lines = filmFile(new Map(), 60)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: new Map(), freeTiming: true, playbackLines: lines,
+    })
+    expect(playButton()).not.toBeDisabled()
+    expect(playButton().textContent).toContain("2")
+    act(() => setProgrammeFilm(null))
+  })
+
   it("is disabled, and says why, when not one selected line has audio", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
@@ -1412,22 +1679,19 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
       const take = { ...audioMap().get("cell-1")!.attachments["take-1"], audioId: `voice-${id}`, slot: TRACK }
       return { attachments: { [take.audioId]: take }, selectedBySlot: { [TRACK]: take.audioId }, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
     }
-    setQueueTimingMode("audioFirst")
-    setQueueTargetSlots(["recording", TRACK])
-    try {
-      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
-      renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-        audioMode: true, session: SESSION, audioByCellId: new Map([["cell-1", trackOnly("cell-1")], ["cell-2", trackOnly("cell-2")]]),
-      })
-      const btn = playButton()
-      expect(btn).not.toBeDisabled()
-      expect(btn.textContent).toContain("2")
-      await userEvent.setup().click(btn)
-      expect(startQueue).toHaveBeenCalledTimes(1)
-    } finally {
-      setQueueTimingMode("dubbing")
-      setQueueTargetSlots(["recording"])
-    }
+    // The merge with the film bundle (Nov 19): the bar counts with the timing
+    // and tracks it is handed (`freeTiming`, `programmeTracks`), as the
+    // workspace hands them, not with what the queue was last told.
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: new Map([["cell-1", trackOnly("cell-1")], ["cell-2", trackOnly("cell-2")]]),
+      freeTiming: true, programmeTracks: { layerSlots: [TRACK], layerTrackSlots: [] },
+    })
+    const btn = playButton()
+    expect(btn).not.toBeDisabled()
+    expect(btn.textContent).toContain("2")
+    await userEvent.setup().click(btn)
+    expect(startQueue).toHaveBeenCalledTimes(1)
   })
 
   it("stays out of the text lens — a selection there offers Translate, not playback", () => {
@@ -1452,7 +1716,7 @@ describe("SelectionBar — the health card names lines the same way (AQU-2278)",
     renderBar(makeProject(ROLE.CONTRIBUTOR), [], [], "", { cellStore: store, onValidationCommitted: vi.fn() })
     const name = createHealthCardNamer(store)
     const card = name(picked, undefined, LINE_WORDS)
-    return { card, note: await noteBeside("Validate text", /Validate 2 of 3 selected cells/) }
+    return { card, note: await noteBeside("Validate text cells", /Validate 2 of 3 selected cells/) }
   }
 
   it("by reference, a split verse piece included", async () => {

@@ -7,11 +7,15 @@ vi.mock("@/lib/audio/change-voice-batch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/audio/change-voice-batch")>()),
   cancelBatchChangeVoice: vi.fn(),
 }))
-vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => 0) }))
+vi.mock("@/lib/audio/transcribe", () => ({
+  transcribeCell: vi.fn(async () => 0),
+  transcribeCellOutcome: vi.fn(async () => ({ kind: "done" as const, words: 0 })),
+}))
 
 import { cancelBatchTranscribe, runBatchJobs, runTranscribeAll } from "@/lib/audio/batch-audio"
 import { cancelBatchChangeVoice } from "@/lib/audio/change-voice-batch"
 import { AudioBulkProgressBanner } from "./AudioBulkProgressBanner"
+import { Toaster } from "@/components/ui/toast"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -25,7 +29,12 @@ describe("AudioBulkProgressBanner — Change voice (AQU-1109)", () => {
     const user = userEvent.setup()
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })
-    renderWithTooltips(<AudioBulkProgressBanner />)
+    renderWithTooltips(
+      <>
+        <Toaster />
+        <AudioBulkProgressBanner />
+      </>,
+    )
 
     let run!: Promise<void>
     act(() => {
@@ -53,14 +62,20 @@ describe("AudioBulkProgressBanner — Change voice (AQU-1109)", () => {
 describe("AudioBulkProgressBanner — transcription limit (AQU-1681)", () => {
   it("says when a batch paused by the transcription limit carries on", async () => {
     vi.useFakeTimers({ now: new Date("2026-10-15T19:30:00") })
-    const { transcribeCell } = await import("@/lib/audio/transcribe")
-    vi.mocked(transcribeCell).mockImplementation(async (args) => {
+    // The run transcribes each row through `transcribeCellOutcome` (AQU-2375).
+    const { transcribeCellOutcome } = await import("@/lib/audio/transcribe")
+    vi.mocked(transcribeCellOutcome).mockImplementation(async (args) => {
       await args.onRateLimited?.(899).catch(() => {})
-      return 0
+      return { kind: "skipped" }
     })
     const cell = { id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav" } } } as unknown as CellData
     const run = runTranscribeAll({ cells: [cell], projectId: "p1", session: { jwt: "j", username: "u" } as FrontierSession })
-    render(<AudioBulkProgressBanner />)
+    render(
+      <>
+        <Toaster />
+        <AudioBulkProgressBanner />
+      </>,
+    )
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
     // 899 s, plus the second the batch adds, from 19:30:00 is 19:45:00.
     expect(screen.getByTestId("bulk-progress-waiting").textContent).toMatch(/^Transcription limit reached, continuing at 7:45/)

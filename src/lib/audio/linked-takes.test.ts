@@ -12,8 +12,7 @@ import {
   divergentVoiceTargets,
   primaryAudioHome,
   resolveAudioHomes,
-  resolveSynthTargets,
-} from "./linked-takes"
+  resolveSynthTargets, takesLiveOnHeardLines } from "./linked-takes"
 import type { CellData } from "@/hooks/useCells"
 
 /** A cue with a selected take, as `mergeCellsWithAudio` leaves one. The audio
@@ -327,3 +326,16 @@ describe("buildLinkedTakes — what each heard line performs", () => {
     expect(out.get("s1")![0]).toMatchObject({ performs: ["s1"], partOfSplit: false })
   })
 })
+
+describe("takesLiveOnHeardLines (AQU-2460)", () => {
+  it("a subtitle file with a linked film records its dubs on the heard lines", () => {
+    expect(takesLiveOnHeardLines({ filmIsUpload: false, heardLinesHoldTakes: false })).toBe(true)
+  })
+  it("an imported film's own lines hold its takes, with the heard lines beside them", () => {
+    expect(takesLiveOnHeardLines({ filmIsUpload: true, heardLinesHoldTakes: false })).toBe(false)
+  })
+  it("heard lines that already hold takes on an imported film keep them", () => {
+    expect(takesLiveOnHeardLines({ filmIsUpload: true, heardLinesHoldTakes: true })).toBe(true)
+  })
+})
+

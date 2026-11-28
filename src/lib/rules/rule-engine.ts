@@ -1,12 +1,13 @@
 import type { TranslationRule, RuleInfraction, InfractionSpan } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { effectiveSourceText } from "@/lib/cell-text"
+import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
 import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-rules"
 import type { BuiltinCheckRunContext } from "@/lib/lqa/builtin-run-context"
 import { suggestionFor } from "@/lib/lqa/check-functions/old-orthography"
 import { compiledPattern, prefilterForPattern } from "@/lib/terminology/match"
+import { catastrophicPatternReason } from "../../../db/shared/regex-safety"
 import { AnchorIndex, prefilterMode, verifyRejected } from "@/lib/terminology/prefilter"
 
 /**
@@ -25,7 +26,21 @@ export interface CellCheckContext {
 // every cell. Failed compiles are cached as null so we don't retry each time.
 // AQU-2654: the cache is the terminology matcher's, so a concept's pattern is
 // compiled once for the editor's highlights AND its `term:` rules.
-const compile = compiledPattern
+//
+// Every rule pattern is screened for catastrophic backtracking first: rules are
+// stored project / org settings any editor can write, and one `(a+)+$` would
+// freeze every collaborator's editor on the keystroke path. The verdict is
+// cached per pattern so the screen runs once, not per cell.
+const patternVerdicts = new Map<string, boolean>()
+function compile(pattern: string, flags: string): RegExp | null {
+  let safe = patternVerdicts.get(pattern)
+  if (safe === undefined) {
+    safe = catastrophicPatternReason(pattern) === null
+    if (patternVerdicts.size >= 2048) patternVerdicts.clear()
+    patternVerdicts.set(pattern, safe)
+  }
+  return safe ? compiledPattern(pattern, flags) : null
+}
 
 /**
  * Every match of a cached global regex in `text`, as `text.matchAll(re)` yields
@@ -312,7 +327,7 @@ function caseInsensitiveFlag(check: TranslationRule["check"]): string {
  * passes the gate still has to be run by `checkRulesForCell` to find out
  * whether it actually infracts.
  */
-export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): boolean {
+export function ruleSourceGateMatches(rule: TranslationRule, cell: SourceTextCell): boolean {
   const check = rule.check
   if (check.type !== "source-requires-target" && check.type !== "target-forbids") return true
   const pattern = check.sourcePattern
@@ -333,7 +348,7 @@ export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): bo
  * every glossary term — about 1.5 s of main thread for 664 terms, before any
  * row could paint.
  */
-export function rulesPassingSourceGate(cell: CellData, rules: TranslationRule[]): TranslationRule[] {
+export function rulesPassingSourceGate(cell: SourceTextCell, rules: TranslationRule[]): TranslationRule[] {
   if (rules.length === 0) return rules
   const plan = planFor(rules)
   if (!plan.index) return rules.filter((rule) => ruleSourceGateMatches(rule, cell))

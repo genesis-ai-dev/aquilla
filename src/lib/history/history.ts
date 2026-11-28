@@ -147,7 +147,7 @@ let activeUser: string | null = null
 let activeLane = ""
 let busy = false
 let openFileProbe: ((fileId: string) => boolean) | null = null
-let laneSwitcher: ((lane: string) => Promise<LaneSwitch>) | null = null
+let laneSwitcher: ((lane: string, kinds: readonly string[]) => Promise<LaneSwitch>) | null = null
 let remote: HistoryRemote | null = null
 let idCounter = 0
 
@@ -652,7 +652,7 @@ export type LaneSwitch = "ready" | "denied" | "blocked"
  * workspace registers it; it resolves once that language is on screen and its
  * lines and takes have loaded.
  */
-export function setLaneSwitcher(fn: ((lane: string) => Promise<LaneSwitch>) | null): void {
+export function setLaneSwitcher(fn: ((lane: string, kinds: readonly string[]) => Promise<LaneSwitch>) | null): void {
   laneSwitcher = fn
 }
 
@@ -1009,6 +1009,12 @@ function run(which: "undo" | "redo", pickId?: string): Promise<HistoryResult | n
   return turn
 }
 
+/** A step's kinds: its own, or a group's members'. */
+function stepKinds(record: StepRecord): string[] {
+  if (record.kind !== GROUP_KIND) return [record.kind]
+  return ((record.data as { steps?: ReadonlyArray<{ kind: string }> }).steps ?? []).map((p) => p.kind)
+}
+
 function takeOut(list: StepRecord[], id: string): StepRecord | null {
   const at = list.findIndex((r) => r.id === id)
   return at >= 0 ? (list.splice(at, 1)[0] ?? null) : null
@@ -1041,7 +1047,9 @@ async function runNow(which: "undo" | "redo", scope: string, pickId?: string): P
     // A step lives in its language: open it there first, so the change happens
     // where the person can see it (gap 24).
     if (top.lane !== undefined && top.lane !== activeLane) {
-      const opened = laneSwitcher ? await laneSwitcher(top.lane) : "blocked"
+      // AQU-2426 (review, Nov 9): with what the step is, so the language waits
+      // for its recordings only when the step reads them.
+      const opened = laneSwitcher ? await laneSwitcher(top.lane, stepKinds(top)) : "blocked"
       if (activeScope !== scope) return null
       if (!stillOn(fromList(), top.id)) return { step: label, outcome: { kind: "moved" } }
       if (opened === "denied") {
@@ -1229,14 +1237,19 @@ export function newestStepAt(): number | null {
  * open, even when you have changed other things since; ⌘Z stays the
  * project's newest step.
  */
-export function newestMatchingStep(match: (kind: string, data: unknown) => boolean): StepSummary | null {
+export function newestMatchingStep(
+  match: (kind: string, data: unknown) => boolean,
+  // AQU-2493 (review, Nov 9): whether a group counts, given its parts. By
+  // default when any part does; the Station passes its own rule (own-steps.ts).
+  groupCounts: (parts: ReadonlyArray<{ kind: string; data: unknown }>) => boolean = (parts) => parts.some((p) => match(p.kind, p.data)),
+): StepSummary | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
   if (!s) return null
   for (let i = s.undo.length - 1; i >= 0; i--) {
     const r = s.undo[i]
     const hit =
       r.kind === GROUP_KIND
-        ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+        ? groupCounts((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? [])
         : match(r.kind, r.data)
     if (hit) return summary(r)
   }

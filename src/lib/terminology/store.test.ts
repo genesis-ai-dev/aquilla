@@ -182,7 +182,7 @@ describe("mergeConcepts", () => {
   it("throws when fewer than 2 ids are provided", () => {
     const project = makeProject([makeConcept()])
     expect(() => mergeConcepts(project, ["c1"], "c1")).toThrow(
-      "mergeConcepts requires at least 2 concept ids.",
+      "Merging requires at least 2 concepts.",
     )
   })
 
@@ -191,7 +191,7 @@ describe("mergeConcepts", () => {
     const c2 = makeConcept({ id: "c2" })
     const project = makeProject([c1, c2])
     expect(() => mergeConcepts(project, ["c1", "c2"], "c3")).toThrow(
-      "survivorId must be one of the mergeIds.",
+      "The survivor concept must be one of the concepts being merged.",
     )
   })
 

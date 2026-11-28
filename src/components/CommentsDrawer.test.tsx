@@ -118,7 +118,7 @@ describe("CommentsDrawer — the new-thread field has a real accessible name", (
   it("keeps the placeholder as an additional hint", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
     expect(screen.getByRole("textbox", { name: "New thread" }))
-      .toHaveAttribute("placeholder", "Leave a comment...")
+      .toHaveAttribute("placeholder", "Leave a comment…")
     expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("data-variant", "outline")
   })
 })

@@ -62,6 +62,15 @@ describe("number-integrity-extra", () => {
     expect(runCheck("verses 3-5", "versets 3-6")).not.toBeNull()
   })
 
+  it("ignores numbers that live inside a footnote", () => {
+    const note = "\\f + \\fr LUK 1:32 \\ft about 3,000\\f*"
+    expect(runCheck("He will be great.", `He will be great. ${note}`)).toBeNull()
+    expect(runCheck("He will be great.", `He will be great. ${note} See 40.`)).toEqual([
+      { side: "target", start: `He will be great. ${note} See `.length, end: `He will be great. ${note} See 40`.length, matchedText: "40" },
+    ])
+    expect(runSourceDirection(`Forty days ${note}`, "Forty days.")).toBeNull()
+  })
+
   it("is the mirror of the source direction on a changed number", () => {
     // 40 written as 41: the source direction flags the 40, this one the 41.
     expect(runSourceDirection("40 days", "41 jours")?.[0]).toMatchObject({ side: "source", matchedText: "40" })

@@ -125,7 +125,7 @@ export const workspace = defineNamespace({
 
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
-    "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
+    "workspace.readOnlyGitBanner": "Read-only — imported from Git. Pushing changes isn't available yet.",
     // AQU-1902: edits wait for the project's languages so none lands on the wrong lane.
     "workspace.loadingLanguagesBanner": "Loading language lanes… editing starts in a moment.",
     "workspace.staleSibling.viewInHistory": "View in history",
@@ -133,9 +133,9 @@ export const workspace = defineNamespace({
     // set, which silently switches off every term check in the editor. Say so
     // rather than letting the editor look like a project with no terminology.
     "workspace.terminologyUnavailableBanner":
-      "Terminology checks are unavailable — the termbase could not be loaded, so term rules are not being applied.",
+      "Terminology checks are unavailable — the term base could not be loaded, so term rules are not being applied.",
     "workspace.staleSource.message":
-      "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
+      "Source text changed since your last edit — your translation was saved, but please re-check that it reflects the latest source.",
     "workspace.focusLock.editingNotice":
       "{user} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.",
     "workspace.loadingComments": "Loading comments",
@@ -146,6 +146,8 @@ export const workspace = defineNamespace({
     "workspace.trash.empty": "No recently deleted files.",
     "workspace.trash.deleteForever": "Delete forever",
     "workspace.trash.retentionNote": "Files are kept for 30 days. \"Delete forever\" permanently wipes media.",
+    // AQU-2549: a copy joined into the project's own file cannot be restored.
+    "workspace.trash.joinedInto": "Joined into {name}, so it can't be restored.",
 
     // -- ProjectWorkspace: MoveToCorpusDialog --
     "workspace.moveToCorpus.dialogTitle": "Move to corpus",
@@ -212,8 +214,7 @@ export const workspace = defineNamespace({
     "workspace.metrics.avgEditDistanceColumn": "Avg edit distance",
     "workspace.metrics.emptyNoData.title": "No post-edit pairs yet",
     "workspace.metrics.emptyNoData.description":
-      "Pairs are recorded only after a human approves an AI draft or an edited descendant. " +
-      "Generate a draft, review it, then approve it to add effort data here.",
+      "Pairs are recorded only after someone approves an AI draft or an edited version of it. Create an AI draft, review it, then approve it to add effort data here.",
     "workspace.metrics.emptyError.title": "Failed to load metrics",
     "workspace.metrics.emptyError.description": "Check your connection and try refreshing.",
     "workspace.metrics.emptyNoCloud.title": "Cloud sync required",
@@ -232,18 +233,13 @@ export const workspace = defineNamespace({
     "workspace.metrics.filteredTo": "— filtered to {user}",
     "workspace.metrics.noUserData": "No data for this user yet.",
     "workspace.metrics.byFileHeading": "By file",
-    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for scripture)",
+    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for Scripture)",
     "workspace.metrics.fileColumn": "File",
     "workspace.metrics.acceptedAsIsColumn": "Kept as-is",
     "workspace.metrics.byReviewerHeading": "By reviewer",
     "workspace.metrics.byReviewerHint": "(click a row to filter the trend above)",
     "workspace.metrics.disclosure":
-      "Metric: character-level normalized Levenshtein distance (NED). Pairs require AQU-292 AI " +
-      "provenance (ai_suggestion=true on the commit event). Only human-approved pairs are " +
-      "included. Character insertions, deletions, substitutions, acceptance, model, prompt " +
-      "version, and retrieved example IDs come from this project's private event history. " +
-      "Elapsed time runs from draft commit to first approval and may include time away from " +
-      "the editor. Historical commits before AQU-292 are excluded.",
+      "Metric: character-level normalized edit distance (NED). Only AI drafts approved by a human are included; older edits made before AI draft tracking was added are excluded. Character changes, acceptance, model, prompt version, and reference examples come from this project's private history. Elapsed time runs from when the draft was created to its first approval and may include time away from the editor.",
 
     // -- App.tsx: SyncFreezeOverlay --
     "workspace.syncFreezeOverlay": "Merging incoming changes…",
@@ -307,13 +303,16 @@ export const workspace = defineNamespace({
     "workspace.durationBar.overBy": "+{seconds}s",
 
     // -- CellAiStatusPopover --
-    "workspace.aiStatusPopover.technicalDetail": "Technical detail",
+    "workspace.aiStatusPopover.technicalDetail": "Technical details",
 
     // -- InlineAiError --
     "workspace.inlineAiError.showDetailsAriaLabel": "Show error details: {line}",
 
     // -- CellTranscribeBadge --
     "workspace.transcribeBadge.loadShort": "load",
+    // ── AQU-2740: copy that was hard-coded in English at the call site ──
+    "workspace.transcribeBadge.loadingModelNote": "Loading transcription model…",
+    "workspace.transcribeBadge.downloadingModelNote": "Downloading transcription model ({percent}%)…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
     "workspace.transcribeBadge.changeModel": "Change model",
     "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
@@ -372,7 +371,7 @@ export const workspace = defineNamespace({
     "workspace.alignment.confirmTooltip": "Confirm this alignment",
     "workspace.alignment.rejectTooltip": "Reject this alignment",
     "workspace.alignment.contributorRequired":
-      "Contributor+ required to confirm or reject alignments",
+      "Contributor or above required to confirm or reject alignments",
 
     // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
     "workspace.alignment.originalHeading": "Original language",
@@ -411,7 +410,7 @@ export const workspace = defineNamespace({
     // common.restore, search.expanded.fileCount) --
     "workspace.projectCard.inactiveTooltip": "This project is inactive and cannot be edited until reactivated",
     "workspace.projectCard.yourRoleTooltip": "Your role on this project",
-    "workspace.projectCard.moveToTrash": "Move to Trash",
+    "workspace.projectCard.moveToTrash": "Move to trash",
     "workspace.projectCard.awaitingSetup": "Awaiting setup",
     "workspace.projectCard.awaitingSetupBy": "Awaiting setup by {maintainer}",
     "workspace.projectCard.languagesNotSet": "Languages not set",
@@ -434,11 +433,14 @@ export const workspace = defineNamespace({
     "workspace.statusBar.bothSummary": "{total} lines · {done} done {pct}",
     "workspace.statusBar.textLeftBadge": "Text left: {count}",
     "workspace.statusBar.audioLeftBadge": "Audio left: {count}",
+    // AQU-2655: the file's checks are still running in the background; {count}
+    // is how many cells they have not reached yet.
+    "workspace.statusBar.checking": "Checking… {count} left",
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
     "workspace.updateIndicator.short": "Update",
-    "workspace.updateIndicator.tooltip": "A newer build is deployed. Click to reload now, or it loads the next time you leave the editor.",
+    "workspace.updateIndicator.tooltip": "A newer version is available. Click to reload now, or it loads the next time you leave the editor.",
 
     // -- ProjectWorkspace: legacy-measure batch toast (pre-merge takes with
     // no captured duration; "Measure all" runs a fix-it batch) --
@@ -476,9 +478,9 @@ export const workspace = defineNamespace({
     // -- timeline/LinkVideoTimingDialog --
     "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
     "workspace.linkVideoTiming.description":
-      "This file follows its recordings. A file timed to a film always follows its source, so " +
+      "This file follows its recordings. A file with a film starts on following its source, so " +
       "once the film is linked its lines keep the film's times and the film plays. No recordings " +
-      "or times change, and clearing the film lets the file follow its recordings again.",
+      "or times change. A project lead can switch it back under Timing, and clearing the film does too.",
     "workspace.linkVideoTiming.linkAnyway": "Link the film",
 
     // -- timeline/TimingModeChangedDialog --
@@ -496,11 +498,11 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.sourceLabel": "Source:",
     "workspace.chipStrip.targetLabel": "Target:",
     "workspace.chipStrip.diffLabel": "Diff:",
-    "workspace.chipStrip.startOverlapTooltip": "This target audio starts over the PREVIOUS verse's target audio",
+    "workspace.chipStrip.startOverlapTooltip": "This target audio starts during the previous verse's target audio",
     "workspace.chipStrip.startOverlapValue": "Start overlap: −{sec}s",
-    "workspace.chipStrip.endOverlapTooltip": "This target audio runs over the NEXT verse's target audio",
+    "workspace.chipStrip.endOverlapTooltip": "This target audio runs into the next verse's target audio",
     "workspace.chipStrip.endOverlapValue": "End overlap: −{sec}s",
-    "workspace.chipStrip.eitherOverlapTooltip": "This target audio sounds over a neighbouring verse's target audio",
+    "workspace.chipStrip.eitherOverlapTooltip": "This target audio overlaps a neighboring verse's target audio",
     "workspace.chipStrip.overlapValue": "Overlap: −{sec}s",
     "workspace.chipStrip.speakerLabel": "Speaker",
     "workspace.chipStrip.durationDiffTooltip": "Source duration − target duration",
@@ -532,7 +534,7 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
-      "Drawn short at rest so the neighbouring dubs stay reachable",
+      "Drawn short at rest so the neighboring dubs stay reachable",
     "workspace.targetAudioLane.drawnShortPreviousDubStays":
       "Drawn short at rest so the previous dub stays reachable",
     "workspace.targetAudioLane.drawnShortNextDubStays":
@@ -581,6 +583,9 @@ export const workspace = defineNamespace({
       "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
     "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
     "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
+    // AQU-2426: a mic take waiting out the hourly limit.
+    "workspace.transcribeBadge.waitingForLimitPill": "Waiting at the limit",
+    "workspace.transcribeBadge.waitingForLimitTooltip": "Transcription takes up to 60 requests every 15 minutes for each person. This take waits and transcribes by itself once the limit allows.",
   },
   context: {
     _context: {
@@ -593,6 +598,17 @@ export const workspace = defineNamespace({
       screenshot: "workspace-nav",
     },
     keys: {
+      "workspace.transcribeBadge.loadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is still loading in the browser, before it can transcribe.",
+      },
+      "workspace.transcribeBadge.downloadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is downloading into the browser, before it can transcribe.",
+        placeholders: {
+          percent: "Whole number from 0 to 100: how much of the model has downloaded. Keep the % sign after it as your language writes percentages.",
+        },
+      },
       "workspace.diarize.discardWarning": {
         description:
           "Body of the browser confirm() shown before diarizing a file that already " +
@@ -943,6 +959,14 @@ export const workspace = defineNamespace({
           "permanently purges a soft-deleted file's data (as opposed to " +
           "common.delete, the everyday delete action elsewhere).",
         maxLength: 24,
+      },
+      "workspace.trash.joinedInto": {
+        description:
+          "Shown under a row of the 'Recently deleted' dialog in place of its Restore " +
+          "button: the file was a copy from the source project that was joined into " +
+          "one of the project's own files (projectSettings.sourceLink.joinButton), so " +
+          "restoring it would bring back a second file that no longer follows the source.",
+        placeholders: { name: "The project's own file it was joined into \u2014 never translated." },
       },
       "workspace.trash.retentionNote": {
         description:
@@ -1931,6 +1955,12 @@ export const workspace = defineNamespace({
           "counting lines whose recording is not yet approved.",
         placeholders: { count: "How many lines still need an approved recording." },
       },
+      "workspace.statusBar.checking": {
+        description:
+          "Status in the editor's footer while the file's checks (glossary terms, rules) are " +
+          "still running in the background. Shown beside a small spinner; disappears when done.",
+        placeholders: { count: "How many cells the checks have not reached yet." },
+      },
       "workspace.statusBar.unvalidatedBadge": {
         description:
           "Small badge in the status footer counting cells not yet " +
@@ -2062,8 +2092,9 @@ export const workspace = defineNamespace({
       "workspace.linkVideoTiming.title": {
         description:
           "Heading of the dialog shown when linking a film to a file whose timing " +
-          "is 'Follows recordings': a file timed to a film always follows its source, " +
-          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
+          "is 'Follows recordings' and that has no timing choice of its own: a file with " +
+          "a film starts on following its source, so linking switches it. Use the same " +
+          "names as the timeline's Timing dropdown.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.description": {
@@ -2451,6 +2482,9 @@ export const workspace = defineNamespace({
           "comma-separated list of file names.",
         placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
+      // AQU-2426: a mic take waiting out the hourly limit.
+      "workspace.transcribeBadge.waitingForLimitPill": { description: "Short status on a take recorded with the mic whose transcription is waiting out the hourly transcription limit; it carries on by itself.", maxLength: 24 },
+      "workspace.transcribeBadge.waitingForLimitTooltip": { description: "Text a click on the 'Waiting at the limit' status opens." },
     },
   },
   surfaces: [],

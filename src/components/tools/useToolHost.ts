@@ -17,12 +17,13 @@ import { createToolHandlers } from "@/lib/tools/host-handlers"
 import { LiveToolData, type ToolHostServices } from "@/lib/tools/live-data"
 import { dispatchHostKey } from "@/lib/tools/host-keys"
 import { METHOD_SCOPES, applyPromptAnswer, decideScope, type PromptAnswer } from "@/lib/tools/permissions"
-import { readThemeVars } from "@/lib/tools/srcdoc"
+import { readThemeVars, toolWindowOf } from "@/lib/tools/srcdoc"
 import { loadFrameFonts } from "@/lib/tools/frame-fonts"
 import { mintToolSession, setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
 import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import type { PendingPrompt } from "./PermissionPrompt"
+import { useToolsMount } from "./ToolsMountContext"
 
 export interface UseToolHostArgs {
   frameRef: RefObject<HTMLIFrameElement | null>
@@ -65,6 +66,11 @@ export interface ToolFrameControl {
 }
 
 export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef, headless }: UseToolHostArgs): ToolHostState {
+  const toolsCtx = useToolsMount()
+  const toolsCtxRef = useRef(toolsCtx)
+  useEffect(() => {
+    toolsCtxRef.current = toolsCtx
+  }, [toolsCtx])
   const headlessRef = useRef(headless)
   useEffect(() => {
     headlessRef.current = headless
@@ -172,6 +178,20 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       hostKey: (key) => dispatchHostKey(key),
       locale: () => localeRef.current,
       headless: () => headlessRef.current,
+      nativeEditor: () => {
+        const ctx = toolsCtxRef.current
+        if (!ctx) return undefined
+        return {
+          getActiveCell: () => ctx.nativeEditor.getActiveCell(),
+          reveal: (fileId, cellId, focus) => ctx.nativeEditor.reveal(fileId, cellId, focus),
+          annotate: (input) => ctx.nativeEditor.annotate(toolId, toolName, input),
+          clearAnnotations: (fileId, layer) => ctx.nativeEditor.clearAnnotations(toolId, fileId, layer),
+          openOwnPanel: () => {
+            ctx.openInPanel(toolId)
+            return true
+          },
+        }
+      },
     })
     // apiRev 7: the server-minted tool session. Until it arrives, writes carry
     // an unverified claim (fine for translations; file and data-file writes
@@ -187,7 +207,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     // Editor mounts read the workspace's store: nothing to warm.
     if (warmFile && !servicesRef.current?.editor) data.warm(warmFile)
     const host = createBridgeHost({
-      getFrameWindow: () => frameRef.current?.contentWindow ?? null,
+      getFrameWindow: () => toolWindowOf(frameRef.current),
       handlers: createToolHandlers(data),
       authorize: async (method, hold) => {
         const scope = METHOD_SCOPES[method]
@@ -244,6 +264,26 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       dataRef.current = null
     }
   }, [projectId, session, toolId, toolVersion, codeHash, toolName, ask, frameRef])
+
+  // apiRev 8: push live native-editor active-cell changes into mounted panels/pages
+  // so companion extensions follow whichever cell the translator is editing.
+  const nativeEditor = toolsCtx?.nativeEditor ?? null
+  useEffect(() => {
+    if (!ready || !nativeEditor) return
+    const send = () => {
+      const cell = nativeEditor.getActiveCell()
+      hostRef.current?.push({
+        type: "editor.activeCell",
+        fileId: cell?.fileId ?? null,
+        cellId: cell?.cellId ?? null,
+        ref: cell?.ref ?? null,
+        source: cell?.source ?? "",
+        target: cell?.target ?? "",
+      })
+    }
+    send()
+    return nativeEditor.subscribeActiveCell(send)
+  }, [ready, nativeEditor])
 
   // apiRev 2 live pushes from workspace services: focus locks and comments.
   const lockHolders = services?.lockHolders
@@ -369,7 +409,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   useEffect(() => {
     if (!ready || !revealCellId) return
     hostRef.current?.push({ type: "editor.reveal", fileId: boundFile ?? null, cellId: revealCellId })
-    frameRef.current?.contentWindow?.focus()
+    toolWindowOf(frameRef.current)?.focus()
   }, [ready, revealCellId, boundFile, frameRef])
 
   // apiRev 3: catch a mount that loads but draws nothing (asked twice: a

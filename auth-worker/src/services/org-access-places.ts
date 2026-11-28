@@ -12,6 +12,7 @@ import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { laneReadWallEnabled, visibleLaneTags } from "../../../src/lib/lanes/read-wall"
 import type { Env } from "../types"
 import type { ScopePath, ScopeRef } from "./access-payload"
+import type { LaneShape } from "./lane-shape"
 
 export interface DirectGrantee {
   userId: string
@@ -22,6 +23,12 @@ export interface DirectGrantee {
   /** Winning row at this place. Invites are not accounts. */
   source?: "direct" | "creator" | "invite"
   pendingInvite?: { expiresAt: string | null }
+  /**
+   * AQU-2322, project nodes only: this person's way in is lane grants, drawn
+   * as one row ("Contributor · Spanish"). The lanes this viewer can see, each
+   * with its role; `roleLevel` is the highest of them.
+   */
+  lanes?: { id: string; name: string; roleLevel: number }[]
 }
 
 /** A grant on an ancestor that resolves to this place. */
@@ -67,7 +74,12 @@ interface Attachment {
   laneIds: string[]
 }
 interface Invite {
-  token: string
+  /**
+   * Stable, non-redeemable id for the row: a hash of the token. The token is a
+   * bearer credential (an open link is redeemable by any account), so it never
+   * leaves loadPlaceExtras.
+   */
+  ref: string
   roleLevel: number
   email: string | null
   expiresAt: string | null
@@ -89,6 +101,8 @@ export interface PlaceAssembly {
   projects: readonly ProjectRow[]
   memberIds: ReadonlySet<string>
   extras: PlaceExtras
+  /** AQU-2322: which lane rows are lane grants, and whose project row is drawn as lanes. */
+  laneShape: LaneShape
 }
 
 export interface PlaceExtras {
@@ -114,6 +128,11 @@ function asIso(value: string | Date | null): string | null {
   if (value == null) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+async function inviteRef(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))
+  return [...new Uint8Array(digest).slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
 function parseLaneList(raw: string | null): string[] {
@@ -225,7 +244,7 @@ export async function loadPlaceExtras(env: Env, orgId: number, viewerId: string)
   const projectInvites = new Map<string, Invite[]>()
   for (const row of projectInviteRes.results ?? []) {
     const invite: Invite = {
-      token: row.token,
+      ref: await inviteRef(row.token),
       roleLevel: Number(row.role_level),
       email: row.email,
       expiresAt: asIso(row.expires_at),
@@ -248,13 +267,13 @@ export async function loadPlaceExtras(env: Env, orgId: number, viewerId: string)
     memberCount: new Map((countRes.results ?? []).map((row) => [String(row.group_id), Number(row.n)])),
     viewerTeamIds: new Set((memberRes.results ?? []).map((row) => String(row.group_id))),
     laneUsers: await laneUsersMissing(env, laneGrants),
-    orgInvites: (orgInviteRes.results ?? []).map((row) => ({
-      token: row.token,
+    orgInvites: await Promise.all((orgInviteRes.results ?? []).map(async (row) => ({
+      ref: await inviteRef(row.token),
       roleLevel: Number(row.role_level),
       email: row.email,
       expiresAt: asIso(row.expires_at),
       lanes: [],
-    })),
+    }))),
     projectInvites,
   }
 }
@@ -285,8 +304,9 @@ export function redactUnseenPlaces(
 
 function inviteGrantee(invite: Invite): DirectGrantee {
   return {
-    userId: `invite:${invite.token}`,
-    displayName: invite.email ?? invite.token,
+    userId: `invite:${invite.ref}`,
+    // An open link has no name; never fall back to the token.
+    displayName: invite.email ?? "Invite link",
     email: invite.email,
     roleLevel: invite.roleLevel,
     isGuest: false,
@@ -401,17 +421,22 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
   const inviteMatchesLane = (invite: Invite, lane: LaneRow) =>
     invite.lanes.length > 0 && invite.lanes.some((token) => token === lane.id || token === lane.legacyTag)
 
-  const laneNodes = (project: ProjectRow): AccessTreeNode[] => {
-    const lanes = extras.lanes.filter((lane) => lane.projectId === project.id)
+  /** The project's target lanes this viewer may see: all of them, or under the read wall their granted ones. */
+  const shownLanes = (projectId: string): LaneRow[] => {
+    const lanes = extras.lanes.filter((lane) => lane.projectId === projectId)
     const viewerGrants = extras.laneGrants
-      .filter((row) => row.projectId === project.id && row.userId === input.viewerId)
+      .filter((row) => row.projectId === projectId && row.userId === input.viewerId)
       .map((row) => ({ lane: row.laneId, level: row.roleLevel }))
     const visible = visibleLaneTags({
       enabled: wallOn,
-      role: input.viewerProjectRole.get(project.id) ?? 0,
+      role: input.viewerProjectRole.get(projectId) ?? 0,
       laneGrants: viewerGrants,
     })
-    const shown = visible == null ? lanes : lanes.filter((lane) => visible.has(lane.id))
+    return visible == null ? lanes : lanes.filter((lane) => visible.has(lane.id))
+  }
+
+  const laneNodes = (project: ProjectRow): AccessTreeNode[] => {
+    const shown = shownLanes(project.id)
     const projectRef: ScopeRef = { type: "project", id: project.id, name: project.name }
     const invites = extras.projectInvites.get(project.id) ?? []
     return shown.map((lane): AccessTreeNode => {
@@ -419,6 +444,8 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
       const granted = new Map<string, DirectGrantee>()
       for (const row of extras.laneGrants) {
         if (row.projectId !== project.id || row.laneId !== lane.id) continue
+        // AQU-2322: the lanes a project-wide grant already gives are not granted here.
+        if (!input.laneShape.isLaneGrant(row)) continue
         const known = personById.get(row.userId) ?? extras.laneUsers.get(row.userId)
         if (!known) continue
         const name = "userName" in known ? known.userName : known.name
@@ -439,8 +466,13 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
       // A creator who also holds a project_members row is two view rows for one
       // grant at this project. Collapse them the same way Granted here does,
       // or the lane lists that person twice under "via project".
+      // AQU-2322: a project row drawn as lanes is not a project-wide grant, so
+      // the lane it names lists that person once, as granted here. With the
+      // read wall off the row still opens the other lanes, and says so there.
       const viaProject: InheritedSource[] = directOf(
-        projectDirect(project.id).filter((g) => grantAppliesToLane(g, lane)),
+        projectDirect(project.id).filter((g) =>
+          grantAppliesToLane(g, lane) && !(granted.has(g.userId) && input.laneShape.narrowed(g.userId, project.id)),
+        ),
       ).map((person) => ({
         kind: "person",
         roleLevel: person.roleLevel,
@@ -468,9 +500,25 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
 
   const projectNode = (project: ProjectRow): AccessTreeNode => {
     const wholeProjectInvites = (extras.projectInvites.get(project.id) ?? []).filter((invite) => invite.lanes.length === 0)
+    // AQU-2322: someone whose way in is lane grants is one row that names the
+    // lanes ("Contributor · Spanish"), so the project still shows everyone who
+    // can open something in it, once each.
+    const shown = shownLanes(project.id)
+    const direct = directOf(projectDirect(project.id)).map((row): DirectGrantee => {
+      if (row.source !== "direct" || !input.laneShape.narrowed(row.userId, project.id)) return row
+      const lanes = shown.flatMap((lane) => {
+        const grant = extras.laneGrants.find(
+          (g) => g.projectId === project.id && g.userId === row.userId && g.laneId === lane.id && input.laneShape.isLaneGrant(g),
+        )
+        return grant ? [{ id: lane.id, name: lane.name, roleLevel: grant.roleLevel }] : []
+      })
+      // None of their lanes is one this viewer may see: the plain project row, as before.
+      if (lanes.length === 0) return row
+      return { ...row, roleLevel: Math.max(...lanes.map((l) => l.roleLevel)), lanes }
+    })
     return {
       scope: { type: "project", id: project.id, name: project.name },
-      directGrantees: withInvites(directOf(projectDirect(project.id)), wholeProjectInvites),
+      directGrantees: withInvites(direct, wholeProjectInvites),
       inherited: [...orgPeopleReaching(project.id), ...teamRows(teamsOn(project.id))],
       children: laneNodes(project),
     }

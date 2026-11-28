@@ -375,6 +375,48 @@ describe("skipSilentLinesCanChange", () => {
     })
   })
 
+  // AQU-2253 (Sam, Nov 9): a linked film playing behind the lines is their
+  // source, so a line it plays behind has something to play: the setting can
+  // only change the lines past the film's end with nothing of their own.
+  describe("following the recordings, with a linked film behind the lines (AQU-2253)", () => {
+    // c1 recorded 2 s [0, 2); c2 a stand-in [2, 3.5); c3 a stand-in [3.5, 5).
+    const lines = () => [cue("c1", 0, 2, 2_000), cue("c2", 2, 4), cue("c3", 4, 6)]
+    const filmOf = (cells: CellData[], endSec: number | null, runsOn = true) =>
+      ({ endSec, runsOn, cellIds: new Set(cells.map((c) => c.id)) })
+    const withFilm = (runs: CellData[][], film: ReturnType<typeof filmOf> | null) =>
+      skipSilentLinesCanChange({ timing: "audioFirst", runs, clockCells: null, slots: SLOTS, film })
+
+    it("no: the film plays behind every line, so none has nothing to play", () => {
+      const cells = lines()
+      expect(withFilm([cells], null)).toBe(true)
+      expect(withFilm([cells], filmOf(cells, 60))).toBe(false)
+    })
+
+    it("no: the film's length not known yet (it may cover them all)", () => {
+      const cells = lines()
+      expect(withFilm([cells], filmOf(cells, null))).toBe(false)
+    })
+
+    it("yes: a film shorter than the lines leaves a line past its end with nothing to play", () => {
+      const cells = lines()
+      // The film ends at 3 s: c3 starts at 3.5 s.
+      expect(withFilm([cells], filmOf(cells, 3))).toBe(true)
+      // …but a film that reaches into c3 covers it.
+      expect(withFilm([cells], filmOf(cells, 4))).toBe(false)
+    })
+
+    it("on a book: each chapter is under the film it is a part of", () => {
+      const one = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4)]
+      const two = [cue("c3", 0, 2), cue("c4", 2, 4, 2_000)]
+      const film = filmOf([...one, ...two], 60, false)
+      expect(withFilm([one, two], film)).toBe(false)
+    })
+
+    it("another file's film does not count", () => {
+      expect(withFilm([lines()], filmOf([cue("x1", 0, 2)], 60))).toBe(true)
+    })
+  })
+
   describe("following the source", () => {
     it("no: a film or a source recording drives the file, so every line is heard", () => {
       expect(

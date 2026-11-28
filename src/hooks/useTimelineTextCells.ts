@@ -43,20 +43,38 @@ export function useTimelineTextCells({ projectId, fileIds, getToken, enabled = t
     }
   }, [projectId, idsKey])
 
+  // AQU-2655: the scope whose every file has an answer on screen. A read
+  // behind one (a focus return, an applied event) is a revalidation: the
+  // captions stay as they are, `isLoading` stays false, and the new answer
+  // lands in one update once every file is back — not a spinner and N
+  // partial updates each time the window regains focus.
+  const loadedScopeRef = useRef<string | null>(null)
+
   useEffect(() => {
     const ids = JSON.parse(idsKey) as string[]
     if (!projectId || !ids.length) {
+      loadedScopeRef.current = null
       setState({ scope, cellsByFile: {}, errors: {}, isLoading: false })
       return
     }
     let cancelled = false
-    setState(previous => ({ scope,
-      cellsByFile: previous.scope === scope ? previous.cellsByFile
-        : Object.fromEntries(ids.map(id => [id, []])),
-      errors: {}, isLoading: true,
-    }))
+    const revalidating = loadedScopeRef.current === scope
+    const fresh: Record<string, CellData[]> = {}
+    const freshErrors: Record<string, Error> = {}
+    if (!revalidating) {
+      setState(previous => ({ scope,
+        cellsByFile: previous.scope === scope ? previous.cellsByFile
+          : Object.fromEntries(ids.map(id => [id, []])),
+        errors: {}, isLoading: true,
+      }))
+    }
     const update = (fileId: string, cells: CellData[], error?: Error) => {
       if (cancelled || scopeRef.current !== scope) return
+      if (revalidating) {
+        fresh[fileId] = cells
+        if (error) freshErrors[fileId] = error
+        return
+      }
       setState(previous => ({ ...previous,
         cellsByFile: { ...previous.cellsByFile, [fileId]: cells },
         errors: error ? { ...previous.errors, [fileId]: error } : previous.errors,
@@ -79,9 +97,15 @@ export function useTimelineTextCells({ projectId, fileIds, getToken, enabled = t
     }
     void Promise.all(Array.from({ length: Math.min(3, ids.length) }, worker))
       .then(() => {
-        if (!cancelled && scopeRef.current === scope) {
-          setState(previous => ({ ...previous, isLoading: false }))
+        if (cancelled || scopeRef.current !== scope) return
+        loadedScopeRef.current = scope
+        if (revalidating) {
+          setState(previous => ({ ...previous,
+            cellsByFile: { ...previous.cellsByFile, ...fresh }, errors: freshErrors,
+          }))
+          return
         }
+        setState(previous => ({ ...previous, isLoading: false }))
       })
     return () => { cancelled = true }
   }, [projectId, idsKey, scope, revision])

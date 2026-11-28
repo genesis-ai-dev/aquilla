@@ -153,7 +153,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeTruthy()
     expect(screen.queryByText(/Clone or live\?/i)).toBeNull()
-    expect(screen.getByText(/Which corpus should become this project's source\?/i)).toBeTruthy()
+    expect(screen.getByText(/What should become this project's source\?/i)).toBeTruthy()
   })
 
   it("shows the upstream project name on the trigger after selection, not its UUID", async () => {
@@ -409,7 +409,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.submit(document.getElementById("project-create-form")!)
     await waitFor(() => {
       expect(
-        screen.getByText(/Choose which corpus should become this project's source/i),
+        screen.getByText(/Choose what should become this project's source/i),
       ).toBeInTheDocument()
     })
     expect(mockCreateCloudProject).not.toHaveBeenCalled()

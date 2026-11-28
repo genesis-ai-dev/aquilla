@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
+import { EXTENSION_DOCUMENT } from "../../helpers/editor-mode"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
@@ -50,7 +51,7 @@ test("a freshly built extension renders in its full page and in the side panel, 
   const ws = new Workspace(alice)
   await ws.waitForEditor()
   await tools.openInSidePanelFromPalette(NAME)
-  const panel = alice.getByTestId("tools-dock-panel").frameLocator(`iframe[title="${NAME} (sandboxed extension)"]`)
+  const panel = alice.getByTestId("tools-dock-panel").frameLocator(`iframe[title="${NAME} (sandboxed extension)"]`).frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
   await expect(panel.locator(".total")).toContainText(/^0\s*words/)
 
@@ -63,6 +64,6 @@ test("a freshly built extension renders in its full page and in the side panel, 
   await alice.reload()
   await ws.waitForEditor()
   await tools.openInSidePanelFromPalette(NAME)
-  const sheetPanel = alice.getByRole("dialog").getByTestId("tools-dock-panel").frameLocator(`iframe[title="${NAME} (sandboxed extension)"]`)
+  const sheetPanel = alice.getByRole("dialog").getByTestId("tools-dock-panel").frameLocator(`iframe[title="${NAME} (sandboxed extension)"]`).frameLocator(EXTENSION_DOCUMENT)
   await expect(sheetPanel.locator("body")).toContainText("words", { timeout: 30_000 })
 })

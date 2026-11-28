@@ -211,7 +211,7 @@ describe("authorize()", () => {
     if (!result.ok) expect(result.status).toBe(403)
   })
 
-  it("returns 403 when CONTRIBUTOR tries to source.cell.commit (PROJECT_LEAD only)", async () => {
+  it("returns 403 when CONTRIBUTOR tries to source.cell.commit (default floor is Maintainer)", async () => {
     const token = await makeToken({ role: 400 })
     const raw = makeSourceCommit()
     const result = await authorize(token, raw, SECRET)
@@ -284,13 +284,24 @@ describe("authorize()", () => {
     }
   })
 
-  it("returns AuthorizedEvent for a PROJECT_LEAD source commit", async () => {
+  it("refuses a PROJECT_LEAD source commit when no floor is stored (default Maintainer)", async () => {
     const token = await makeToken({ role: 500 })
+    const raw = makeSourceCommit()
+    const result = await authorize(token, raw, SECRET)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toContain("source.cell.commit")
+    }
+  })
+
+  it("returns AuthorizedEvent for a MAINTAINER source commit", async () => {
+    const token = await makeToken({ role: 600 })
     const raw = makeSourceCommit()
     const result = await authorize(token, raw, SECRET)
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.event.claims.roleLevel).toBe(500)
+      expect(result.event.claims.roleLevel).toBe(600)
     }
   })
 

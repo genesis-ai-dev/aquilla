@@ -103,7 +103,9 @@ test("YouTube original media generates captions through ASR and preserves source
   const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
   await ws.previewYouTubeOriginalMedia(url,
     path.resolve(__dirname, "../../fixtures/tone-segments.mp3"))
-  await ws.confirmYouTubeOriginalMedia()
+  // AQU-2426: no captions came with it, so transcribing is the person's choice.
+  await ws.answerRecordingChoice("transcribe")
+  await ws.waitForFileInSidebar("tone-segments.mp3")
   await ws.openFileBySubstring("tone-segments.mp3")
   await ws.openMediaView()
   await expect(alice.getByTestId("video-pane-media"))
@@ -183,7 +185,7 @@ test("imported video keeps its authenticated picture and range seeking after rel
   await dash.openProject(name)
   const ws = new Workspace(alice)
   const fixture = path.resolve(__dirname, "../../fixtures/tone-picture.mp4")
-  await ws.importMediaFile(fixture)
+  await ws.importMediaFile(fixture, "whole")
   await ws.openFileBySubstring("tone-picture.mp4")
   await ws.waitForEditor()
   await alice.getByRole("tab", { name: "Media", exact: true }).click()

@@ -143,6 +143,19 @@ export interface ResolveAudioHomesArgs {
 }
 
 /**
+ * AQU-2460: whether a file's takes live on its audio cue file's heard lines.
+ * A subtitle file with a linked film records its dubs on the heard lines (the
+ * mic is redirected to the cue that performs each subtitle). An IMPORTED film
+ * (its film is an upload) has its own lines, cut from its sound: its takes are
+ * on those lines, with the heard lines beside them as text. Heard lines that
+ * already hold takes (recorded before this rule) keep them, so nothing
+ * recorded disappears.
+ */
+export function takesLiveOnHeardLines(args: { filmIsUpload: boolean; heardLinesHoldTakes: boolean }): boolean {
+  return !args.filmIsUpload || args.heardLinesHoldTakes
+}
+
+/**
  * Transcribed from `openRecordingTarget`, which has been the de-facto authority
  * since stage 4 and stays behaviourally identical — it now delegates here and
  * takes `cells[0]`.

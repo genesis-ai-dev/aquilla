@@ -13,6 +13,7 @@ import { selectQueueForFile, selectQueueStateForFile } from "@/lib/audio/queue-s
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
@@ -192,7 +193,7 @@ const progressTicks = vi.hoisted(() => {
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 // Round 5: the speaker buttons push audibility straight into the queue.
-let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
+let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] } | null = null
 // Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
 // against `getQueueAudibility()` rather than against component state, precisely
 // so the editor's button and the video pane's cannot clobber each other. So the
@@ -204,18 +205,21 @@ let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, 
 // would make every per-track mute read back as "audible" inside this suite —
 // the same blindness that let stage 6A's bug reach Sam.
 const audibilityStore = vi.hoisted(() => {
-  let value: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } = {
+  let value: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] } = {
     source: true,
     target: true,
   }
   const listeners = new Set<() => void>()
   return {
     get: () => value,
-    set: (next: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
+    set: (next: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] }) => {
       value = {
         source: next.source,
         target: next.target,
         ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+        // AQU-2664: solo rides the same store, as in the real one.
+        ...(next.solo && next.solo.length > 0 ? { solo: [...next.solo] } : {}),
+        ...(next.drawn ? { drawn: [...next.drawn] } : {}),
       }
       for (const l of listeners) l()
     },
@@ -253,7 +257,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
     // file position cannot be allowed to drift from the real rule.
     queueClockIsFileTime: (cell: CellData | undefined | null) =>
       cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
-    setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
+    setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] }) => {
       lastAudibility = a
       audibilityStore.set(a)
     },
@@ -431,7 +435,10 @@ describe("TimelineEditor", () => {
       />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()
-    expect(document.querySelector("video")).toBeNull()
+    // AQU-2253: the one <video> left is the film track's frame grabber — muted,
+    // hidden, only ever seeked, so it plays nothing and drives no clock.
+    const videos = Array.from(document.querySelectorAll("video"))
+    expect(videos.every((v) => v.getAttribute("data-testid") === "tl-film-grabber" && v.muted)).toBe(true)
   })
 
   it("offers the film row in Sources, with its state, and disables it below contributor", () => {
@@ -1058,29 +1065,151 @@ describe("TimelineEditor", () => {
       <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={withTake} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
-    expect(lastAudibility).toEqual({ source: true, target: true })
-    const src = screen.getByTestId("tl-speaker-source")
-    const tgt = screen.getByTestId("tl-speaker-target")
-    expect(src).toHaveAttribute("aria-pressed", "true")
-    expect(tgt).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: true, target: true })
+    const src = screen.getByTestId("tl-mute-source")
+    const tgt = screen.getByTestId("tl-mute-target")
+    expect(src).toHaveAttribute("aria-pressed", "false")
+    expect(tgt).toHaveAttribute("aria-pressed", "false")
 
     fireEvent.click(src)
-    expect(src).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(src).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
     expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
 
     fireEvent.click(tgt)
-    expect(lastAudibility).toEqual({ source: false, target: false })
+    expect(lastAudibility).toMatchObject({ source: false, target: false })
     // STAGE 6A — THE ASSERTION THIS TEST WAS MISSING. It checked that the click
     // reached the store and never that the button reported it back, so a reader
     // that classified `"target"` differently from the writer passed here and
     // shipped: the row really did mute while the icon stayed on, and the second
     // click people naturally gave it turned the sound back on (Sam, 2026-08-27).
-    expect(tgt).toHaveAttribute("aria-pressed", "false")
+    expect(tgt).toHaveAttribute("aria-pressed", "true")
 
     fireEvent.click(tgt)
-    expect(tgt).toHaveAttribute("aria-pressed", "true")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(tgt).toHaveAttribute("aria-pressed", "false")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
+  })
+
+  // AQU-2664 (board 74): the Logic-style header — M | S, the fader and ≈ in one
+  // line on the target track; the source row keeps M | S alone.
+  describe("the track header like Logic (AQU-2664, board 74)", () => {
+    const TAKE = "audio-m1-1700000000-take.webm"
+    const withTake = () => [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, selectedAudioId: TAKE,
+        attachments: {
+          [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" },
+          [TAKE]: { type: "audio", url: "frontier-audio://take" },
+        },
+      } as Partial<CellData>),
+      mediaCells[1],
+    ]
+    beforeEach(() => {
+      localStorage.removeItem("aquilla:timelineAudibility:hdr")
+    })
+
+    it("puts M | S, the fader and ≈ in that order after the target track's name", () => {
+      render(
+        <TimelineEditor
+          fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}}
+          onSetTrackVolume={() => {}}
+          evenOut={{ states: new Map([["target-audio", "none" as const]]), open: () => {} }}
+        />,
+      )
+      const m = screen.getByTestId("tl-mute-target")
+      const fader = screen.getByTestId("tl-fader-target-audio")
+      const ev = screen.getByTestId("tl-even-target-audio")
+      expect(m.compareDocumentPosition(fader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(fader.compareDocumentPosition(ev) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(screen.getByTestId("tl-solo-target")).toBeInTheDocument()
+      // The source row: M | S, never a fader or ≈.
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("tl-fader-source-audio")).toBeNull()
+      expect(screen.queryByTestId("tl-even-source-audio")).toBeNull()
+    })
+
+    it("solo plays one track alone: the others' M stays as it was, and it persists", () => {
+      render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      fireEvent.click(screen.getByTestId("tl-solo-target"))
+      expect(screen.getByTestId("tl-solo-target")).toHaveAttribute("aria-pressed", "true")
+      expect(lastAudibility).toMatchObject({ source: true, target: true, solo: ["target"] })
+      expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "false")
+      expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:hdr")!)).toMatchObject({ solo: ["target"] })
+      fireEvent.click(screen.getByTestId("tl-solo-target"))
+      expect(lastAudibility?.solo).toBeUndefined()
+    })
+
+    // Review M4: a soloed track that goes away must not silence the rest.
+    it("tells the play queue which rows are drawn, so a deleted or hidden soloed track is ignored", () => {
+      const withMusic = deriveTracksForFile({ trackOverrides: { music: { kind: "audio", name: "Music" } } })
+      const { rerender } = render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={withMusic} onRetimeSubtitle={() => {}} />)
+      expect(lastAudibility?.drawn).toEqual(expect.arrayContaining(["source", "target", "music"]))
+      rerender(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={deriveTracksForFile(null)} onRetimeSubtitle={() => {}} />)
+      expect(lastAudibility?.drawn).not.toContain("music")
+      expect(lastAudibility?.drawn).toContain("target")
+    })
+
+    // The film bundle's browser pass (Nov 27): on a subtitle file with a linked
+    // film and no Source audio row, the film's own row carries the "source"
+    // switch. Its S lit but nothing went quiet: "source" was not among the
+    // drawn rows, so the solo was ignored. The film's row is a drawn row.
+    it("counts the film's row among the drawn rows, so soloing it is heard", () => {
+      localStorage.removeItem("aquilla:timelineAudibility:filmsolo")
+      setVideoDurationSec("https://cdn/linked.webm", 60)
+      render(
+        <TimelineEditor
+          fileId="filmsolo" coreMediaUrl="https://cdn/linked.webm" editable
+          cells={[cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 })]}
+          tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+          timingMode="audioFirst" onRetimeSubtitle={() => {}}
+        />,
+      )
+      const filmRow = screen.getByTestId("tl-film-track-label")
+      fireEvent.click(within(filmRow).getByTestId("tl-solo-source"))
+      expect(lastAudibility?.solo).toEqual(["source"])
+      expect(lastAudibility?.drawn).toContain("source")
+      // dev's one solo rule (track-slots): the film is heard, the takes are not.
+      expect(sourceHeard(lastAudibility!)).toBe(true)
+      expect(slotAudible(lastAudibility!, "recording")).toBe(false)
+    })
+
+    it("saves the fader once, on Option-click, and only when it changed", () => {
+      const onSetTrackVolume = vi.fn()
+      const tracks = deriveTracksForFile({ trackOverrides: { "target-audio": { volumeDb: -9 } } })
+      render(
+        <TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={tracks} onRetimeSubtitle={() => {}} onSetTrackVolume={onSetTrackVolume} />,
+      )
+      const fader = screen.getByTestId("tl-fader-target-audio")
+      expect(fader).toHaveAttribute("aria-valuenow", "-9")
+      fireEvent.pointerDown(fader, { clientX: 10, pointerId: 1, button: 0, altKey: true })
+      expect(onSetTrackVolume).toHaveBeenCalledExactlyOnceWith("target-audio", 0)
+    })
+
+    it("draws the fader but never moves it for someone who may not change it", () => {
+      render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      expect(screen.getByTestId("tl-fader-target-audio")).toHaveAttribute("aria-disabled", "true")
+    })
+
+    it("opens the Even out window on the track from its ≈, lit when evened", () => {
+      const open = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}}
+          evenOut={{ states: new Map([["target-audio", "part" as const]]), open }}
+        />,
+      )
+      const ev = screen.getByTestId("tl-even-target-audio")
+      expect(ev).toHaveAttribute("data-even", "part")
+      fireEvent.click(ev)
+      expect(open).toHaveBeenCalledExactlyOnceWith(["target-audio"], "target-audio")
+    })
+
+    it("has no ≈ without the clearance, or on a track with no takes", () => {
+      const { rerender } = render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      expect(screen.queryByTestId("tl-even-target-audio")).toBeNull()
+      rerender(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} evenOut={{ states: new Map(), open: () => {} }} />)
+      expect(screen.queryByTestId("tl-even-target-audio")).toBeNull()
+    })
   })
 
   // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too, on
@@ -1101,7 +1230,7 @@ describe("TimelineEditor", () => {
     expect(pill).toHaveTextContent(/^Sound: Film$/)
     // In the SOURCE row, with its speaker, not the target's...
     let row: HTMLElement | null = pill.parentElement
-    while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
+    while (row && !row.contains(screen.getByTestId("tl-mute-source"))) row = row.parentElement
     expect(row).not.toBeNull()
     // (Target audio has no takes here, so since AQU-1682 it shows no speaker;
     // tell the rows apart by name.)
@@ -1123,7 +1252,7 @@ describe("TimelineEditor", () => {
           soundSource={{ value: "video", recordingName: null, onChange: () => {} }}
         />,
       )
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
       expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
     } finally {
       localStorage.removeItem("aquilla:tlGutterCollapsed:sndstrip")
@@ -1136,8 +1265,8 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
   })
 
   // ── 2026-08-07: the chip strip follows the CURRENT chip, not just clicks ──
@@ -2064,14 +2193,14 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
   })
 
-  it("a file timed to a film only follows its source: plain text, why on a click, even for a lead (AQU-2204, AQU-2260)", async () => {
-    renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
+  it("a file with a film can still be switched by a lead — nothing ever locks (Oct 27–28)", async () => {
+    const onChange = vi.fn()
+    renderAt("dubbing", { onChangeTimingMode: onChange, coreMediaUrl: "https://cdn.test/ep1/master.m3u8" })
     const control = screen.getByTestId("tl-timing-mode")
-    expect(control).toHaveAttribute("data-mode", "dubbing")
-    expect(control).toHaveAttribute("data-locked", "film")
-    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
-    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent(/^Follows source$/)
-    await expectClickNote(screen.getByTestId("tl-timing-mode-reason"), /timed to the film, so it always follows its source/)
+    expect(control).not.toHaveAttribute("data-locked")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    expect(onChange).toHaveBeenCalledWith("audioFirst")
   })
 
   // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its
@@ -2101,15 +2230,15 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })
 
-  it("hides a linked video and says why — it runs on the original's timing", () => {
+  it("following the recordings, a linked film is never hidden and no note says it is (AQU-2253)", () => {
     render(
       <TimelineEditor
         fileId="af2" coreMediaUrl="http://v.test/a.mp4" editable cells={verses}
         timingMode="audioFirst" onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.queryByTestId("tl-video")).toBeNull()
-    expect(screen.getByTestId("tl-video-hidden-note")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-video-hidden-note")).toBeNull()
+    expect(screen.queryByText(/linked video is hidden/i)).toBeNull()
   })
 
   it("clicking a verse seeks to it on the ASSEMBLED clock, not the file's", () => {
@@ -2383,7 +2512,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
-    const speaker = screen.getByTestId("tl-speaker-source")
+    const speaker = screen.getByTestId("tl-mute-source")
     // Named for what actually goes quiet. On this file the row's cues are
     // timings over the FILM's soundtrack, and "source audio" would be true but
     // useless at the moment of clicking.
@@ -2407,7 +2536,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("tl-mute-target")).toHaveAttribute("aria-pressed", "false")
   })
 
   // AQU-1682: a lane's mute button only where the lane has something to play.
@@ -2424,9 +2553,9 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-target")).toBeNull()
       // The film still sounds, so the Source audio row keeps its speaker.
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
     })
 
     it("gives the Source audio row no speaker when nothing on it plays (cues, no video, no recording)", () => {
@@ -2436,10 +2565,10 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-source")).toBeNull()
     })
 
-    it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
+    it("keeps the Source audio row's speaker following the recordings: the film still sounds there (AQU-2253)", () => {
       setVideoDurationSec(VIDEO, 120)
       render(
         <TimelineEditor
@@ -2447,14 +2576,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
     })
 
     it("keeps the Source audio row's speaker for an imported recording", () => {
       render(
         <TimelineEditor fileId="f1682" coreMediaUrl={null} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
       )
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
     })
 
     it("keeps the button on a muted lane even when it has nothing to play, so it can be unmuted", () => {
@@ -2466,11 +2595,11 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      const target = screen.getByTestId("tl-speaker-target")
-      expect(target).toHaveAttribute("aria-pressed", "false")
+      const target = screen.getByTestId("tl-mute-target")
+      expect(target).toHaveAttribute("aria-pressed", "true")
       fireEvent.click(target)
       // Unmuted and still empty: now it goes.
-      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-target")).toBeNull()
     })
   })
 
@@ -2483,11 +2612,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     // The dialogue lane, not the cue row — media cells own this track.
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
     expect(screen.getAllByTestId("tl-lane")).toHaveLength(2)
-    const speaker = screen.getByTestId("tl-speaker-source")
-    expect(speaker).toHaveAttribute("aria-pressed", "true")
+    const speaker = screen.getByTestId("tl-mute-source")
+    expect(speaker).toHaveAttribute("aria-pressed", "false")
     fireEvent.click(speaker)
-    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
+    // Sam, Oct 29: a film file that already has a Source audio recording keeps
+    // it as it was, mute and all; the film's row adds no second switch.
+    expect(within(screen.getByTestId("tl-film-track-label")).queryByRole("button")).toBeNull()
   })
 
   // Round 8: the VTT's own timing is not ours to nudge, but a line added into
@@ -2823,6 +2955,34 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(attach).toHaveBeenCalledOnce()
   })
 
+  // D#7 (import map, Nov 2): a greyed Sources row says why, behind its (i).
+  it("says why each greyed Sources row is greyed", () => {
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}}
+      onRequestLinkVideo={vi.fn()} canLinkVideo={false}
+      onRequestImportAudioVtt={vi.fn()} canImportAudioVtt={false}
+      onRequestExtractSubtitles={vi.fn()} canExtractSubtitles={false}
+      onRequestImportCharacters={vi.fn()} canImportCharacters={false}
+      // Sources shows only while one of its rows can be used.
+      onRequestImportCaptions={vi.fn()} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const why = (name: RegExp) => screen.getByRole("menuitem", { name })
+    expect(why(/^Film/)).toHaveAccessibleDescription("Only a Project Lead or above can link or change the film.")
+    expect(why(/^Source cues/)).toHaveAccessibleDescription("Only a Maintainer or above can import Source cues.")
+    expect(why(/^Subtitle/)).toHaveAccessibleDescription("Only a Maintainer or above can extract subtitles.")
+    expect(why(/^Characters/)).toHaveAccessibleDescription("Only a Maintainer or above can import characters.")
+  })
+
+  it("says a file's subtitles are already in when that is why Subtitles is greyed", () => {
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}}
+      onRequestExtractSubtitles={vi.fn()} canExtractSubtitles subtitleCueCount={12}
+      onRequestImportCaptions={vi.fn()} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    expect(screen.getByRole("menuitem", { name: /^Subtitle/ }))
+      .toHaveAccessibleDescription("This file's subtitles are already imported.")
+  })
+
   it("opens script alignment from Sources with track-editing permission", () => {
     const align = vi.fn()
     render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
@@ -2946,8 +3106,12 @@ describe("TimelineEditor — rows come from the track model", () => {
         onRetimeSubtitle={() => {}}
       />,
     )
-    expect(gutterNames()).toEqual(["Source text", "Target text", "Source audio", "Target audio"])
+    // Sam, Oct 30: a row of cues is "Source cues", not "Source audio".
+    expect(gutterNames()).toEqual(["Source text", "Target text", "Source cues", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "source-audio-cues", "tl-target-lane"])
+    // Nov 8: its sub-line says what it holds, as in an imported film's folder.
+    expect(screen.getByText("heard lines")).toBeInTheDocument()
+    expect(screen.queryByText("original speech")).toBeNull()
   })
 
   it("the Target-subtitles row shows the translation, not the source text", () => {
@@ -3285,6 +3449,21 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.queryByTestId("tl-track-move-to")).toBeNull()
   })
 
+  // Evidence 71C: the track menu is the board's 236 px, and "Even out
+  // loudness (3 tracks)…" stays on one line.
+  it("draws the track menu at the board's width, its Even out item on one line", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        evenOut={{ states: new Map([["target-audio", "none" as const]]), open: () => {} }}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    const item = screen.getByTestId("tl-track-even-out")
+    expect(item.className).toContain("whitespace-nowrap")
+    expect(item.closest("[data-slot=context-menu-content], [role=menu]")?.className).toContain("w-[236px]")
+  })
+
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
   // the fact the person is being asked to accept.
   it("asks before deleting, naming the track", () => {
@@ -3574,7 +3753,7 @@ describe("TimelineEditor — rows come from the track model", () => {
   it("leaves the speaker button's own click alone", () => {
     render(selectable())
     // The Source-audio row carries the speaker; pressing it must mute, not select.
-    fireEvent.click(screen.getByTestId("tl-speaker-source"))
+    fireEvent.click(screen.getByTestId("tl-mute-source"))
     expect(selectedRows()).toEqual([])
   })
 
@@ -5152,6 +5331,193 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     expect(within(lane).queryByTestId("tl-target-empty-s1")).toBeNull()
   })
 
+  // Group D (Nov 5, 2253 + 2227): a project lead can switch a file with an
+  // audio cue file to Follows recordings. Its takes live on the cue sheet's
+  // heard lines, so following the recordings it is THEIR lines that are laid
+  // end to end. Laid out from the subtitle lines, which hold no take, the
+  // Target audio row came up empty and Play all had nothing to play.
+  describe("an audio cue file following the recordings (group D)", () => {
+    const take = (id: string, ms: number) => ({
+      selectedAudioId: `audio-${id}-take.webm`,
+      attachments: { [`audio-${id}-take.webm`]: { type: "audio", url: "frontier-audio://t", durationMs: ms } },
+    })
+    const heard = [
+      cell({ id: "cue1", fileId: "f1-cues", original: "Line one.", startTime: 1, endTime: 4, ...take("cue1", 6_000) } as Partial<CellData>),
+      cell({ id: "cue2", fileId: "f1-cues", original: "Line two.", startTime: 5, endTime: 8, ...take("cue2", 2_000) } as Partial<CellData>),
+    ]
+    const raw = heard.map(({ attachments: _a, selectedAudioId: _s, ...c }) => c as CellData)
+    const renderAt = (timingMode: "audioFirst" | "dubbing") =>
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable
+          cells={subtitleCells}
+          audioCues={raw}
+          targetCells={heard}
+          timingMode={timingMode}
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+
+    it("lays the heard lines' dubs end to end", () => {
+      renderAt("audioFirst")
+      const one = screen.getByTestId("tl-target-cue1")
+      const two = screen.getByTestId("tl-target-cue2")
+      expect(parseFloat(one.style.left)).toBeCloseTo(0, 0)
+      expect(parseFloat(one.style.width)).toBeCloseTo(6 * 38, 0)
+      expect(parseFloat(two.style.left)).toBeCloseTo(6 * 38, 0)
+    })
+
+    it("following the source, the same dubs stay on their heard lines' own times", () => {
+      renderAt("dubbing")
+      expect(parseFloat(screen.getByTestId("tl-target-cue1").style.left)).toBeCloseTo(1 * 38, 0)
+      expect(parseFloat(screen.getByTestId("tl-target-cue2").style.left)).toBeCloseTo(5 * 38, 0)
+    })
+
+    // AQU-2253 (browser pass, Nov 9): Play on such a file plays its heard
+    // lines (the workspace's `playbackCells`), and the playhead has to follow
+    // them. Scoped to the subtitle lines, the queue on a heard line read as
+    // another file's: the playhead stood where the timeline was clicked while
+    // the film and the bottom strip's time ran on.
+    it("the playhead follows the queue while it plays the heard lines", () => {
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "cue2" }
+      mockProgress = { currentTime: 7, duration: 8, rate: 1, volume: 1, programmeClock: true }
+      try {
+        renderAt("audioFirst")
+        expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBeCloseTo(7 * 38, 0)
+      } finally {
+        mockQueueState = { kind: "idle" }
+        mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+      }
+    })
+
+    // AQU-2227 (review, Nov 9): the same file with recording lines of its own
+    // (an uploaded recording cut into lines beside a linked film, or an
+    // imported film whose heard lines already hold takes). Laid out from the
+    // recording's lines, no heard line had a place: every take vanished from
+    // the Target audio row and the file looked unrecorded.
+    it("keeps the heard lines' dubs on the timeline when the file has recording lines of its own", () => {
+      const clip = { "audio-f1-1690000000-shared.mp3": { type: "audio", url: "frontier-audio://src" } }
+      const recordingLines = [
+        cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, attachments: clip } as Partial<CellData>),
+        cell({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20, attachments: clip } as Partial<CellData>),
+      ]
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl="https://cdn/episode.m3u8" editable
+          cells={recordingLines}
+          audioCues={raw}
+          targetCells={heard}
+          timingMode="audioFirst"
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+      const one = screen.getByTestId("tl-target-cue1")
+      const two = screen.getByTestId("tl-target-cue2")
+      expect(parseFloat(one.style.left)).toBeCloseTo(0, 0)
+      expect(parseFloat(one.style.width)).toBeCloseTo(6 * 38, 0)
+      expect(parseFloat(two.style.left)).toBeCloseTo(6 * 38, 0)
+    })
+
+    // AQU-2253 (Nov 13): following the recordings only the heard lines play,
+    // so a subtitle row has no place in what plays and its own Play did
+    // nothing. It plays from the first heard line that performs it, or with
+    // none, from the heard line sounding at the row's start, or the next one.
+    describe("a subtitle row's own Play", () => {
+      const heard3 = [...heard, cell({ id: "cue3", fileId: "f1-cues", original: "Line three.", startTime: 9, endTime: 10, ...take("cue3", 1_000) } as Partial<CellData>)]
+      const raw3 = heard3.map(({ attachments: _a, selectedAudioId: _s, ...c }) => c as CellData)
+      const rows = [
+        cell({ id: "sA", original: "Performed", medium: "text", startTime: 50, endTime: 52 }),
+        cell({ id: "sB", original: "Unperformed", medium: "text", startTime: 8.5, endTime: 9.5 }),
+      ]
+      const links = buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "sA",
+        toFileId: "f1-cues", toCellId: "cue2", origin: "auto", confidence: 1,
+      }])
+      const playRow = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onPlayFromTime = vi.fn()
+        const props = {
+          fileId: "f1", coreMediaUrl: null, editable: true, cells: rows,
+          audioCues: raw3, targetCells: heard3, cueLinks: links, timingMode,
+          onRetimeSubtitle: () => {}, onSeekToTime: vi.fn(), onPlayFromTime,
+        }
+        const { rerender } = render(<TimelineEditor {...props} activateRequest={null} />)
+        rerender(<TimelineEditor {...props} activateRequest={{ cellId, nonce: 1, play: true }} />)
+        return onPlayFromTime
+      }
+
+      it("plays from the heard line that performs it", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(playRow("sA", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("with no heard line performing it, plays from the first heard line at or after its start", () => {
+        // cue3 (film 9 s) is the first at or after 8.5 s; laid out it starts at 6 + 2 = 8 s.
+        expect(playRow("sB", "audioFirst")).toHaveBeenCalledWith(8)
+      })
+
+      it("following the source, plays from the row's own time", () => {
+        expect(playRow("sA", "dubbing")).toHaveBeenCalledWith(50)
+      })
+
+      // AQU-2253 (review, Nov 13): a clean click on the row's card in the
+      // Subtitles row seeks where a click on the row in the table does. It
+      // looked the subtitle up among the heard lines, found nothing and
+      // stayed put. sC sits on the film where cue2, which performs it, does,
+      // so its card is drawn following the recordings too.
+      const carded = [cell({ id: "sC", original: "Performed", medium: "text", startTime: 5.5, endTime: 7.5 })]
+      const cardLinks = buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "sC",
+        toFileId: "f1-cues", toCellId: "cue2", origin: "auto", confidence: 1,
+      }])
+      const clickCard = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onSeekToTime = vi.fn()
+        render(
+          <TimelineEditor
+            fileId="f1" coreMediaUrl={null} editable cells={carded}
+            audioCues={raw3} targetCells={heard3} cueLinks={cardLinks} timingMode={timingMode}
+            onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+          />,
+        )
+        fireEvent.click(screen.getByTestId(`tl-card-${cellId}`))
+        return onSeekToTime
+      }
+
+      it("a click on its card seeks to the heard line that performs it", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(clickCard("sC", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("following the source, a click on its card seeks to the row's own time", () => {
+        expect(clickCard("sC", "dubbing")).toHaveBeenCalledWith(5.5)
+      })
+
+      // AQU-2253 (review, Nov 13): a take on a heard line is found among the
+      // heard lines, so double-clicking it jumps to its line. It was looked
+      // for among the subtitle lines only, and did nothing.
+      const doubleClickTake = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onSeekToTime = vi.fn()
+        render(
+          <TimelineEditor
+            fileId="f1" coreMediaUrl={null} editable cells={carded}
+            audioCues={raw3} targetCells={heard3} cueLinks={cardLinks} timingMode={timingMode}
+            onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+          />,
+        )
+        fireEvent.doubleClick(screen.getByTestId(`tl-target-${cellId}`))
+        return onSeekToTime
+      }
+
+      it("double-clicking a heard line's take seeks to that heard line", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(doubleClickTake("cue2", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("following the source, double-clicking a heard line's take seeks to its film time", () => {
+        expect(doubleClickTake("cue2", "dubbing")).toHaveBeenCalledWith(5)
+      })
+    })
+  })
+
   // ── AQU-646 stage 6C ───────────────────────────────────────────────────────
   //
   // Sam, 2026-08-27: "the first new track I added didn't let me add any audio
@@ -5255,7 +5621,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
   // not a source. And as far as source text and source audio go, in BTT
   // products where source audio is linked to source text the new tracks align
   // with the source audio regardless of which you select."
-  it("offers one honest alignment on a cue-linked file, named for the audio", () => {
+  it("offers one honest alignment on a cue-linked file, named for the cues", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
@@ -5276,8 +5642,9 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     // the dialog takes both clicks.
     fireEvent.click(screen.getByTestId("tl-add-track"))
     fireEvent.click(screen.getByText("Audio track"))
-    // One option, stated rather than asked…
-    expect(screen.getByTestId("tl-add-track-align-fixed")).toHaveTextContent("Source audio")
+    // One option, stated rather than asked, under the row's own name (Sam,
+    // Oct 30: the cues row is "Source cues")…
+    expect(screen.getByTestId("tl-add-track-align-fixed")).toHaveTextContent("Source cues")
     expect(screen.queryByTestId("tl-add-track-align")).toBeNull()
     // …and the boring automatic name.
     expect(screen.getByTestId("tl-add-track-name")).toHaveValue("Track")
@@ -5378,7 +5745,7 @@ describe("TimelineEditor — the gutter's trailing controls sit in one column", 
         onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
       />,
     )
-    const speaker = screen.getByTestId("tl-speaker-source")
+    const speaker = screen.getByTestId("tl-mute-source")
     const row = speaker.closest("[data-tl-track-row]")!
     // Exactly two: the name block, and the controls. Three is the bug.
     expect(row.children).toHaveLength(2)
@@ -7146,7 +7513,9 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
   }
 
   it("on a short Free timing lane, is one readable line at the view's left edge, at every zoom, and the ruler keeps its labels", () => {
-    setVideoDurationSec(LINKED, 635)
+    // No film length known: since AQU-2253 a film's strip carries the timeline
+    // to the film's end in Follows recordings too, and this walk is about a
+    // timeline shorter than the view.
     localStorage.removeItem("aquilla:timelineZoom:lv-ft-zoom")
     const attach = vi.fn()
     withScrollColumn(900, () => withQueuedFrames((flush) => {
@@ -7238,14 +7607,21 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(lane.textContent).not.toContain("10:35.0")
   })
 
-  it("draws no placeholder in Free timing, where the video is hidden and silent", () => {
+  // AQU-2253 (Sam, Oct 29): the film's own sound plays straight through with
+  // its picture in both timings, so following the recordings the row still
+  // stands for it: one band from 0:00 to the film's end, on the film's clock,
+  // with the speaker that mutes it.
+  it("following the recordings, the band is still the video's own sound, to the film's end, with its mute", () => {
     setVideoDurationSec(LINKED, 635)
-    render(
+    renderWithTooltips(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
         timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
-    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-    expect(screen.queryByText("The film's own sound")).toBeNull()
+    const gap = screen.getByTestId("tl-source-gap")
+    expect(gap.getAttribute("data-region-start")).toBe("0")
+    expect(gap.getAttribute("data-region-end")).toBe("635")
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The film's own sound")
+    expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-label", expect.stringMatching(/film's own sound/))
   })
 
   // Sam, Oct 5: once a linked video's captions are its rows, its Source audio
@@ -7583,7 +7959,7 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
 describe("TimelineEditor — the media view's top bar (board 55, option E)", () => {
   beforeEach(() => { topOwner.value = 1 })
   const drawBar = (over: Record<string, unknown> = {}) => {
-    const film = { name: "a.mp4", hiddenByTiming: false, showing: true, onHide: vi.fn(), onShow: vi.fn() }
+    const film = { name: "a.mp4", showing: true, onHide: vi.fn(), onShow: vi.fn() }
     const onLink = vi.fn()
     renderWithTooltips(
       <>
@@ -7629,17 +8005,19 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
   })
 
-  it("draws Sources as its icon alone, 'Film and sources' on hover, the film first in its menu", async () => {
+  it("draws Sources as its icon alone, called 'Sources' on hover and to screen readers, the film first in its menu", async () => {
     const { film, onLink } = drawBar()
     const sources = await screen.findByTestId("tl-sources-menu")
     expect(sources.textContent).toBe("")
     expect(sources.querySelectorAll("svg")).toHaveLength(1)
-    await expectTooltip(sources, /^Film and sources$/)
+    // D#24: one name everywhere, the same as the menu's own heading.
+    expect(sources).toHaveAccessibleName("Sources")
+    await expectTooltip(sources, /^Sources$/)
     fireEvent.click(sources)
     const menu = await screen.findByRole("menu")
     const text = menu.textContent ?? ""
     // The film (its name, Change, Fold), then the other sources.
-    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Audio cues"].map((word) => text.indexOf(word))
+    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Source cues"].map((word) => text.indexOf(word))
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     fireEvent.click(within(menu).getByTestId("top-film-hide"))
@@ -7662,7 +8040,7 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(within(menu).getByTestId("top-film-change")).toBeInTheDocument()
     expect(within(menu).getByTestId("top-film-hide")).toBeInTheDocument()
     // The other sources, and their heading, stay behind the setting.
-    expect(text).not.toMatch(/Audio cues/)
+    expect(text).not.toMatch(/Source cues/)
     expect(text).not.toMatch(/^Sources|Sources$/m)
     fireEvent.click(within(menu).getByTestId("top-film-hide"))
     expect(film.onHide).toHaveBeenCalled()
@@ -7698,6 +8076,367 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(standInText).toHaveTextContent(/at a stand-in length worked out from its text/)
   })
 })
+
+// AQU-2253 (board 56): the film is a row pinned at the very top of the tracks,
+// in both timings, whenever a film is linked — one strip from 0:00 to its end
+// on its own clock.
+describe("TimelineEditor — the film track", () => {
+  const FILM = "http://127.0.0.1:5540/showcase-film.webm"
+  const film = { name: "showcase-film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  // Episode 1.vtt's first two cues; the first has a 3.1 s take.
+  const takeId = "audio-e1-1700000000-take.webm"
+  const cues = [
+    cell({
+      id: "e1", medium: "text", startTime: 0.5, endTime: 4, original: "Simon, where are you going?",
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_100 } },
+    } as unknown as Partial<CellData>),
+    cell({ id: "e2", medium: "text", startTime: 4.6, endTime: 8.8, original: "To the shore." }),
+  ]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep1" coreMediaUrl={FILM} film={film} editable cells={cues} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+        onRetimeSubtitle={() => {}}
+        {...over}
+      />,
+    )
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling!
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(FILM, 27.08)
+  })
+
+  it.each(["dubbing", "audioFirst"] as const)("is the first row in %s, headed Film and the film's name", (mode) => {
+    draw(mode)
+    const names = Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+    expect(names[0]).toBe("Film")
+    expect(screen.getByTestId("tl-film-track-label")).toHaveTextContent("showcase-film.webm")
+    // …and its lane is the first under the ruler, holding one strip from 0:00.
+    const lanes = screen.getByTestId("tl-scroll").firstElementChild!
+    const firstLane = Array.from(lanes.children).find((el) => el.getAttribute("data-testid") !== "tl-ruler")
+    expect(firstLane).toBe(screen.getByTestId("tl-film-lane"))
+    expect(screen.getByTestId("tl-film-strip").style.left).toBe("0px")
+  })
+
+  // Merged onto dev's horizontal list (Nov 14): once the column is measured the
+  // lanes are drawn in 2048 px columns, each placed from its own start. The
+  // film's lane is drawn in every column, so its strip must be too: a strip at
+  // `left: 0` in every column repeats the film's opening at each column's
+  // edge. And the frames are fetched once, not once per column.
+  it("in the measured timeline, each column's copy of the strip sits on 0:00, and there is one frame grabber", async () => {
+    setVideoDurationSec(FILM, 600)
+    const isColumn = (el: Element) => el.getAttribute("data-testid") === "tl-scroll"
+    const orig = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")!
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get(this: HTMLElement) { return isColumn(this) ? 900 : orig.get!.call(this) },
+    })
+    try {
+      draw("dubbing")
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+      const columns = [...document.querySelectorAll<HTMLElement>("[data-tl-slice]")]
+      expect(columns.length).toBeGreaterThan(1)
+      for (const column of columns) {
+        const startPx = Number(column.getAttribute("data-tl-slice")) * 2048
+        const strip = column.querySelector<HTMLElement>("[data-testid='tl-film-strip']")!
+        expect(column.firstElementChild).toBe(strip.closest("[data-testid='tl-film-lane']"))
+        expect(startPx + parseFloat(strip.style.left)).toBe(0)
+      }
+      expect(screen.getAllByTestId("tl-film-grabber")).toHaveLength(1)
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", orig)
+    }
+  })
+
+  it("following the recordings it does not adjust to the lines: the same strip in both timings", () => {
+    const { unmount } = draw("dubbing")
+    const width = screen.getByTestId("tl-film-strip").style.width
+    unmount()
+    draw("audioFirst")
+    expect(screen.getByTestId("tl-film-strip").style.width).toBe(width)
+  })
+
+  it("the timeline reaches the film's end even when the lines end sooner", () => {
+    draw("audioFirst")
+    const content = screen.getByTestId("tl-scroll").firstElementChild as HTMLElement
+    const strip = screen.getByTestId("tl-film-strip")
+    expect(parseFloat(content.style.width)).toBeGreaterThanOrEqual(parseFloat(strip.style.width))
+  })
+
+  // Since AQU-2664 the film's sound switch is the M | S pair every audio row has.
+  it("is never a track you can drag, rename or open a menu on; its only buttons mute and solo the film", () => {
+    draw("dubbing", { onReorderTrack: vi.fn(), onRenameTrack: vi.fn() })
+    const label = screen.getByTestId("tl-film-track-label")
+    expect(label).not.toHaveAttribute("data-tl-track-row")
+    expect(label).not.toHaveAttribute("role", "listitem")
+    const buttons = within(label).queryAllByRole("button")
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]).toHaveAccessibleName(/mute the film's own sound/i)
+    expect(buttons[1]).toHaveAccessibleName(/solo the film's own sound/i)
+  })
+
+  // Sam, Oct 29: the film's own sound lives with the film. Its mute is on the
+  // film's row, and no Source audio row stands in for it.
+  it("has no Source audio row standing in for the film's sound", () => {
+    draw("dubbing", {
+      tracks: deriveTracksForFile(null, {
+        isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false, hasLinkedFilm: true,
+      }),
+    })
+    const names = Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+    expect(names).not.toContain("Source audio")
+  })
+
+  it("no film, no film row", () => {
+    draw("dubbing", { coreMediaUrl: null, film: undefined })
+    expect(screen.queryByTestId("tl-film-track-label")).toBeNull()
+    expect(screen.queryByTestId("tl-film-lane")).toBeNull()
+  })
+})
+
+// AQU-2253 (Sam, Oct 30): a film IMPORTED through the importer is stored once,
+// as the film and as every line's recording. Its sound is its Source audio
+// row, cut into source cues as on dev, and its picture is cut along the same
+// cues: end to end following the source, each line's piece in its line's slot
+// following the recordings.
+describe("TimelineEditor — an imported film is cut along its source cues", () => {
+  const UPLOAD = "frontier-audio://ep9/audio-ep9-1690000000-film.webm"
+  const SOURCE_ID = "audio-ep9-1690000000-film.webm"
+  const film = { name: "Imported film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  const line = (id: string, start: number, end: number, takeSec?: number) => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, fileId: "ep9", medium: "media", startTime: start, endTime: end, original: `Line ${id}`,
+      ...(takeSec != null ? { selectedAudioId: takeId } : {}),
+      attachments: {
+        [SOURCE_ID]: { type: "audio", url: UPLOAD, trimStartMs: start * 1000, trimEndMs: end * 1000, durationMs: 27_080 },
+        ...(takeSec != null ? { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeSec * 1000 } } : {}),
+      },
+    } as unknown as Partial<CellData>)
+  }
+  // An exact fit, a dub 1.8 s longer than its line, and one 2.3 s shorter.
+  const lines = [line("a", 0.5, 4.0, 3.5), line("b", 4.6, 8.8, 6.0), line("c", 9.2, 13.5, 2.0)]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep9" coreMediaUrl={UPLOAD} film={film} editable cells={lines} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: true, hasAudioCues: false, hasSourceAudio: true })}
+        onRetimeSubtitle={() => {}}
+        {...over}
+      />,
+    )
+  const gutterNames = () =>
+    Array.from(screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(UPLOAD, 27.08)
+  })
+
+  it.each(["dubbing", "audioFirst"] as const)("keeps its Source audio row, cut into its lines, in %s; the film's row has no mute of its own", (mode) => {
+    draw(mode)
+    // Nov 8: inside the film's folder, named after the file.
+    expect(gutterNames().slice(0, 2)).toEqual(["Imported film.webm", "Film"])
+    expect(gutterNames()).toContain("Source audio")
+    expect(gutterNames()).not.toContain("Source cues")
+    expect(within(screen.getByTestId("tl-film-track-label")).queryByRole("button")).toBeNull()
+    expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
+  })
+
+  it("following the source, its pieces sit end to end: the one strip on the film's clock", () => {
+    draw("dubbing")
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
+    expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+  })
+
+  it("following the recordings, each line's piece of film sits at its line, from its own stretch", () => {
+    draw("audioFirst")
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "imported-pieces")
+    const pieces = screen.getAllByTestId("tl-film-piece")
+    expect(pieces.map((p) => [p.getAttribute("data-cell-id"), p.getAttribute("data-film-start"), p.getAttribute("data-film-end")])).toEqual([
+      ["a", "0.5", "4"],
+      ["b", "4.6", "8.8"],
+      // Cut where its line ends, exactly where the Source audio is cut.
+      ["c", "9.2", "11.2"],
+    ])
+    // Each piece starts where its line's Source audio card starts.
+    const dialogue = screen.getAllByTestId("tl-lane").find((lane) => lane.getAttribute("data-variant") === "dialogue")!
+    lines.forEach((l, i) => {
+      const card = within(dialogue).getByTestId(`tl-card-${l.id}`)
+      expect(parseFloat(pieces[i].style.left)).toBeCloseTo(parseFloat(card.style.left), 0)
+    })
+  })
+
+  it("a dub longer than its line: its piece holds the last frame until the line ends", () => {
+    draw("audioFirst")
+    const [a, b, c] = screen.getAllByTestId("tl-film-piece")
+    expect(a.querySelector("[data-testid='tl-film-held']")).toBeNull()
+    expect(b.querySelector("[data-testid='tl-film-held']")).not.toBeNull()
+    expect(c.querySelector("[data-testid='tl-film-held']")).toBeNull()
+  })
+
+  it("following the recordings, the timeline ends with its lines, not at the film's own end", () => {
+    draw("audioFirst")
+    // 3.5 + 6 + 2 = 11.5 s of lines, against a 27 s film.
+    const b = screen.getAllByTestId("tl-film-piece")[1]
+    const pxPerSec = parseFloat(b.style.left) / 3.5
+    const filePx = Number(screen.getByTestId("tl-canvas").getAttribute("data-file-px"))
+    expect(filePx / pxPerSec).toBeLessThan(20)
+    expect(filePx / pxPerSec).toBeGreaterThanOrEqual(11.5)
+  })
+
+  it("a linked film on the same lines stays one strip on its own clock following the recordings", () => {
+    draw("audioFirst", { coreMediaUrl: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
+    expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+  })
+})
+
+// Nov 8 (the film bundle): an imported film's picture, sound and heard lines
+// are one folder at the top, named after the file (lib/timeline/film-folder).
+// Derived every time, never stored: pinned, nothing to rename or drag.
+describe("TimelineEditor — an imported film's folder", () => {
+  const UPLOAD = "frontier-audio://ep9/audio-ep9-1690000000-film.webm"
+  const SOURCE_ID = "audio-ep9-1690000000-film.webm"
+  const film = { name: "Imported film", fileName: "Imported film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  const line = (id: string, start: number, end: number, takeSec?: number) => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, fileId: "ep9", medium: "media", startTime: start, endTime: end, original: "Imported film.webm",
+      ...(takeSec != null ? { selectedAudioId: takeId } : {}),
+      attachments: {
+        [SOURCE_ID]: { type: "audio", url: UPLOAD, trimStartMs: start * 1000, trimEndMs: end * 1000, durationMs: 27_080 },
+        ...(takeSec != null ? { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeSec * 1000 } } : {}),
+      },
+    } as unknown as Partial<CellData>)
+  }
+  const lines = [line("a", 0.5, 4.0, 3.5), line("b", 4.6, 8.8, 6.0), line("c", 9.2, 13.5, 2.0)]
+  // The heard lines of its audio cue file, on the film's own clock.
+  const heard = [
+    cell({ id: "h1", original: "Whoa there", startTime: 1.0, endTime: 2.0 }),
+    cell({ id: "h2", original: "Easy now", startTime: 5.0, endTime: 6.0 }),
+  ]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep9folder" coreMediaUrl={UPLOAD} film={film} editable cells={lines} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: true, hasAudioCues: false, hasSourceAudio: true })}
+        onRetimeSubtitle={() => {}}
+        onReorderTrack={() => {}}
+        onRenameTrack={() => {}}
+        {...over}
+      />,
+    )
+  const gutterNames = () =>
+    Array.from(screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(UPLOAD, 27.08)
+    localStorage.removeItem("aquilla:tlFoldersClosed:ep9folder")
+  })
+
+  it("holds the film and its Source audio, under the file's name, with Source text outside it", () => {
+    draw("dubbing")
+    expect(gutterNames()).toEqual(["Imported film.webm", "Film", "Source audio", "Source text", "Target audio"])
+    expect(screen.getByTestId("tl-folder-toggle-film-folder")).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("with an audio cue file, the heard lines get their own row inside it, beside the Source audio", () => {
+    draw("dubbing", { audioCues: heard })
+    expect(gutterNames()).toEqual(["Imported film.webm", "Film", "Source audio", "Source cues", "Source text", "Target audio"])
+    // Both rows draw: the film's sound, cut into its lines, and the heard lines.
+    expect(screen.getAllByTestId("tl-lane").some((lane) => lane.getAttribute("data-variant") === "dialogue")).toBe(true)
+    expect(within(screen.getByTestId("tl-source-regions")).getAllByTestId(/^tl-card-h/)).toHaveLength(2)
+    // One switch for the one sound: on the Source audio row, not on the heard lines.
+    expect(within(screen.getByTestId("tl-film-folder-source-audio-label")).getByTestId("tl-mute-source")).toBeInTheDocument()
+    expect(within(screen.getByTestId("tl-film-folder-cues-label")).queryByRole("button")).toBeNull()
+  })
+
+  it("is pinned: no grip, no menu, and its rows are not among the rows a drag moves", () => {
+    draw("dubbing", { audioCues: heard })
+    for (const id of ["tl-film-folder-label", "tl-film-track-label", "tl-film-folder-source-audio-label", "tl-film-folder-cues-label"]) {
+      const row = screen.getByTestId(id)
+      expect(row).not.toHaveAttribute("data-tl-track-row")
+      expect(within(row).queryByTestId(/^tl-track-grip-/)).toBeNull()
+      expect(within(row).queryByTestId(/^tl-track-menu-/)).toBeNull()
+    }
+    // The rows a drag measures are the tracks below it, Source audio not among them.
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    expect(gutter.querySelectorAll("[data-tl-track-row]")).toHaveLength(2)
+  })
+
+  it("folds to one slim row showing the film, and its speaker moves to the heading", () => {
+    draw("audioFirst", { audioCues: heard })
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-film-folder"))
+    expect(gutterNames()).toEqual(["Imported film.webm", "Source text", "Target audio"])
+    const band = screen.getByTestId("tl-folder-lane-film-folder")
+    expect(band).toHaveAttribute("data-collapsed")
+    // The film strip is the summary: its pieces, cut at the lines.
+    expect(within(band).getByTestId("tl-film-lane")).toHaveAttribute("data-summary")
+    expect(within(band).getAllByTestId("tl-film-piece")).toHaveLength(3)
+    expect(screen.queryByTestId("tl-source-regions")).toBeNull()
+    expect(within(screen.getByTestId("tl-film-folder-label")).getByTestId("tl-mute-source")).toBeInTheDocument()
+    expect(screen.getAllByTestId("tl-mute-source")).toHaveLength(1)
+    // Folding is personal, kept for this file.
+    expect(localStorage.getItem("aquilla:tlFoldersClosed:ep9folder")).toContain("film-folder")
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-film-folder"))
+    expect(gutterNames()).toContain("Source cues")
+  })
+
+  it("following the recordings, the heard lines move with the film's pieces", () => {
+    draw("audioFirst", { audioCues: heard })
+    const [a, b] = screen.getAllByTestId("tl-film-piece")
+    const lane = screen.getByTestId("tl-source-regions")
+    // h1 is the film's 1.0 s, 0.5 s into line a's stretch; h2 is 5.0 s, 0.4 s into line b's.
+    const pxPerSec = (parseFloat(b.style.left) - parseFloat(a.style.left)) / 3.5
+    const h1 = within(lane).getByTestId("tl-card-h1")
+    const h2 = within(lane).getByTestId("tl-card-h2")
+    expect(parseFloat(h1.style.left)).toBeCloseTo(parseFloat(a.style.left) + 0.5 * pxPerSec, 0)
+    expect(parseFloat(h2.style.left)).toBeCloseTo(parseFloat(b.style.left) + 0.4 * pxPerSec, 0)
+  })
+
+  it("a linked film gets no folder", () => {
+    draw("dubbing", { coreMediaUrl: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
+    expect(screen.queryByTestId("tl-film-folder-label")).toBeNull()
+    expect(gutterNames()[0]).toBe("Film")
+  })
+
+  it("following the recordings, a line nobody has recorded shows its whole stretch of film, never \"cut\"", () => {
+    const unrecorded = [line("a", 0.5, 4.0), { ...line("b", 4.6, 8.8), transcription: "Hi." } as CellData]
+    draw("audioFirst", { cells: unrecorded })
+    expect(screen.getAllByTestId("tl-film-piece")).toHaveLength(2)
+    expect(screen.queryAllByTestId("tl-film-cut")).toHaveLength(0)
+  })
+})
+
+// AQU-2253: with the film pinned as the first row, a timeline scrolled down
+// slid "Film" up OVER the corner's "Tracks" — the track names sat one layer
+// above the corner they are meant to slide under (the ruler's opposite
+// number). The corner is opaque and on top; it draws its own piece of the
+// gutter's edge rule, which it now covers.
+describe("TimelineEditor — the corner stays above the scrolled track names", () => {
+  const z = (el: Element) => Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(el.className)?.[1] ?? 0)
+  it("paints the corner above the gutter's rows, with its own piece of the edge rule", () => {
+    render(
+      <TimelineEditor fileId="zc" coreMediaUrl={null} editable onRetimeSubtitle={() => {}}
+        cells={[cell({ id: "d1", medium: "media", startTime: 0, endTime: 2, original: "Hello" })]} />,
+    )
+    const corner = screen.getByTestId("tl-corner").parentElement!
+    const rows = corner.nextElementSibling!
+    expect(z(corner)).toBeGreaterThan(z(rows))
+    // Its piece of the edge rule is AQU-2236's `border-e` on the header, so
+    // the corner has one 1px divider, not two.
+    expect(corner.classList).toContain("border-e")
+  })
+})
+
 // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
 describe("TimelineEditor — the toolbar's hovers only name its icons", () => {
   // Media redesign, layout: the quality toggle is a row of the timeline's

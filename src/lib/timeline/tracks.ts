@@ -10,7 +10,7 @@
 //
 // TRACKS ARE CUE DATA, AND THE FILM'S SOUNDTRACK GETS NO ROW, EVER. The picture
 // is heard from the video pane whatever the timeline shows, so there is nothing
-// for a "the film's own audio" row to hold. "Source audio" is the row for the
+// for a "the film's own audio" row to hold. "Source cues" is the row for the
 // AUDIO VTT's cues — a near-verbatim transcript of that soundtrack, imported as
 // a hidden sibling file — and until such an import exists there is nothing to
 // draw and the row is simply absent. That is why derivation takes a
@@ -99,6 +99,13 @@ export interface TimelineTrack {
    * is most often another voice.
    */
   setsLineLengths?: false
+  /**
+   * AQU-2664 (board 74): the track's own volume, dB, −150…+6 or −Infinity
+   * (silence) — the fader in its header. Absent means 0 dB. Shared (everyone hears it) and exported: the
+   * mixer's track stage and every export apply it, after each take's evening
+   * out, own volume and fades.
+   */
+  volumeDb?: number
 }
 
 /**
@@ -132,6 +139,19 @@ export interface PersistedTrackPatch {
    *  the server accepts; only `false` means anything. HAND-MIRRORED with the
    *  handler's PATCH_KEYS. */
   setsLineLengths?: boolean
+  /** AQU-2664: the track's volume, dB (see TimelineTrack.volumeDb), or
+   *  "-inf" for silence. HAND-MIRRORED with the handler's PATCH_KEYS. */
+  volumeDb?: number | "-inf"
+}
+
+/** AQU-2664: a stored track volume this build can use, or undefined: the
+ *  number (−150…+6 dB), or "-inf" for silence (read as −Infinity). The rule is
+ *  lib/audio/track-volume-store.ts `fromStoredVolume`, HAND-MIRRORED here because
+ *  this module has no imports (a test holds the two together), and the
+ *  worker's (file-track-set.ts). Anything else reads as none. */
+export function overrideVolumeDb(value: unknown): number | undefined {
+  if (value === "-inf" || value === -Infinity) return -Infinity
+  return typeof value === "number" && Number.isFinite(value) && value >= -150 && value <= 6 ? value : undefined
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
@@ -151,6 +171,16 @@ export const TRACK_KIND_LABELS: Record<TrackKind, string> = {
   folder: "Folder",
   audio: "Audio",
 }
+
+/**
+ * The name of the Source-audio row while what it holds is the AUDIO VTT's cues,
+ * the transcript of the film's own speech, rather than a source recording (Sam,
+ * Oct 30: "Source cues"). Same kind, same id, same seat: only what the row is
+ * CALLED changes, so a rename still wins and nothing persisted moves. A row of
+ * real source audio (an imported recording, a book's chapter audio) keeps
+ * "Source audio".
+ */
+export const SOURCE_CUES_TRACK_NAME = "Source cues"
 
 /**
  * THE RESERVED IDS — every kind, not "the rows this file starts with".
@@ -224,10 +254,12 @@ export interface TrackDerivationContext {
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
   hasAudioCues: boolean
-  /** The file plays a linked video with its sound on (Original's timing), so
-   *  the Source-audio row has the video's own sound to stand for even with no
-   *  cues. Absent reads as false. */
-  hasLinkedVideoSound?: boolean
+  /** The file has a linked film. Its own sound lives on the film track (AQU-2253)
+   *  and NEVER makes a Source-audio row (Sam, Oct 29: "source audio track only
+   *  shows up when the source that is imported is literally just audio"). The
+   *  derivation reads nothing from it; it is here so that rule is stated and
+   *  pinned in tests. Absent reads as false. */
+  hasLinkedFilm?: boolean
   /** AQU-1758: the file is in reading order — a Bible book, a document —
    *  rather than timed. Absent reads as false. */
   sequenceOrdered?: boolean
@@ -312,19 +344,28 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // these numbers are never compared against anything but each other. That
   // invisibility is the guarantee the whole renumber hangs on; it is the
   // highest-blast-radius part of the change and tracks.test.ts pins it twice.
-  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered)) {
+  // A linked film with nothing of its own yet (a YouTube film linked with no
+  // lines): its sound is the film track's, so the legacy shape's empty Source
+  // audio row ("The film's own sound") is never drawn — the rows below decide.
+  const linkedFilmOnly = Boolean(context?.hasLinkedFilm) && !context?.hasSourceAudio
+  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered && !linkedFilmOnly)) {
     return [trackRow("source-subtitles"), trackRow("source-audio"), trackRow("target-audio")]
   }
   // AQU-1758: a book or document opens on the timeline since the Audio view
   // went. With no source audio there is nothing for a Source-audio row to
   // hold, and an empty one reads as "the source is silent", so it is left
   // out, the same rule as a subtitle file's below.
+  //
+  // Its recording, when it has one, is what the row draws; with only cues, it
+  // is the Source cues row.
   if (!context.isSubtitleImport) {
     return [
       trackRow("source-subtitles"),
-      ...(context.hasAudioCues || context.hasLinkedVideoSound || context.hasSourceAudio
+      ...(context.hasSourceAudio
         ? [trackRow("source-audio")]
-        : []),
+        : context.hasAudioCues
+          ? [trackRow("source-audio", SOURCE_CUES_TRACK_NAME)]
+          : []),
       trackRow("target-audio"),
     ]
   }
@@ -335,10 +376,12 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
     // No audio VTT imported yet means no cues, and a row with nothing to draw
     // is worse than no row: it reads as "this episode has no speech".
     //
-    // A linked video's own sound IS something to draw (Sam, Oct 5): the row
-    // stays as one dashed band, "The video's own sound", with its mute button,
-    // the same row the file had before its captions became rows (AQU-1566).
-    ...(context.hasAudioCues || context.hasLinkedVideoSound ? [trackRow("source-audio")] : []),
+    // A linked film's own sound is NOT drawn here (Sam, Oct 29): it lives on
+    // the film track, which carries its mute. Until then (AQU-1566, Oct 5) this
+    // row stood in for it as one dashed band, "The video's own sound".
+    //
+    // What it holds here is always the cues, so it is the Source cues row.
+    ...(context.hasAudioCues ? [trackRow("source-audio", SOURCE_CUES_TRACK_NAME)] : []),
     trackRow("target-audio"),
   ]
 }
@@ -430,6 +473,8 @@ export function mergeTrackOverrides(
       if (color !== null) target.color = color
       const contentFileId = overrideContentFileId(patch.contentFileId)
       if (contentFileId !== undefined) target.contentFileId = contentFileId
+      const volumeDb = overrideVolumeDb(patch.volumeDb)
+      if (volumeDb !== undefined) target.volumeDb = volumeDb
       continue
     }
     // A reserved id the caller left out of `defaults` stays reserved — a delta
@@ -466,6 +511,7 @@ export function mergeTrackOverrides(
         ? { contentFileId: overrideContentFileId(patch.contentFileId) } : {}),
       // AQU-2252: only an audio track has takes to set a line's length with.
       ...(patch.kind === "audio" && patch.setsLineLengths === false ? { setsLineLengths: false as const } : {}),
+      ...(overrideVolumeDb(patch.volumeDb) !== undefined ? { volumeDb: overrideVolumeDb(patch.volumeDb) } : {}),
     })
   }
 

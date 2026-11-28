@@ -164,14 +164,14 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
   it("persists Top K and context, each by itself, while retrieval stays on approved examples", async () => {
     renderSettings()
 
-    const topK = screen.getByLabelText(/examples retrieved/i)
+    const topK = screen.getByLabelText(/reference examples/i)
     fireEvent.change(topK, { target: { value: "17" } })
     fireEvent.blur(topK)
     await waitFor(() => expect(draftingWrites()).toEqual([{ top_k: 17 }]))
     await pickSelectOption(/context window/i, /large — chapter/i)
     await waitFor(() => expect(draftingWrites()).toEqual([{ top_k: 17 }, { contextSize: "large" }]))
 
-    const approvedOnly = screen.getByRole("switch", { name: /approved examples only/i })
+    const approvedOnly = screen.getByRole("switch", { name: /validated examples only/i })
     // Base UI Switch: checked + locked via data-* (not the native disabled prop).
     expect(approvedOnly).toHaveAttribute("aria-checked", "true")
     expect(approvedOnly).toHaveAttribute("data-disabled")
@@ -189,7 +189,7 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
   it("says Saved beside the field, and the page stays open", async () => {
     renderSettings()
 
-    const topK = screen.getByLabelText(/examples retrieved/i)
+    const topK = screen.getByLabelText(/reference examples/i)
     fireEvent.change(topK, { target: { value: "17" } })
     fireEvent.blur(topK)
 
@@ -202,7 +202,7 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
   it("has no Save bar, and typing back to the stored value saves nothing", () => {
     renderSettings()
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
-    const input = screen.getByLabelText(/examples retrieved/i)
+    const input = screen.getByLabelText(/reference examples/i)
     fireEvent.change(input, { target: { value: "17" } })
     fireEvent.change(input, { target: { value: "15" } })
     fireEvent.blur(input)

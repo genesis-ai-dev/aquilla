@@ -30,13 +30,13 @@ export const nav = defineNamespace({
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Aquilla account",
     "nav.account.loginTitle": "Log in to Aquilla",
-    "nav.account.signupTitle": "Create an Aquilla Account",
+    "nav.account.signupTitle": "Create an Aquilla account",
     "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
     "nav.account.logOut": "Log out",
-    "nav.account.signOutAllAccounts": "Sign out of all accounts",
+    "nav.account.signOutAllAccounts": "Log out of all accounts",
     "nav.account.unsavedEditsTitle": "Unsaved edits",
     "nav.account.unsavedEditsDescription": plural({
       one: "You have {count} unsaved edit that hasn't synced to the server. Logging out will discard it. Continue?",
@@ -92,12 +92,14 @@ export const nav = defineNamespace({
     // -- workspace-actions/registry.ts: the file-scoped action menu (⋯) and its
     // per-action confirmation dialogs, rendered through ConfirmActionDialog. --
     "nav.workspaceActions.import": "Import",
-    "nav.workspaceActions.runCompletions.label": "Run AI completions",
-    "nav.workspaceActions.runCompletions.title": "Run completions",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "nav.workspaceActions.moreAria": "More actions",
+    "nav.workspaceActions.runCompletions.label": "Draft next batch",
+    "nav.workspaceActions.runCompletions.title": "Draft next untranslated cells",
     "nav.workspaceActions.runCompletions.description": plural(
       {
-        one: "Generate an approved-example draft package for the next {next} untranslated cell",
-        other: "Generate an approved-example draft package for the next {next} untranslated cells",
+        one: "Draft an AI translation using reference examples for the next {next} untranslated cell",
+        other: "Draft AI translations using reference examples for the next {next} untranslated cells",
       },
       "next",
     ),
@@ -114,15 +116,9 @@ export const nav = defineNamespace({
     "nav.workspaceActions.completeAll.description": plural(
       {
         one:
-          "Generate drafts for all {untranslated} untranslated cell, split into " +
-          "packages of at most {batchSize}. Packaging preserves context but is not a " +
-          "quality guarantee; every draft remains unapproved until a human reviews " +
-          "it individually.",
+          "Generate a draft for {untranslated} untranslated cell, split into batches of at most {batchSize}. Batching preserves context but is not a quality guarantee; every draft remains unvalidated until a human reviews it individually.",
         other:
-          "Generate drafts for all {untranslated} untranslated cells, split into " +
-          "packages of at most {batchSize}. Packaging preserves context but is not a " +
-          "quality guarantee; every draft remains unapproved until a human reviews " +
-          "it individually.",
+          "Generate drafts for all {untranslated} untranslated cells, split into batches of at most {batchSize}. Batching preserves context but is not a quality guarantee; every draft remains unvalidated until a human reviews it individually.",
       },
       "untranslated",
     ),
@@ -155,6 +151,8 @@ export const nav = defineNamespace({
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
+    "nav.workspaceActions.batchValidate.nothingInChapter":
+      "Nothing in this chapter can be batch-validated right now.",
     // AQU-2507: the trailing clause the confirmation body actually uses now.
     // One action validates the whole file; this says how it gets there, so a
     // reviewer accepting a 2,870-cell pretranslated book is not left wondering
@@ -170,6 +168,17 @@ export const nav = defineNamespace({
       },
       "cap",
     ),
+    "nav.workspaceActions.batchValidate.runsToChapter": plural(
+      {
+        one:
+          " It saves in batches of {cap} cell and keeps going until this chapter " +
+          "is done — one click is enough.",
+        other:
+          " It saves in batches of {cap} cells and keeps going until this chapter " +
+          "is done — one click is enough.",
+      },
+      "cap",
+    ),
     // AQU-586's per-run cap note. RETIRED by AQU-2507 — nothing renders it,
     // because the file-wide run no longer stops at the project's batch size.
     // Left in the catalog rather than deleted: the 18 non-English catalogs are
@@ -180,8 +189,7 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
         one:
-          " At most {cap} eligible cell are validated per run (project batch " +
-          "size); run again to continue.",
+          " At most {cap} eligible cell is validated per run (project batch size); run again to continue.",
         other:
           " At most {cap} eligible cells are validated per run (project batch " +
           "size); run again to continue.",
@@ -193,8 +201,8 @@ export const nav = defineNamespace({
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
       {
-        one: "Run Whisper on {n} cell that already has a recording but no karaoke timings yet.",
-        other: "Run Whisper on {n} cells that already have a recording but no karaoke timings yet.",
+        one: "Run Whisper on {n} cell that already has a recording but no word timings yet.",
+        other: "Run Whisper on {n} cells that already have a recording but no word timings yet.",
       },
       "n",
     ),
@@ -387,7 +395,7 @@ export const nav = defineNamespace({
 
     // -- ExpandableFileList --
     "nav.fileList.filterFiles": "Filter files",
-    "nav.fileList.filterPlaceholder": "Filter files...",
+    "nav.fileList.filterPlaceholder": "Filter files…",
     "nav.fileList.clearFilter": "Clear filter",
     "nav.fileList.noFilesMatch": "No files match \"{filter}\".",
     "nav.fileList.noFilesImported": "No files imported yet.",
@@ -409,7 +417,7 @@ export const nav = defineNamespace({
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
-    "nav.outbox.title": "Outbox",
+    "nav.outbox.title": "Pending changes",
     "nav.outbox.allSynced": "All synced",
     "nav.outbox.pendingCount": "{count} pending",
     "nav.outbox.failedCount": "{count} failed",
@@ -504,6 +512,10 @@ export const nav = defineNamespace({
       maxLength: 24,
     },
     keys: {
+      "nav.workspaceActions.moreAria": {
+        description:
+          "Screen-reader name of the '⋯' icon button beside Import in the project header, which opens a menu of further project actions. Not visible text.",
+      },
       "nav.projects": {
         description:
           "Sidebar link to the list of translation projects the user belongs to. Plural " +
@@ -909,6 +921,12 @@ export const nav = defineNamespace({
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.nothingInChapter": {
+        description:
+          "Stands in for willValidate when a chapter-scoped run would validate " +
+          "nothing. Neutral, not an error. Ends with a period and no trailing space.",
+        maxLength: 160,
+      },
       "nav.workspaceActions.batchValidate.nothingToValidate": {
         description:
           "Stands in for willValidate when the run would validate nothing at all, " +
@@ -927,6 +945,16 @@ export const nav = defineNamespace({
           cap: "How many cells the run saves per batch. Selects the plural form.",
         },
         maxLength: 140,
+      },
+      "nav.workspaceActions.batchValidate.runsToChapter": {
+        description:
+          "Same clause as runsToCompletion, for a run limited to one chapter of " +
+          "the open book. Leading space is intentional. Do not tell the reader to " +
+          "click again.",
+        placeholders: {
+          cap: "How many cells the run saves per batch. Selects the plural form.",
+        },
+        maxLength: 160,
       },
       "nav.workspaceActions.batchValidate.capNote": {
         description:

@@ -1,20 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[] }))
+const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[], even: [] as unknown[], measure: [] as unknown[] }))
 vi.mock("@/lib/audio/upload", () => ({
   buildAudioId: (seed: string) => `audio-${seed}`,
   uploadCellAudio: vi.fn(async (a: { audioId: string }) => ({ audioId: a.audioId, ext: "wav", url: `frontier-audio://${a.audioId}.wav` })),
   deleteCellAudio: vi.fn(async () => {}),
 }))
 vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
+const overlays = vi.hoisted(() => ({ trim: [] as Array<Record<string, unknown>> }))
+vi.mock("@/lib/audio/audio-attachments-bus", () => ({
+  injectOptimisticAudioAttachment: vi.fn(),
+  injectOptimisticAudioTrim: vi.fn((_f: string, _c: string, att: Record<string, unknown>) => overlays.trim.push(att)),
+  notifyAudioAttachmentsChanged: vi.fn(),
+}))
+// The meter, off the page (loudness-client.ts): held here so a test can
+// keep it busy and see the save not wait for it.
+const meter = vi.hoisted(() => ({ gate: null as Promise<void> | null }))
+vi.mock("@/lib/audio/loudness-client", async () => {
+  const { measureLoudness } = await import("@/lib/audio/loudness")
+  return {
+    loudnessClient: () => ({
+      measure: async (channels: Float32Array[], rate: number) => {
+        if (meter.gate) await meter.gate
+        return measureLoudness(channels, rate)
+      },
+    }),
+  }
+})
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async (x: unknown) => (calls.attach.push(x), "ev")),
   emitCellAudioPlace: vi.fn(async (x: unknown) => (calls.place.push(x), "ev")),
   emitCellAudioRemove: vi.fn(async (x: unknown) => (calls.remove.push(x), "ev")),
+  emitCellAudioGain: vi.fn(async () => "ev"),
+  emitCellAudioEven: vi.fn(async (x: unknown) => (calls.even.push(x), "ev")),
+  emitCellAudioMeasure: vi.fn(async (x: unknown) => (calls.measure.push(x), "ev")),
 }))
 
-import { historyView, matchingSteps, resetHistoryForTests, setHistoryScope } from "@/lib/history/history"
+import { historyReady, historyView, matchingSteps, redoLast, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
+import { takeStepHandlers } from "@/lib/history/take-steps"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { saveStationVersion, type VersionPlacement } from "./save"
 
 const base: VersionPlacement = {
@@ -35,6 +60,49 @@ describe("Save as new version", () => {
     calls.attach.length = 0
     calls.place.length = 0
     calls.remove.length = 0
+    calls.even.length = 0
+    calls.measure.length = 0
+  })
+
+  // AQU-2664 review M3: an evened-out take's new version stays evened out,
+  // and its new audio is measured (it is in memory already).
+  it("carries the evening out to the new version and measures its audio", async () => {
+    const tone = Float32Array.from({ length: 48000 }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000))
+    const res = await saveStationVersion({
+      projectId: "p",
+      samples: tone,
+      rate: 48000,
+      placements: [{ ...base, evenTargetLufs: -16 }, { ...base, cellId: "c316", fromAudioId: "t1.webm" }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+    })
+    expect(calls.even).toEqual([expect.objectContaining({ cellId: "c331", audioId: res.audioIds[0], evenTargetLufs: -16 })])
+    await vi.waitFor(() => expect(calls.measure).toHaveLength(2))
+    const m = calls.measure[0] as { loudness: { loudnessLufs: number; truePeakDb: number }; audioId: string }
+    expect(m.audioId).toBe(res.audioIds[0])
+    expect(m.loudness.truePeakDb).toBeCloseTo(-20, 1)
+    expect(m.loudness.loudnessLufs).toBeLessThan(-10)
+    // Shown on the page at once, not only after the outbox flushes.
+    await vi.waitFor(() => expect(overlays.trim.some((o) => o.audioId === res.audioIds[0] && typeof o.loudnessLufs === "number")).toBe(true))
+  })
+
+  // Re-check S3: the save never waits for the meter; it measures after.
+  it("finishes without waiting for the meter, which runs after it", async () => {
+    let open: () => void = () => {}
+    meter.gate = new Promise<void>((r) => { open = r })
+    try {
+      const res = await saveStationVersion({
+        projectId: "p", samples: new Float32Array(48000).fill(0.1), rate: 48000,
+        placements: [base], author: "ana", getSyncToken: async () => "jwt", where: { fileId: "f" },
+      })
+      expect(res.audioIds).toHaveLength(1)
+      expect(calls.measure).toHaveLength(0)
+      open()
+      await vi.waitFor(() => expect(calls.measure).toHaveLength(1))
+    } finally {
+      meter.gate = null
+    }
   })
 
   it("attaches the new version on each line, pointing back at the take it replaces, keeping track, name, trim and place", async () => {
@@ -195,5 +263,86 @@ describe("Save as new version", () => {
     })
     expect(calls.remove).toHaveLength(0)
     expect(calls.attach[0]).not.toMatchObject({ versionChanges: { over: true } })
+  })
+
+  // AQU-2493 (review, Nov 9): Undo of a save on one piece of a cut take left
+  // both the old piece and the new one on the line: taking the new piece away
+  // was skipped as "changed since", because its take still held the pieces
+  // that were there all along.
+  describe("Undo of a save on one piece of a cut take", () => {
+    type Takes = Record<string, Partial<CodexCellAttachment>>
+    /** A line's takes, with the workspace's own reads and writes over them. */
+    async function world(takes: Takes) {
+      resetHistoryForTests()
+      await clearHistoryStoreForTests()
+      registerStepKinds(
+        takeStepHandlers({
+          readTake: (_c, id) => (takes[id] && !takes[id].isDeleted ? (takes[id] as CodexCellAttachment) : null),
+          selectedIn: () => "t3.webm",
+          applyTrim: async () => {},
+          applyPlace: async () => {},
+          cut: async () => true,
+          uncut: async () => {},
+          select: async (_c, _slot, id) => {
+            if (id) takes[id] = { ...takes[id], isDeleted: false }
+          },
+          remove: async (_c, id) => {
+            takes[id] = { ...takes[id], isDeleted: true }
+          },
+          rename: async () => {},
+          liveGroup: (_c, id) => {
+            const group = takes[id]?.pieceOf ?? id
+            return Object.keys(takes).filter((k) => !takes[k].isDeleted && (takes[k].pieceOf ?? k) === group)
+          },
+        }),
+      )
+      setHistoryScope("p", "ana")
+      await historyReady()
+    }
+    const live = (takes: Takes) => Object.keys(takes).filter((k) => !takes[k].isDeleted).sort()
+    const savePiece = (piece: VersionPlacement) =>
+      saveStationVersion({ projectId: "p", samples: new Float32Array(4800), rate: 48000, placements: [piece], author: "ana", getSyncToken: async () => "jwt", where: { fileId: "f" }, mode: "over" })
+
+    it("takes the new piece away and brings the old one back; Redo swaps them again", async () => {
+      const takes: Takes = { "t3.webm": { slot: "recording", trimEndMs: 2500 }, "piece2.webm": { slot: "recording", pieceOf: "t3.webm", trimStartMs: 2500 } }
+      await world(takes)
+      const res = await savePiece({ ...base, fromAudioId: "piece2.webm", pieceOf: "t3.webm", selectedBefore: "t3.webm", otherPieces: ["t3.webm"] })
+      // What the save's events did to the line.
+      takes[res.audioIds[0]] = { slot: "recording", pieceOf: "t3.webm" }
+      takes["piece2.webm"] = { ...takes["piece2.webm"], isDeleted: true }
+
+      expect((await undoLast())?.outcome).toEqual({ kind: "done" })
+      expect(live(takes)).toEqual(["piece2.webm", "t3.webm"])
+      expect((await redoLast())?.outcome).toEqual({ kind: "done" })
+      expect(live(takes)).toEqual([res.audioIds[0], "t3.webm"].sort())
+      resetHistoryForTests()
+    })
+
+    it("the same for the take's first piece, which the other pieces are named after", async () => {
+      const takes: Takes = { "t3.webm": { slot: "recording", trimEndMs: 2500 }, "piece2.webm": { slot: "recording", pieceOf: "t3.webm", trimStartMs: 2500 } }
+      await world(takes)
+      const res = await savePiece({ ...base, fromAudioId: "t3.webm", pieceOf: "t3.webm", selectedBefore: "t3.webm", otherPieces: ["piece2.webm"] })
+      takes[res.audioIds[0]] = { slot: "recording", pieceOf: "t3.webm" }
+      takes["t3.webm"] = { ...takes["t3.webm"], isDeleted: true }
+
+      expect((await undoLast())?.outcome).toEqual({ kind: "done" })
+      expect(live(takes)).toEqual(["piece2.webm", "t3.webm"])
+      resetHistoryForTests()
+    })
+
+    it("still leaves the new piece alone when it was cut again since the save", async () => {
+      const takes: Takes = { "t3.webm": { slot: "recording", trimEndMs: 2500 }, "piece2.webm": { slot: "recording", pieceOf: "t3.webm", trimStartMs: 2500 } }
+      await world(takes)
+      const res = await savePiece({ ...base, fromAudioId: "piece2.webm", pieceOf: "t3.webm", selectedBefore: "t3.webm", otherPieces: ["t3.webm"] })
+      takes[res.audioIds[0]] = { slot: "recording", pieceOf: "t3.webm" }
+      takes["piece2.webm"] = { ...takes["piece2.webm"], isDeleted: true }
+      // Someone cut the saved piece in two.
+      takes["piece3.wav"] = { slot: "recording", pieceOf: "t3.webm" }
+
+      await undoLast()
+      expect(live(takes)).toContain(res.audioIds[0])
+      expect(live(takes)).toContain("piece3.wav")
+      resetHistoryForTests()
+    })
   })
 })

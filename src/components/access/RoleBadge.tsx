@@ -66,9 +66,12 @@ export function RoleBadge({
   origin,
   hrefFor,
   className,
+  lanes,
 }: {
   roleLevel: number | null
   origin: GrantOrigin
+  /** AQU-2322: a direct grant that is lane grants on a project: the pill names the lanes ("Contributor · Spanish"). */
+  lanes?: readonly string[]
   /** URL for the place an inherited grant is set at. */
   hrefFor?: (scope: ScopeRef) => string | undefined
   className?: string
@@ -91,7 +94,9 @@ export function RoleBadge({
       ? t("org.access.roleBadge.via", { role, path: viaPhrase })
       : t("org.access.roleBadge.origin", { role, origin: originLabel(t, origin) })
     : origin.kind === "direct"
-      ? role
+      ? lanes && lanes.length > 0
+        ? t("org.access.roleBadge.lanes", { role, lanes: lanes.join(", ") })
+        : role
       : t("org.access.roleBadge.origin", { role, origin: originLabel(t, origin) })
 
   const shape = inherited

@@ -34,6 +34,7 @@ import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleRemovedCellsReadRequest } from "./events/removed-cells-read-route"
+import { handleSourceAudioAccessRequest } from "./events/source-audio-access-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
@@ -48,6 +49,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleUploadTicketRequest } from "./external/upload-tickets"
 import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleExternalTranscriptionRequest } from "./external/transcription-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
@@ -534,6 +536,9 @@ const worker = {
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
     if (removedCellsResponse) return withCors(removedCellsResponse, request)
+    // AQU-2682: may this caller declare source audio (every language)?
+    const sourceAudioAccessResponse = await handleSourceAudioAccessRequest(request, env)
+    if (sourceAudioAccessResponse) return withCors(sourceAudioAccessResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
     if (memberActivityResponse) return withCors(memberActivityResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
@@ -686,6 +691,9 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+    // Signed upload URLs minted by the MCP create_upload_url tool.
+    const uploadTicketResponse = await handleUploadTicketRequest(request, env)
+    if (uploadTicketResponse) return withCors(uploadTicketResponse, request)
 
     // AQU-1762: Agent API knowledge-base (reference document) upload / list.
     // Bridged to auth-worker, which owns extraction + indexing.

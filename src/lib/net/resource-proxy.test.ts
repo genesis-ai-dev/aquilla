@@ -122,6 +122,24 @@ describe("server handler — proxyResourceRequest", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*")
   })
 
+  // A Door43 account is free, and Gitea serves a repo's raw SVG as
+  // image/svg+xml behind its own sandbox policy. Proxied, that file is on
+  // our subdomain: it must not run script there when someone opens the link.
+  it("serves an upstream file sandboxed and unsniffed, whatever the upstream sent", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(document.domain)</script></svg>", {
+        status: 200,
+        headers: { "content-type": "image/svg+xml", "content-security-policy": "default-src *" },
+      }),
+    )
+    const res = await proxyResourceRequest(
+      new Request("https://resources.aquilla.app/git.door43.org/someone/repo/raw/branch/master/x.svg"),
+      { fetchImpl },
+    )
+    expect(res.headers.get("content-security-policy")).toMatch(/^sandbox; default-src 'none'/)
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff")
+  })
+
   it("forwards conditional/range request headers upstream", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 304 }))
     await proxyResourceRequest(

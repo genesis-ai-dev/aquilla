@@ -24,16 +24,58 @@ import {
   type ImportSessionRecord,
 } from "./import-session"
 import { v7 as uuidv7 } from "uuid"
+import { t } from "../i18n/standalone"
 import type { CaptionRowsPromotion, ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
+  MAX_IMPORT_REQUEST_BODY_BYTES,
   sourceArtifactDescriptor,
+  utf8ByteLength,
   type SourceArtifactFormat,
 } from "../../../shared/import-contract"
 
-/** Cells per HTTP request. The worker turns each chunk into bounded multi-row
- *  Postgres inserts, keeping request bodies manageable while still amortizing
- *  Hyperdrive/network latency. */
+/** Cells per HTTP request, when they are small. The worker turns each chunk
+ *  into bounded multi-row Postgres inserts. A chunk also stops once its JSON
+ *  nears half the server body cap: an InDesign file's per-character tracking
+ *  makes 1,500 cells larger than that cap, and the route refuses the whole
+ *  request before reading it. */
 const CHUNK = 1500
+const CHUNK_BODY_BUDGET = Math.floor(MAX_IMPORT_REQUEST_BODY_BYTES / 2)
+
+/**
+ * Where each upload request starts. The first request is always cell 0, even
+ * for an empty file, so file.create has somewhere to travel. A later request
+ * starts when the previous one is full: `maxCells` rows, or `maxBytes` of the
+ * JSON those rows and their paired targets will occupy. One cell that is
+ * itself over the byte budget still goes alone — a single cell is capped
+ * elsewhere, and dropping it would leave a hole in the file.
+ */
+export function importChunkStarts(
+  cells: readonly BulkImportCell[],
+  targets: readonly TargetCommit[] = [],
+  limits: { maxCells: number; maxBytes: number } = { maxCells: CHUNK, maxBytes: CHUNK_BODY_BUDGET },
+): number[] {
+  if (cells.length === 0) return [0]
+  const targetByParent = new Map(targets.map((target) => [target.parentId, target]))
+  const starts = [0]
+  let bytes = 0
+  let count = 0
+  for (let index = 0; index < cells.length; index++) {
+    const cell = cells[index]!
+    const target = targetByParent.get(cell.id)
+    const size = utf8ByteLength(JSON.stringify(cell))
+      + (target ? utf8ByteLength(JSON.stringify(target)) : 0)
+      + 1
+    if (count > 0 && (count >= limits.maxCells || bytes + size > limits.maxBytes)) {
+      starts.push(index)
+      bytes = 0
+      count = 0
+    }
+    bytes += size
+    count += 1
+  }
+  return starts
+}
+
 /** The chunking a resumable session's recorded offsets are relative to
  *  (`src/lib/sync/import-session.ts`). */
 export const BULK_IMPORT_CHUNK = CHUNK
@@ -479,9 +521,7 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     if (response) {
       if (response.ok) return
       const detail = await response.text().catch(() => "")
-      lastError = new Error(
-        `Import publication failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
+      lastError = new Error(importRefusalMessage("Import publication failed", response.status, detail))
       if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
         const refreshed = await args.getToken(args.fileId)
         if (refreshed) {
@@ -496,6 +536,21 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     }
   }
   throw lastError ?? new Error("Import publication failed")
+}
+
+/** The sync worker's own word for a film it won't store: neither a YouTube
+ *  video's link nor a film uploaded with this file. */
+const FILM_REFUSAL = "invalid linked picture publication"
+
+/**
+ * What a refused import says to a person. A refusal the app knows gets a plain
+ * sentence (import map X-D-film-refusal-text: the film refusal read "Upload
+ * failed (HTTP 400): invalid linked picture publication"); any other keeps the
+ * server's own words after the status, as before.
+ */
+export function importRefusalMessage(prefix: string, status: number, detail: string): string {
+  if (status === 400 && detail.trim() === FILM_REFUSAL) return t("importExport.errors.filmRefused")
+  return `${prefix} (HTTP ${status})${detail ? `: ${detail.slice(0, 200)}` : ""}`
 }
 
 /**
@@ -551,16 +606,23 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
   // of the import, so skip them.
   const landed = new Set<number>(session?.landedOffsets ?? [])
 
-  // Chunk offsets. `do…while` semantics: at least one request (carrying
-  // file.create) even for a zero-cell file.
-  // A revision import sends the file row alone; its units travel once, below.
-  const offsets: number[] = []
-  for (let offset = 0; offset === 0 || (!revision && offset < args.cells.length); offset += CHUNK) {
-    offsets.push(offset)
+  // Chunk offsets. At least one request (carrying file.create) even for a
+  // zero-cell file. A revision import sends the file row alone; its units
+  // travel once, below.
+  const offsets = revision
+    ? [0]
+    : importChunkStarts(args.cells, args.targets ?? [], {
+        maxCells: CHUNK,
+        maxBytes: CHUNK_BODY_BUDGET,
+      })
+  const chunkEnd = new Map<number, number>()
+  for (let index = 0; index < offsets.length; index++) {
+    const start = offsets[index]!
+    chunkEnd.set(start, offsets[index + 1] ?? (revision ? start : args.cells.length))
   }
 
   const chunkLengthAt = (offset: number): number =>
-    Math.max(0, Math.min(offset + CHUNK, args.cells.length) - offset)
+    Math.max(0, (chunkEnd.get(offset) ?? args.cells.length) - offset)
 
   /** Count an already-landed chunk towards progress without re-sending it. */
   const skipChunk = (offset: number): void => {
@@ -570,7 +632,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
 
   const sendChunk = async (offset: number, isFirst: boolean): Promise<void> => {
     if (args.signal?.aborted) throw new Error("Import cancelled")
-    const chunk = revision ? [] : args.cells.slice(offset, offset + CHUNK)
+    const chunk = revision ? [] : args.cells.slice(offset, chunkEnd.get(offset) ?? args.cells.length)
     const payload: Record<string, unknown> = {
       projectId: args.projectId,
       fileId: args.fileId,
@@ -619,9 +681,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
         }
 
         const detail = await response.text().catch(() => "")
-        lastError = new Error(
-          `Upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-        )
+        lastError = new Error(importRefusalMessage("Upload failed", response.status, detail))
 
         // Large imports can outlive their original file token. Refresh it and
         // retry the exact same idempotent chunk once the server returns 401.

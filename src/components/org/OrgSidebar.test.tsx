@@ -282,7 +282,7 @@ describe("OrgSidebar Data egress entry (AQU-907)", () => {
 
     renderSidebar("/orgs/1")
 
-    await screen.findByRole("link", { name: "Teams" })
+    await screen.findByRole("link", { name: "People & access" })
     expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
   })
 })
@@ -328,14 +328,30 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     expect(screen.getByRole("link", { name: "Archived projects" })).toBeInTheDocument()
   })
 
-  it("shows Members when the roster floor allows it", async () => {
+  it("shows People & access, and no Members or Teams entry, when the roster floor allows it", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
     fetchAccessibleProjects.mockResolvedValue([])
 
     renderSidebar("/orgs/1")
 
-    expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
-    expect(screen.getByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access-audit")
+    // People & access is the one page for people, folders and access: the old
+    // Members and Teams pages would be a second door to the same thing.
+    expect(await screen.findByRole("link", { name: "People & access" })).toHaveAttribute("href", "/orgs/1/access")
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    // AQU-2324: the audit is the People lens; a second entry to the same page would only be a duplicate.
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
+  })
+
+  it("keeps an Access audit door into the People lens for an admin the roster floor hides People & access from", async () => {
+    rosterSettings.canViewRoster = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access?lens=people")
+    expect(screen.queryByRole("link", { name: "People & access" })).not.toBeInTheDocument()
   })
 })
 

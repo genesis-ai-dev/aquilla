@@ -4,20 +4,52 @@
  * is unit-tested on its own.
  */
 
-import type { ToolMount, ToolScope } from "../../../shared/tools/manifest"
+import type { ToolManifest, ToolMount, ToolScope } from "../../../shared/tools/manifest"
+import type { extensions } from "../i18n/namespaces/extensions"
 import type { BuildPhase } from "./build-flow"
+
+type ExtensionKey = keyof typeof extensions.keys
 
 /** The three steps a first-time user goes through. */
 export type BuilderStep = "describe" | "review" | "add"
 
 /** Where the user wants the extension to show up ("auto" = let the AI choose). */
-export type WhereChoice = "auto" | "panel" | "page" | "editor"
+export type WhereChoice =
+  | "auto"
+  | "panel"
+  | "column"
+  | "inline"
+  | "importer"
+  | "exporter"
+  | "page"
+  | "editor"
 
-export const WHERE_CHOICES: readonly WhereChoice[] = ["auto", "panel", "page", "editor"]
+export const WHERE_CHOICES: readonly WhereChoice[] = [
+  "auto",
+  "panel",
+  "column",
+  "inline",
+  "importer",
+  "exporter",
+  "page",
+  "editor",
+]
 
-/** Read a `?where=` preset (the editor's "Build your own editor…" link). */
+/** Read a `?where=` preset (contextual "+ Build a…" links across the app). */
 export function parseWhere(value: string | null | undefined): WhereChoice {
-  return value === "panel" || value === "page" || value === "editor" ? value : "auto"
+  return WHERE_CHOICES.find((w) => w === value) ?? "auto"
+}
+
+/** Build the deep link to the Smart Extensions builder with optional placement + open file context. */
+export function buildExtensionPath(
+  projectId: string,
+  opts: { where?: WhereChoice; fileId?: string | null } = {},
+): string {
+  const qs = new URLSearchParams()
+  if (opts.where && opts.where !== "auto") qs.set("where", opts.where)
+  if (opts.fileId) qs.set("fileId", opts.fileId)
+  const query = qs.toString()
+  return `/project/${projectId}/extensions${query ? `?${query}` : ""}`
 }
 
 /**
@@ -28,21 +60,110 @@ export function parseWhere(value: string | null | undefined): WhereChoice {
 export function composeRequest(text: string, where: WhereChoice): string {
   const words = text.trim()
   if (!words || where === "auto") return words
-  const sentence = where === "panel"
-    ? "It should appear in the editor's side panel (mount: panel)."
-    : where === "editor"
-      ? "It should replace the editor for a file, as a full editing surface (mount: editor)."
-      : "It should be its own page (mount: page)."
-  return `${words}\n\n${sentence}`
+  const sentenceByWhere: Record<Exclude<WhereChoice, "auto">, string> = {
+    panel: "It should appear in the editor's side panel (mount: panel).",
+    column:
+      "It should integrate into Aquilla's native editor using a read-only column (manifest.columns) and/or native row badges, wavy span highlights, and quick-fixes via aq.editor.annotate(), with a toolbar action (where: ['bar']) to run it.",
+    inline: "It should appear inline under each verse in the cell details Extensions tab (mount: inline, reading aquilla.context.cell).",
+    importer:
+      "It should be an importer contribution in Aquilla's Import dialog (manifest.importers with schema-driven options, scope write:files, creating/updating files via aquilla.files.upsert).",
+    exporter:
+      "It should be a custom export format in Aquilla's Export dialog (manifest.exports, delivering files via aquilla.export.deliver).",
+    page: "It should be its own page (mount: page).",
+    editor: "It should replace the editor for a file, as a full editing surface (mount: editor).",
+  }
+  return `${words}\n\n${sentenceByWhere[where]}`
 }
 
-/** Suggestions (i18n keys): a short title on the pill; the full prompt fills the composer. */
+export interface ExamplePrompt {
+  title: ExtensionKey
+  prompt: ExtensionKey
+  where: WhereChoice
+}
+
+/** Default suggestions when placement is "auto". */
 export const EXAMPLE_PROMPTS = [
   { title: "extensions.examples.graceAcrossBooksTitle", prompt: "extensions.examples.graceAcrossBooks", where: "auto" },
   { title: "extensions.examples.wordCountTitle", prompt: "extensions.examples.wordCount", where: "panel" },
   { title: "extensions.examples.untranslatedTitle", prompt: "extensions.examples.untranslated", where: "auto" },
   { title: "extensions.examples.focusEditorTitle", prompt: "extensions.examples.focusEditor", where: "editor" },
-] as const satisfies readonly { title: string; prompt: string; where: WhereChoice }[]
+] as const satisfies readonly ExamplePrompt[]
+
+/** Contextual composer placeholder key per placement. */
+export const WHERE_PLACEHOLDERS: Record<WhereChoice, ExtensionKey> = {
+  auto: "extensions.describe.placeholder",
+  panel: "extensions.describe.placeholderPanel",
+  column: "extensions.describe.placeholderColumn",
+  inline: "extensions.describe.placeholderInline",
+  importer: "extensions.describe.placeholderImporter",
+  exporter: "extensions.describe.placeholderExporter",
+  page: "extensions.describe.placeholderPage",
+  editor: "extensions.describe.placeholderEditor",
+}
+
+const EXAMPLES_BY_WHERE: Record<Exclude<WhereChoice, "auto">, readonly ExamplePrompt[]> = {
+  panel: [
+    { title: "extensions.examples.activeVerseNotesTitle", prompt: "extensions.examples.activeVerseNotes", where: "panel" },
+    { title: "extensions.examples.wordCountTitle", prompt: "extensions.examples.wordCount", where: "panel" },
+    { title: "extensions.examples.graceAcrossBooksTitle", prompt: "extensions.examples.graceAcrossBooks", where: "panel" },
+  ],
+  column: [
+    { title: "extensions.examples.studyNotesColTitle", prompt: "extensions.examples.studyNotesCol", where: "column" },
+    { title: "extensions.examples.lengthRatioColTitle", prompt: "extensions.examples.lengthRatioCol", where: "column" },
+    { title: "extensions.examples.punctuationCheckTitle", prompt: "extensions.examples.punctuationCheck", where: "column" },
+  ],
+  inline: [
+    { title: "extensions.examples.inlineGlossaryTitle", prompt: "extensions.examples.inlineGlossary", where: "inline" },
+    { title: "extensions.examples.inlineChecklistTitle", prompt: "extensions.examples.inlineChecklist", where: "inline" },
+  ],
+  importer: [
+    { title: "extensions.examples.glossaryImporterTitle", prompt: "extensions.examples.glossaryImporter", where: "importer" },
+    { title: "extensions.examples.notesImporterTitle", prompt: "extensions.examples.notesImporter", where: "importer" },
+  ],
+  exporter: [
+    { title: "extensions.examples.annotatedTsvExporterTitle", prompt: "extensions.examples.annotatedTsvExporter", where: "exporter" },
+    { title: "extensions.examples.reviewDocExporterTitle", prompt: "extensions.examples.reviewDocExporter", where: "exporter" },
+  ],
+  page: [
+    { title: "extensions.examples.chapterProgressPageTitle", prompt: "extensions.examples.chapterProgressPage", where: "page" },
+    { title: "extensions.examples.graceAcrossBooksTitle", prompt: "extensions.examples.graceAcrossBooks", where: "page" },
+    { title: "extensions.examples.untranslatedTitle", prompt: "extensions.examples.untranslated", where: "page" },
+  ],
+  editor: [
+    { title: "extensions.examples.focusEditorTitle", prompt: "extensions.examples.focusEditor", where: "editor" },
+    { title: "extensions.examples.interlinearEditorTitle", prompt: "extensions.examples.interlinearEditor", where: "editor" },
+  ],
+}
+
+/** Suggestions tailored to the chosen placement ("auto" keeps the general set). */
+export function examplesForWhere(where: WhereChoice): readonly ExamplePrompt[] {
+  return where === "auto" ? EXAMPLE_PROMPTS : EXAMPLES_BY_WHERE[where]
+}
+
+/** Where to take the user right after "Add to project" succeeds. */
+export function postInstallTarget(
+  projectId: string,
+  toolId: string,
+  manifest: Pick<ToolManifest, "mounts" | "columns" | "importers" | "exports">,
+  opts: { where?: WhereChoice; fileId?: string | null } = {},
+): string {
+  const filePath = opts.fileId ? `/project/${projectId}/editor/file/${opts.fileId}` : `/project/${projectId}/editor`
+  if (manifest.mounts.includes("editor")) return filePath
+  const wantsEditor =
+    opts.where === "panel"
+    || opts.where === "column"
+    || opts.where === "inline"
+    || opts.where === "importer"
+    || opts.where === "exporter"
+    || (Boolean(opts.fileId) && (
+      manifest.mounts.includes("panel")
+      || manifest.mounts.includes("inline")
+      || (manifest.columns?.length ?? 0) > 0
+      || (manifest.importers?.length ?? 0) > 0
+      || (manifest.exports?.length ?? 0) > 0
+    ))
+  return wantsEditor ? filePath : `/project/${projectId}/extensions/${toolId}`
+}
 
 export type ProgressStepId = "write" | "check" | "try" | "fix"
 export type ProgressState = "pending" | "active" | "done"

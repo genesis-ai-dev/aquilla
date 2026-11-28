@@ -24,8 +24,9 @@
  * AQU-983: a file-wide run may pass `includeUntouchedAiDrafts: false`. Those
  * lines then land in `aiDraft` and the modal says so, instead of the click
  * appearing to do nothing. A cell someone else has already validated is not
- * untouched, so a second pass includes it either way. `notChosen` is the
- * same kind of account for the "ready for your check" box left unticked.
+ * untouched. It is the "someone else has validated" box, on unless the
+ * reader unticks it; a cell still short of the project's signature count
+ * stays on the first box. `notChosen` counts either box left unticked.
  *
  * AQU-2507: `cap` is no longer a per-CLICK ceiling on the file-wide run. It is
  * the size of one chunk, and the run loops over `chunksOf(…)` until the file is
@@ -46,6 +47,7 @@
  */
 import { isBulkValidatableByMe, type BulkValidatePolicy } from "@/lib/review/bulk-validation"
 import { isUntouchedAiDraft } from "@/lib/review/batch-file-options"
+import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { isOwnTextEdit, textValidationScope } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { canPerform } from "@/lib/sync/role-policy"
@@ -63,6 +65,8 @@ export interface BatchValidateCandidate {
   activeValidators?: string[]
   /** AQU-1571: who wrote the current text in the active lane. */
   lastEditor?: string | null
+  /** Canonical ref ("GEN 1:1"). The chapter filter reads it; eligibility does not. */
+  group?: string | null
 }
 
 /**
@@ -204,10 +208,21 @@ export interface SummarizeOptions {
    */
   includeUntouchedAiDrafts?: boolean
   /**
-   * AQU-983: the "ready for your check" box. Absent means include them.
-   * Unticked cells are `notChosen`, not a refusal.
+   * AQU-983: cells that do not yet have enough signatures. Absent means
+   * include them. Unticked cells are `notChosen`, not a refusal.
    */
   includeReadyCells?: boolean
+  /**
+   * Cells that already have enough signatures from other people. Absent
+   * means include them, which is what the selection toolbar does. The file
+   * modal passes false when that box is unticked.
+   */
+  includeSignedByOthers?: boolean
+  /**
+   * How many signatures make a cell validated. Absent is 1. A cell short of
+   * this is the first box even when someone else has already signed.
+   */
+  validationCount?: number
   /**
    * AQU-2507: does this cell carry an open (non-waived) check or rule flag?
    * Absent means "ask nothing" — the selection toolbar does not, so a reviewer
@@ -231,6 +246,8 @@ export function summarizeBatchValidate(
     noPermissionReason = "role",
     includeUntouchedAiDrafts = true,
     includeReadyCells = true,
+    includeSignedByOthers = true,
+    validationCount,
     hasOpenFlags,
     includeFlaggedCells = false,
   } = options
@@ -250,21 +267,30 @@ export function summarizeBatchValidate(
       skips[reason]++
       continue
     }
+    // A flagged cell belongs to the unresolved-checks choice, even when it is
+    // also an untouched AI draft. That list is where the reader sees it, so
+    // the skip reason is the flag, and opting into the list takes the cell.
+    // Counting it on the AI line as well explained one cell twice and left
+    // the list at zero while the run still skipped it.
+    if (hasOpenFlags?.(cell.id)) {
+      if (!includeFlaggedCells) {
+        skips.flagged++
+        continue
+      }
+      eligible.push(cell)
+      continue
+    }
     const untouched = isUntouchedAiDraft(cell)
     if (untouched && !includeUntouchedAiDrafts) {
       skips.aiDraft++
       continue
     }
-    if (!untouched && !includeReadyCells) {
-      skips.notChosen++
-      continue
-    }
-    // AQU-2507: asked last of the choices, so a cell that is both an untouched
-    // AI draft and flagged is reported under the box the reader can see rather
-    // than under a second one explaining the same cell twice.
-    if (!includeFlaggedCells && hasOpenFlags?.(cell.id)) {
-      skips.flagged++
-      continue
+    if (!untouched) {
+      const enough = hasEnoughSignatures(cell, validationCount)
+      if ((enough && !includeSignedByOthers) || (!enough && !includeReadyCells)) {
+        skips.notChosen++
+        continue
+      }
     }
     eligible.push(cell)
   }
@@ -293,7 +319,7 @@ export function workspaceBatchValidateOptions(args: {
   project:
     | Pick<
         ProjectRecord,
-        "id" | "syncRole" | "completionSettings" | "allowSelfValidation" | "validationRoleFloor" | "validationNamedUsers"
+        "id" | "syncRole" | "completionSettings" | "allowSelfValidation" | "validationRoleFloor" | "validationNamedUsers" | "validationCount"
       >
     | null
     | undefined
@@ -321,7 +347,16 @@ export function workspaceBatchValidateOptions(args: {
     noPermissionReason: roleCanValidate && scope?.reason === "allowlist" ? "allowlist" : "role",
     hasTarget: Boolean(project?.id && activeFileId),
     allowSelfValidation: project?.allowSelfValidation,
+    validationCount: readValidationCount({ validationCount: project?.validationCount }),
   }
+}
+
+/** True when this cell already has as many signatures as the project requires. */
+export function hasEnoughSignatures(
+  cell: { activeValidators?: readonly string[] | null },
+  validationCount?: number,
+): boolean {
+  return (cell.activeValidators?.length ?? 0) >= readValidationCount({ validationCount })
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +591,8 @@ export function batchValidateConfirmDescription(
   t: Translate,
   joinList: JoinList,
   chunkSize?: number | null,
+  /** A chapter run finishes that chapter. The file run finishes the file. */
+  scope: "file" | "chapter" = "file",
 ): string {
   // The dead-end outcomes borrow the toast's wording rather than mint a second
   // phrasing for "your role cannot do this" in the nav namespace.
@@ -588,14 +625,22 @@ export function batchValidateConfirmDescription(
   if (summary.outcome === "nothing-eligible") {
     // No chunk note here: how a run would be written is not why it will do
     // nothing, and saying so would read as the reason.
-    return t("nav.workspaceActions.batchValidate.nothingToValidate") + skippedClause
+    const lead = scope === "chapter"
+      ? t("nav.workspaceActions.batchValidate.nothingInChapter")
+      : t("nav.workspaceActions.batchValidate.nothingToValidate")
+    return lead + skippedClause
   }
 
   // AQU-2507: only on a run that will take more than one chunk. On a 40-cell
   // file the sentence would raise a question the reader did not have.
   const chunk = batchValidateChunkSize(chunkSize)
   const chunkNote = summary.validatable.length > chunk
-    ? t("nav.workspaceActions.batchValidate.runsToCompletion", { cap: chunk })
+    ? t(
+      scope === "chapter"
+        ? "nav.workspaceActions.batchValidate.runsToChapter"
+        : "nav.workspaceActions.batchValidate.runsToCompletion",
+      { cap: chunk },
+    )
     : ""
   return (
     t("nav.workspaceActions.batchValidate.willValidate", { count: summary.validatable.length })

@@ -15,11 +15,13 @@
  *   1. Create a project (source en, target fr), import a small file.
  *   2. Translate cell 0 in the default lane.
  *   3. Assert the lane switcher renders at one lane (AQU-1601) and offers Add lane.
- *   4. Open Settings → Languages, add lane "es".
+ *   4. Open Settings → Languages, add lane "es"; opt the project into
+ *      Autopilot under Experimental (AQU-1246 — off for a new project).
  *   5. Back in the workspace, switch to "es".
  *   6. Cell 0's target is EMPTY; Autopilot remains available on the open lane.
  *   7. Type Spanish text, commit (targetLang: "es" on the wire).
- *   8. Switch back to the default lane — the original French text is intact.
+ *   8. Switch back to the first lane ("fr", AQU-1594) — the original French
+ *      text is intact.
  *   9. Switch to "es" again — the Spanish text is intact.
  *
  * AQU-602 / AQU-1601: the lane switcher is the TARGET language tag in the
@@ -53,7 +55,7 @@ test("add target language, switch lane, translate independently per lane", async
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Translate cell 0 in the default (fr) lane.
+  // Translate cell 0 in the first (fr) lane.
   const frenchText = `Bonjour e2e ${Date.now()}`
   await ws.editCell(0, frenchText)
   await expect(ws.cellRow(0)).toContainText(frenchText, { timeout: 5_000 })
@@ -69,6 +71,9 @@ test("add target language, switch lane, translate independently per lane", async
   const settings = new ProjectSettings(alice)
   await settings.openSettings()
   await settings.addTargetLanguage("es")
+  // AQU-1246: a project shows no Autopilot surface until it opts in. Opt in
+  // here so the run control can be checked on each lane below.
+  await settings.optInToAutopilot()
   await settings.backToEditor()
 
   // Back in the workspace: the second lane is in the switcher.
@@ -89,10 +94,11 @@ test("add target language, switch lane, translate independently per lane", async
   await ws.editCell(0, spanishText)
   await expect(ws.cellRow(0)).toContainText(spanishText, { timeout: 5_000 })
 
-  // Switch back to the default lane — the original French text is intact,
-  // untouched by the "es" edit.
-  await ws.switchLane("")
-  expect(await ws.readActiveLane()).toBe("")
+  // Switch back to the first lane — the original French text is intact,
+  // untouched by the "es" edit. That lane is tagged "fr", the project's
+  // target language, not "" (AQU-1594).
+  await ws.switchLane("fr")
+  expect(await ws.readActiveLane()).toBe("fr")
   await expect(ws.cellRow(0)).toContainText(frenchText, { timeout: 5_000 })
   expect(await ws.readTargetText(0)).not.toContain(spanishText)
   await expect(alice.getByRole("button", { name: "Run Autopilot" })).toBeVisible()
@@ -111,6 +117,6 @@ test("add target language, switch lane, translate independently per lane", async
   await ws.waitForEditor()
   if ((await ws.readActiveLane()) !== "es") await ws.switchLane("es")
   await expect(ws.cellRow(0)).toContainText(spanishText, { timeout: 10_000 })
-  await ws.switchLane("")
+  await ws.switchLane("fr")
   await expect(ws.cellRow(0)).toContainText(frenchText, { timeout: 10_000 })
 })

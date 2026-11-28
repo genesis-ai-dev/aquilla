@@ -74,6 +74,9 @@ export const INHERIT_NEVER_KEYS = [
   "validationNamedUsersAudio",
   "importMinRole",
   "milestoneFloor",
+  // AQU-2647: a permission of this project. Copying it would let an upstream
+  // maintainer decide who may edit the next project's source text.
+  "sourceTextFloor",
   "sourceLanguage",
   "targetLanguage",
   "targetLanes",

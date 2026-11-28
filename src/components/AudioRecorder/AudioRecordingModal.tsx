@@ -8,6 +8,7 @@
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
+import { waitingTake } from "@/lib/audio/waiting-take"
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -407,6 +408,7 @@ function GroupedTakes({
   )
 }
 
+export type AudioRecordingModalProps = Props
 
 export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
@@ -1451,7 +1453,28 @@ export function AudioRecordingModal({
       // Fire Whisper transcription in the background — user gets karaoke as
       // soon as the model is ready; doesn't block the auto-advance.
       const fullAudioId = `${result.audioId}.${result.ext}`
-      void transcribeCell({
+      // AQU-2426 (review, Nov 9): while the take waits at the hourly limit it
+      // is kept as a one-row transcription run, so a reload during the wait
+      // (up to 15 minutes) no longer leaves it untranscribed for good: the
+      // page that opens this file next carries it on. Kept under the file
+      // that is open (a cue's own file is hidden), and only for the recording
+      // slot, which is the take a carried-on run reads.
+      const openFileId = filmOwnerId ?? activeCell.fileId
+      const waiting = waitingTake({
+        audioId: fullAudioId,
+        keep: session && targetSlot === RECORDING_SLOT
+          ? {
+              projectId: project.id,
+              fileId: openFileId,
+              fileName: project.files?.find((f) => f.id === openFileId)?.name ?? "",
+              cellId: activeCell.id,
+              username: session.username,
+              lane: laneTag ?? "",
+              ...(laneLanguageForTag(laneTag ?? "", project.lanes) ? { targetLanguage: laneLanguageForTag(laneTag ?? "", project.lanes)! } : {}),
+            }
+          : null,
+      })
+      void Promise.resolve(transcribeCell({
         cell: {
           ...activeCell,
           selectedAudioId: fullAudioId,
@@ -1482,10 +1505,13 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-2426: past the hourly limit the take waits and transcribes by
+        // itself once the limit allows, rather than staying untranscribed.
+        onRateLimited: waiting.onRateLimited,
         // AQU-1978: …and the lane, for the same reason: the timings re-attach
         // deselects within the lane it names, and naming none meant `''`.
         ...(laneTag ? { targetLang: laneTag } : {}),
-      })
+      })).finally(waiting.settled)
       scheduleAutoAdvance()
     } catch (e) {
       // A network failure that raced the online flag reads as the same
@@ -1499,7 +1525,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, project.files, filmOwnerId, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //

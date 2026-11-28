@@ -154,9 +154,6 @@ export function AdminTenantsSection({
           const linkClass = "text-xs text-primary hover:underline"
           return (
             <div className="flex justify-end gap-3 whitespace-nowrap">
-              <button type="button" className={linkClass} onClick={open("/members")}>
-                Members
-              </button>
               <button type="button" className={linkClass} onClick={open("/access")}>
                 People &amp; access
               </button>

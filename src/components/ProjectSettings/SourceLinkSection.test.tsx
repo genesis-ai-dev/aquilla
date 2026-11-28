@@ -226,3 +226,15 @@ describe("SourceLinkSection — followed-file scope (AQU-1559)", () => {
     expect(screen.getByText("2 of 2 files")).toBeTruthy()
   })
 })
+
+describe("SourceLinkSection — a Contributor's reason line (AQU-2549)", () => {
+  // WHY (evidence pass): the greyed buttons are Choose files, Join and Detach,
+  // and the line under them spoke only of detaching.
+  it("names every greyed action, joining and replacing included", () => {
+    renderSection({ sourceLinkCursor: 42, roleLevel: 400 })
+    expect(
+      screen.getByText("Project Lead or above required to choose, join or replace files, or detach from source."),
+    ).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Join a copy into my file" }).hasAttribute("disabled")).toBe(true)
+  })
+})

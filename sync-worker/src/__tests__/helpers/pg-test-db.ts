@@ -4,19 +4,19 @@
 // code path (the Postgres shim) against a real Postgres engine, so dialect +
 // FTS (tsvector) are validated for real. Schema is the canonical db/postgres/
 // schema.sql. Use makeTestDb() per suite; call reset() between tests.
+//
+// Every makeTestDb() is its own database, loaded from the one template the
+// run built (db/shared/test-pg-harness.ts) rather than bootstrapped and
+// schema'd from nothing each time. One made inside a test is closed by the
+// harness once a later test has gone by without using it; one made in
+// beforeAll is the suite's to close (helpers/test-db-lifetime.ts).
 import { PGlite } from "@electric-sql/pglite"
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
-import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { TEST_PG_RESET_SQL, TEST_PG_SESSION_SQL, testPgTemplate } from "../../../../db/shared/test-pg-harness"
 import { guardPoolOverflow } from "../../../../db/shared/test-pool-guard"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
-
-const SCHEMA = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
-  "utf8",
-)
+import { closeFinishedTestDbs, trackTestDb } from "./test-db-lifetime"
 
 /**
  * AQU-1543: the most bound values postgres.js — the driver every worker reaches
@@ -122,7 +122,7 @@ export interface TestDb {
   rows<T = Record<string, unknown>>(table: string): Promise<T[]>
   /** All public tables as { tableName: rows[] } — async drop-in for db._tables(). */
   snapshot(): Promise<Record<string, Array<Record<string, unknown>>>>
-  /** Truncate every app table (RESTART IDENTITY) — call between tests. */
+  /** Empty every app table and restart its identities — call between tests. */
   reset(): Promise<void>
   close(): Promise<void>
 }
@@ -227,10 +227,13 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
   // same ids/seqs across independent databases, so clear it here or a
   // previous test's ordering leaks into this one.
   resetChainCacheForTests()
-  const pg = new PGlite()
-  await pg.exec(SCHEMA)
-  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
-  await installTestLaneFill((sql) => pg.exec(sql))
+  // The template carries the schema and the lane-fill trigger (lane_id is
+  // NOT NULL; tests that omit it get a lane minted by that trigger). The
+  // session setting that switches the fill on is this database's own.
+  await closeFinishedTestDbs()
+  const pg = new PGlite({ loadDataDir: await testPgTemplate(() => new PGlite()) })
+  trackTestDb(pg)
+  await pg.exec(TEST_PG_SESSION_SQL)
   // Lanes before content rows, so an explicit seed lane wins over a minted one.
   const seeded = Object.entries(seed).filter(([table, rows]) => rows && table !== "cells_fts")
   seeded.sort((a, b) => Number(b[0] === "lanes") - Number(a[0] === "lanes"))
@@ -272,11 +275,7 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
     },
     reset: async () => {
       resetChainCacheForTests() // same reason as in makeTestDb above
-      await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
-        FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
-          EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-        END LOOP; END $$;`)
-      await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
+      await pg.exec(TEST_PG_RESET_SQL)
     },
     close: () => pg.close(),
   }

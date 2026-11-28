@@ -99,6 +99,7 @@ export function dispatchEvent(
     case 'cell.audio.rename':
     case 'cell.audio.trim':
     case 'cell.audio.gain':
+    case 'cell.audio.even':
     case 'cell.audio.place':
     case 'cell.audio.cut':
     case 'cell.audio.uncut':

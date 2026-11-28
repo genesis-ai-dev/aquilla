@@ -1,13 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useContext, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { createMediaFileCommit, probeMediaDurationMs,
+import { createMediaFileCommit, measureByDecodingMs, probeMediaDurationMs,
   type EmitParsedFileResult, type ImportContext } from "@/lib/import"
 import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
-import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
+import { embeddedCaptionsUnread, mayCarryEmbeddedCaptions, prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
+import { RecordingImportChoiceDialog } from "./RecordingImportChoiceDialog"
+import { localTranscribeChoice, TranscribeChoiceContext, type TranscribeChoiceInfo } from "./recording-choice-context"
 import { FramesAsHundredthsNotice, useFramesAsHundredths } from "./FramesAsHundredthsNotice"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
@@ -17,9 +20,14 @@ import { prepareYouTubeCaptionImport,
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { detectFileType, isMediaFileType, type FileReference } from "@/lib/parsers/types"
 
-export function YouTubeImportPanel({ ctx, onImported }: {
+export function YouTubeImportPanel({ ctx, onImported, mediaDisabledReason = null }: {
   ctx: ImportContext
   onImported: (refs: FileReference[]) => void | Promise<void>
+  /** AQU-2682: set when the original audio or video may not be imported: it
+   *  is stored as the file's source audio, which needs access to every
+   *  language (the reason is shown and the media is refused before it is
+   *  read or uploaded), or the answer is not in yet. Same as Upload files. */
+  mediaDisabledReason?: string | null
 }) {
   const t = useT()
   const id = useId()
@@ -34,7 +42,10 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     videoUrl: string
     sources: MediaTextSourceOption[]
     durationMs?: number
+    /** AQU-2426: with no captions to use, the last step asks whole or transcribed. */
+    choice?: TranscribeChoiceInfo
   } | null>(null)
+  const prepareTranscribeChoice = useContext(TranscribeChoiceContext)
   const [preview, setPreview] = useState<PreparedYouTubeCaptionImport | PreparedYouTubePictureImport | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,27 +81,35 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     reset()
     try {
       if (source === "media") {
+        if (mediaDisabledReason) throw new Error(mediaDisabledReason)
         if (!media) throw new Error("Choose your original audio or video.")
         const fileType = detectFileType(media.name)
         if (!fileType || !isMediaFileType(fileType)) {
           throw new Error("Choose a supported audio or video file.")
         }
         // AQU-1853: multipart upload handles anything over the single-request cap.
-        if (media.size === 0 || media.size > MAX_AUDIO_OBJECT_BYTES) {
-          throw new Error("Choose a non-empty audio or video within the upload limit.")
-        }
+        if (media.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: media.name }))
+        if (media.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(media.name))
         const prepared = prepareYouTubePictureImport({ url, name: media.name })
-        const sources = /\.(mp4|m4a)$/i.test(media.name)
+        // AQU-2344 (review, Nov 9): Upload files' own guard. Looking for
+        // captions holds the whole file in memory, so a film over the source
+        // ceiling is not read for them; the last step says it wasn't checked.
+        const sources = mayCarryEmbeddedCaptions(media.name) && !embeddedCaptionsUnread(media)
           ? prepareEmbeddedSubtitleSources(await media.arrayBuffer()).map((option, index) => ({
             ...option, label: t(option.language
               ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
               number: index + 1, language: option.language ?? "",
             }),
           })) : []
-        const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+        // AQU-2426 (review, Nov 9): a browser recording's length is not in
+        // its header; measured by decoding, as the import itself does.
+        const durationMs = await probeMediaDurationMs(media).catch(() => measureByDecodingMs(media)).catch(() => undefined)
+        const choice = sources.length > 0 ? undefined : prepareTranscribeChoice
+          ? await prepareTranscribeChoice([durationMs]).catch(() => localTranscribeChoice(ctx.author, [durationMs]))
+          : localTranscribeChoice(ctx.author, [durationMs])
         active.signal.throwIfAborted()
         setMediaReview({ file: media, fileType: fileType as "audio" | "video",
-          videoUrl: prepared.videoUrl, sources, durationMs })
+          videoUrl: prepared.videoUrl, sources, durationMs, ...(choice ? { choice } : {}) })
         return
       }
       let prepared: PreparedYouTubeCaptionImport | PreparedYouTubePictureImport
@@ -146,21 +165,41 @@ export function YouTubeImportPanel({ ctx, onImported }: {
   }
   return (
     <>
-    {mediaReview && <MediaImportPreviewDialog
-      mediaName={mediaReview.file.name} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs} busy={busy}
-      confirmLabel={t("importExport.youtube.importMedia")}
-      onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => {
+    {mediaReview && (() => {
+      const importWith = (mediaTextSource: MediaTextSourceOption["source"] | undefined, mediaMode?: "whole" | "transcribe") => {
+        // The answer may have changed while the preview was open.
+        if (mediaDisabledReason) {
+          setMediaReview(null)
+          setError(mediaDisabledReason)
+          return
+        }
         const active = controller.current
         const mediaCommit = createMediaFileCommit(mediaReview.file, mediaReview.fileType, {
           ...ctx, mediaPictureUrl: mediaReview.videoUrl, mediaTextSource,
+          ...(mediaMode ? { mediaMode } : {}),
           signal: ctx.signal ? AbortSignal.any([ctx.signal, active.signal]) : active.signal,
         })
         commit.current = async () => ({ ref: await mediaCommit(), speakerPairs: [] })
         setPreview(prepareYouTubePictureImport({ url: mediaReview.videoUrl, name: mediaReview.file.name }))
         setMediaReview(null)
         void publish()
-      }} />}
+      }
+      // AQU-2426: no captions to use — whole, or transcribed, chosen here; with
+      // captions there is no question and "Transcribe audio" is gone.
+      return mediaReview.choice ? <RecordingImportChoiceDialog
+        files={[{ name: mediaReview.file.name, sizeBytes: mediaReview.file.size, durationMs: mediaReview.durationMs, isVideo: mediaReview.fileType === "video",
+          captionsNotRead: embeddedCaptionsUnread(mediaReview.file) }]}
+        block={mediaReview.choice.block} cost={mediaReview.choice.cost}
+        languageTag={mediaReview.choice.languageTag} credits={mediaReview.choice.credits} busy={busy}
+        onCancel={() => setMediaReview(null)}
+        onWhole={() => importWith(undefined, "whole")}
+        onTranscribe={() => importWith(undefined, "transcribe")} /> : <MediaImportPreviewDialog
+        mediaName={mediaReview.file.name} sources={mediaReview.sources}
+        durationMs={mediaReview.durationMs} busy={busy} allowAutomatic={false}
+        frameCheck={{ filmFile: mediaReview.file }}
+        confirmLabel={t("importExport.youtube.importMedia")}
+        onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => importWith(mediaTextSource)} />
+    })()}
     <div className="space-y-4" aria-busy={busy}>
       <p className="text-sm text-muted-foreground">
         {t("importExport.youtube.description")}
@@ -207,6 +246,9 @@ export function YouTubeImportPanel({ ctx, onImported }: {
             reset()
           }} />
         <p className="text-sm text-muted-foreground">{t("importExport.youtube.mediaHint")}</p>
+        {mediaDisabledReason && <p data-testid="youtube-media-disabled" className="text-sm text-muted-foreground">
+          {mediaDisabledReason}
+        </p>}
       </div>}
       <Button onClick={() => void read()} disabled={busy || !url.trim()
         || (source === "captions" ? !file : source === "media" ? !media : !name.trim())}>
@@ -215,6 +257,13 @@ export function YouTubeImportPanel({ ctx, onImported }: {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {shown && <>
         {frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
+        {/* Import map X-D-silent-cue-drop: Upload files' own notice, for the
+            same file read through this door. */}
+        {"droppedCues" in shown && shown.droppedCues > 0 && (
+          <p data-testid="youtube-captions-unreadable" className="text-sm text-amber-700 dark:text-amber-400">
+            {t("importExport.notices.subtitleCuesUnreadable", { count: shown.droppedCues })}
+          </p>
+        )}
         {shown.strings.length === 0 ? <p className="font-medium">{shown.name}</p>
           : <div className="max-h-72 overflow-auto rounded-md border">
           <table className="w-full text-sm">

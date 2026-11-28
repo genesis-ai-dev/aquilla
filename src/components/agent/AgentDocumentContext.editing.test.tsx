@@ -170,7 +170,7 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     fireEvent.keyDown(target, { key: "Enter" })
     expect(row.querySelector(".ProseMirror")).not.toBeInTheDocument()
     expect(within(row).getByText("Bob is editing")).toBeInTheDocument()
-    expect(within(row).getByRole("button", { name: "Read-only (imported from git)" })).toBeDisabled()
+    expect(within(row).getByRole("button", { name: "Read-only (imported from Git)" })).toBeDisabled()
     // AQU-200: comments/history live behind the rail's `⋯`; the popup portals
     // to the body, so query it off `screen` once the row's overflow is open.
     fireEvent.click(within(row).getByRole("button", { name: "More actions" }))
@@ -224,7 +224,7 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     view.rerender(<AgentDocumentContext workspace={{ ...data, isCompletionAvailable: false }} />)
     expect(within(empty).getByRole("button", { name: "AI service unavailable — try again shortly" })).toBeDisabled()
     view.rerender(<AgentDocumentContext workspace={{ ...data, completing: new Map([["c2", "generating"]]) }} />)
-    expect(within(empty).getByRole("button", { name: "Generating…" })).toBeDisabled()
+    expect(within(empty).getByRole("button", { name: "Translating…" })).toBeDisabled()
     expect(data.onDraftTarget).toHaveBeenCalledTimes(2)
   })
 

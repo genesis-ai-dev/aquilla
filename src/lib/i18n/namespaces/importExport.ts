@@ -64,7 +64,7 @@ export const importExport = defineNamespace({
     "importExport.scriptAlignment.trackName": "Track name",
     "importExport.scriptAlignment.destination": "Destination track",
     "importExport.scriptAlignment.newTrack": "New track",
-    "importExport.scriptAlignment.overwrite": "{count} segments in this track will be overwritten.",
+    "importExport.scriptAlignment.overwrite": plural({ one: "{count} segment in this track will be overwritten.", other: "{count} segments in this track will be overwritten." }),
     "importExport.scriptAlignment.align": "Align script",
     "importExport.scriptAlignment.aligning": "Aligning script…",
     "importExport.scriptAlignment.use": "Use aligned segments",
@@ -115,7 +115,7 @@ export const importExport = defineNamespace({
 
     // — Google Drive import panel (AQU-823) —
     "importExport.googleDrive.notConfigured":
-      "Google Drive import isn't configured for this deployment (missing VITE_GOOGLE_CLIENT_ID / VITE_GOOGLE_API_KEY).",
+      "Google Drive import isn't configured on this site. Ask an administrator to enable it.",
     "importExport.googleDrive.description":
       "Pick files or a whole folder from your Google Drive. Only the items you pick are shared with Aquilla. Google Docs import as DOCX.",
     "importExport.googleDrive.waiting": "Waiting for Google…",
@@ -365,7 +365,7 @@ export const importExport = defineNamespace({
     "importExport.landing.noMatches": "No importer matches “{filter}”.",
     "importExport.landing.badgeSoon": "Soon",
     "importExport.landing.badgeBeta": "Beta",
-    "importExport.landing.comingSoonTooltip": "Coming soon — {title} import is tracked for a later release",
+    "importExport.landing.comingSoonTooltip": "Coming soon — {title} import is planned for a future release",
 
     "importExport.landing.upload.title": "Upload files",
     "importExport.landing.upload.description":
@@ -405,7 +405,7 @@ export const importExport = defineNamespace({
     "importExport.landing.tn.title": "Translation Notes",
     "importExport.landing.tn.hint": "TSV",
     "importExport.landing.tn.description": "unfoldingWord notes, shown beside the matching verse as you translate.",
-    "importExport.landing.biblica.title": "Biblica Study Bible Notes",
+    "importExport.landing.biblica.title": "Biblica Study Bible notes",
     "importExport.landing.biblica.hint": "IDML",
     "importExport.landing.biblica.description":
       "Notes from an InDesign study Bible, Treasure Hunt Bible or Reach 4 Life package — imports the notes only and leaves the scripture untouched.",
@@ -419,20 +419,20 @@ export const importExport = defineNamespace({
     "importExport.landing.youtube.title": "YouTube video",
     "importExport.landing.youtube.description":
       "Link a film, bring captions, or generate them from your original media.",
-    "importExport.youtube.description": "Link a YouTube picture now, or add a text source for timed segments.",
+    "importExport.youtube.description": "Link a YouTube film now, or add a text source for timed segments.",
     "importExport.youtube.source": "Caption source",
     "importExport.youtube.aboutCaptions": "About YouTube captions",
     "importExport.youtube.pictureOnly": "Link the film only",
     "importExport.youtube.captionExport": "Import a caption export",
     "importExport.youtube.originalMedia": "Use original audio or video",
-    "importExport.youtube.name": "Video name",
+    "importExport.youtube.name": "Film name",
     "importExport.youtube.previewImport": "Preview import",
     "importExport.youtube.linkVideo": "Link film",
     // AQU-1566 (option b): a link-only file's first captions become its rows,
     // attached by a maintainer from its Text view, with no track-editing switch.
     "importExport.youtube.pictureHint": "A maintainer can attach captions later from this file's Text view. They become its rows, ready to translate.",
     "importExport.youtube.media": "Your original audio or video",
-    "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your ASR settings, or review embedded caption tracks if present.",
+    "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your transcription settings, or review embedded caption tracks if present.",
     "importExport.youtube.captionHint": "Export your captions from YouTube Studio as VTT, SRT, or SBV. YouTube’s player can display captions, but does not share caption text or audio with Aquilla. Text drawn into the video picture is not a subtitle track.",
     "importExport.youtube.importMedia": "Import media and link the film",
     "importExport.youtube.link": "YouTube video link",
@@ -443,11 +443,11 @@ export const importExport = defineNamespace({
     "importExport.youtube.text": "Caption text",
     "importExport.landing.gdrive.title": "Google Drive",
     "importExport.landing.gdrive.hint": "cloud",
-    "importExport.landing.sdbh.title": "SDBH Hebrew Lexicon",
+    "importExport.landing.sdbh.title": "SDBH Hebrew lexicon",
     "importExport.landing.sdbh.hint": "UBS MARBLE",
     "importExport.landing.sdbh.description":
       "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML.",
-    "importExport.landing.tm.title": "Translation Memory",
+    "importExport.landing.tm.title": "Translation memory",
     "importExport.landing.tm.hint": "TMX",
     "importExport.landing.tm.description": "Import source/target pairs from a TMX memory file.",
 
@@ -489,13 +489,12 @@ export const importExport = defineNamespace({
 
     // — Bible API (helloao.org) panel —
     "importExport.helloao.description":
-      "Import a Bible translation from the {link} — over 1,000 versions with section " +
-      "headings and formatting. You can import the whole bible, a single testament, or individual books.",
+      "Import a Bible translation from the {link} — over 1,000 versions with section headings and formatting. You can import the whole Bible, a single testament, or individual books.",
     "importExport.helloao.apiLinkText": "Free Use Bible API",
-    "importExport.helloao.searchPlaceholder": "Search by language, name, or id (e.g. 'English', 'BSB')",
+    "importExport.helloao.searchPlaceholder": "Search by language, name, or ID (e.g. 'English', 'BSB')",
     "importExport.helloao.searchAriaLabel": "Search Bible translations",
     "importExport.helloao.failedToLoadList": "Failed to load list: {error}",
-    "importExport.helloao.loadingTranslations": "Loading translations...",
+    "importExport.helloao.loadingTranslations": "Loading translations…",
     "importExport.helloao.languageAndBookCount": plural(
       { one: "{language} · {count} book", other: "{language} · {count} books" },
       "count",
@@ -505,7 +504,7 @@ export const importExport = defineNamespace({
     "importExport.helloao.failedToLoadBooks": "Failed to load books: {error}",
     "importExport.helloao.loadingBooks": "Loading books…",
     "importExport.helloao.presetAriaLabel": "Book selection preset",
-    "importExport.helloao.presetWholeBible": "Whole bible",
+    "importExport.helloao.presetWholeBible": "Whole Bible",
     "importExport.helloao.presetOldTestament": "Old Testament",
     "importExport.helloao.presetNewTestament": "New Testament",
     "importExport.helloao.booksSelected": "{checked} of {total} books",
@@ -529,7 +528,7 @@ export const importExport = defineNamespace({
     "importExport.ebible.targetDescription":
       "Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and " +
       "fill the target column. A review step lets you keep or replace any existing target content.",
-    "importExport.ebible.searchPlaceholder": "Search by language, title, or id (e.g. 'English', 'KJV')",
+    "importExport.ebible.searchPlaceholder": "Search by language, title, or ID (e.g. 'English', 'KJV')",
     "importExport.ebible.searchAriaLabel": "Search eBible translations",
     "importExport.ebible.otBooks": "{count} OT",
     "importExport.ebible.ntBooks": "{count} NT",
@@ -540,10 +539,10 @@ export const importExport = defineNamespace({
     "importExport.ebible.nextReviewMatches": "Next: Review matches",
     "importExport.ebible.preparationFailed": "Preparation failed",
     "importExport.ebible.applyFailed": "Apply failed",
-    "importExport.ebible.committingVerses": "Committing {enqueued} / {total} verses…",
-    "importExport.ebible.committingVersesIndeterminate": "Committing verses…",
-    "importExport.ebible.targetCommitted": "Target verses committed.",
-    "importExport.ebible.targetCommittedHint": "The target column will update as the server projection lands.",
+    "importExport.ebible.committingVerses": "Saving {enqueued} / {total} verses…",
+    "importExport.ebible.committingVersesIndeterminate": "Saving verses…",
+    "importExport.ebible.targetCommitted": "Target verses saved.",
+    "importExport.ebible.targetCommittedHint": "The target column will update shortly as the server finishes saving.",
 
     // — Paratext project preview/choice panel —
     "importExport.paratext.couldNotReadProject": "Couldn't read the project",
@@ -615,6 +614,12 @@ export const importExport = defineNamespace({
     "importExport.upload.zipOrFolder": ".zip or folder",
     "importExport.upload.categoryOtherFormats": "Other formats",
     "importExport.upload.otherFormatsHint": "AI-assisted when configured, always reviewed before import",
+    // AQU-2682: the Upload files panel for a Project Lead the server will not
+    // take source audio from (his access does not cover every language), and
+    // the moment before the server has answered.
+    "importExport.upload.mediaNeedsEveryLanguage":
+      "Importing audio or video adds the recording every language shares, so it needs access to every language in this project. A maintainer can import it.",
+    "importExport.upload.mediaAccessChecking": "Checking whether you can import audio or video. Try again in a moment.",
 
     // — Main ImportDialog shell (title bar + top-level error frames) —
     "importExport.dialog.titleDirection": "Set translation direction",
@@ -685,8 +690,7 @@ export const importExport = defineNamespace({
       "(media lines use their transcription).",
     "importExport.format.md.label": "Markdown",
     "importExport.format.md.description":
-      "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
-      "blocks keep source (media lines use their transcription).",
+      "Round-trip Markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
     // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
     // longer says it is dropped. Wording approved by Ryder on the ticket
@@ -760,7 +764,7 @@ export const importExport = defineNamespace({
       "shows progress, lets you cancel, and tells you when the download starts.",
     "importExport.dialog.episodeConfirmStart": "Start export",
     "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
-    "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
+    "importExport.status.exportCancelled": "Export canceled. Nothing was downloaded.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
@@ -770,6 +774,17 @@ export const importExport = defineNamespace({
       "Adds each heading's recording to its chapter file, in reading order. Off keeps the file to verses only.",
     // AQU-1575: the broadcast deliverable LOTE's vendor asked for, by name.
     "importExport.dialog.lineAudioWav": "Convert every recording to WAV (16-bit, 48 kHz, mono)",
+    // Sam, question 93: an audio export's mono loudness.
+    "importExport.dialog.monoLoudness": "Mono loudness",
+    "importExport.dialog.monoLoudnessHeard": "As heard",
+    "importExport.dialog.monoLoudnessMeter": "As a single-channel meter reads it",
+    "importExport.dialog.monoLoudnessInfoLabel": "About mono loudness",
+    "importExport.dialog.monoLoudnessInfo":
+      "A mono file plays on both speakers, so it sounds about 3 dB louder than one channel measures. Pick the meter reading if a delivery checks mono files on a loudness meter. Every export is mono today, and only evened-out takes change.",
+    "importExport.dialog.monoLoudnessHeld": plural({
+      one: "{count} take can’t go all the way up to the meter reading; it’d distort or raise too much hiss.",
+      other: "{count} takes can’t go all the way up to the meter reading; they’d distort or raise too much hiss.",
+    }),
     "importExport.dialog.lineAudioWavHint":
       "For broadcast delivery. Off copies each recording as it was saved, which may be compressed or at a lower sample rate.",
     "importExport.dialog.chapterStitchPreview":
@@ -781,8 +796,7 @@ export const importExport = defineNamespace({
     }),
     "importExport.format.characterSheets.label": "Character sheets (corrected)",
     "importExport.format.characterSheets.description":
-      "Both character spreadsheets back — subtitle and audio — in her own columns, with every " +
-      "resolved disagreement applied. Lines still in dispute go back exactly as they came.",
+      "Exports both character spreadsheets — subtitle and audio — in their original columns, with every resolved disagreement applied. Lines still in dispute stay unchanged.",
     "importExport.format.projectReport.label": "Project report",
     "importExport.format.projectReport.description":
       "One document for the whole project: open disagreements, what is recorded and what is not, " +
@@ -841,7 +855,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.permissionsLinkText": "Roles & permissions — help.aquilla.app",
     "importExport.dialog.validationDoesNotBlockAriaLabel": "Validation flags do not block export",
     "importExport.dialog.outstandingFlagsNote": plural({
-      one: "This file has {count} outstanding validation flag (terminology, HTML/markup, punctuation, etc.). These {wontBlock} — download now and resolve them anytime.",
+      one: "This file has {count} outstanding validation flag (terminology, HTML/markup, punctuation, etc.). This {wontBlock} — download now and resolve it anytime.",
       other: "This file has {count} outstanding validation flags (terminology, HTML/markup, punctuation, etc.). These {wontBlock} — download now and resolve them anytime.",
     }),
     "importExport.dialog.wontBlockExport": "won't block your export",
@@ -870,9 +884,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.contentModeCurrent": "Current translations",
     "importExport.dialog.contentModeValidatedOnly": "Validated translations only",
     "importExport.dialog.contentModeCurrentHint":
-      "Every cell's current text — validated, unvalidated draft and AI draft alike. " +
-      "Untranslated cells are filled with the source text, so the file will not show " +
-      "which parts are approved.",
+      "Every cell's current text — validated, unvalidated draft and AI draft alike. Untranslated cells are filled with the source text, so the file will not show which parts are validated.",
     "importExport.dialog.contentModeValidatedOnlyHint":
       "Only cells that meet this project's validation threshold. Everything else is left " +
       "out — no unreviewed drafts and no source-language filler.",
@@ -1063,7 +1075,7 @@ export const importExport = defineNamespace({
     "importExport.status.fetchingOriginalDocument": "Fetching original document…",
     "importExport.status.fetchingOriginalPresentation": "Fetching original presentation…",
     "importExport.status.injectingTranslations": "Injecting translations…",
-    "importExport.status.downloadedNoTranslations": "Downloaded {fileName} (no translations to inject — download original structure)",
+    "importExport.status.downloadedNoTranslations": "Downloaded {fileName} (no translations to inject — downloaded original structure)",
     "importExport.status.downloadedParagraphsTranslated": plural({
       one: "Downloaded {fileName} ({count} paragraph translated)",
       other: "Downloaded {fileName} ({count} paragraphs translated)",
@@ -1074,7 +1086,7 @@ export const importExport = defineNamespace({
       other: "Downloaded {fileName} ({count} values translated)",
     }),
     "importExport.status.validatingProtectedTranslations": "Validating protected translations…",
-    "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original bytes returned unchanged)",
+    "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original file returned unchanged)",
     // A file whose source a link replaced keeps the lines only it had; their
     // paragraphs are not in the linked package, so the export leaves them out.
     "importExport.status.idmlLinesLeftOut": plural({
@@ -1125,13 +1137,13 @@ export const importExport = defineNamespace({
     "importExport.errors.ebibleEmptyCorpus":
       "\"{title}\" is not available for download. The eBible corpus file exists but contains no " +
       "text — this translation may be restricted due to copyright.",
-    "importExport.errors.noImportableContent": "{fileName} did not contain any content the {fileType} adapter could import.",
-    "importExport.errors.sandboxFallbackFailed": "{primary}. Sandbox fallback also failed: {fallback}",
+    "importExport.errors.noImportableContent": "{fileName} did not contain any content the {fileType} importer could read.",
+    "importExport.errors.sandboxFallbackFailed": "{primary}. AI-assisted import also failed: {fallback}",
     "importExport.errors.importCouldNotPublish": "Import could not publish any files: {reason}",
     "importExport.errors.emptyFile": "{fileName} is empty.",
     "importExport.errors.unsupportedFileTypeSignIn": "Unsupported file type: {fileName}. Sign in to use AI-assisted format detection.",
     "importExport.errors.obsListFailed": "Failed to list Open Bible Stories content.",
-    "importExport.errors.importCancelled": "Import cancelled",
+    "importExport.errors.importCancelled": "Import canceled",
     "importExport.errors.obsDownloadIncomplete": "Open Bible Stories download was incomplete: {files}. Nothing was imported.",
     "importExport.errors.obsNoFilesDownloaded": "No OBS story files could be downloaded",
     "importExport.errors.obsNoFrames": "Open Bible Stories downloaded but produced no frames — check the source.",
@@ -1154,13 +1166,11 @@ export const importExport = defineNamespace({
       "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
-      "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
-      "paragraph styles — check that this is the notes document.",
+      "{fileName} parsed successfully but contained no study notes. Biblica notes live in \"intro:*\" paragraph styles — check that this is the notes document.",
     "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
-    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the {limit} media import limit.",
+    "importExport.errors.mediaFileTooLarge": "{fileName} is larger than {limit}, so it can't be imported. Save a smaller copy and import that.",
     "importExport.errors.couldNotDecodeAudio":
-      "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try " +
-      "re-exporting it as mp3 or wav.",
+      "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try re-exporting it as MP3 or WAV.",
     "importExport.errors.notAParatextProject":
       "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
 
@@ -1223,21 +1233,22 @@ export const importExport = defineNamespace({
 
     // — Thrown-error triage: src/lib/sync/source-upload.ts —
     "importExport.errors.sourceUploadEmpty": "Source upload failed: the original file is empty.",
+    // Import map X-D-film-refusal-text: the server's refusal of a film address.
+    "importExport.errors.filmRefused":
+      "This film couldn't be saved with the file. Only a YouTube video's link, or a film uploaded with this file, can be.",
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
     "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
     "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",
     "importExport.errors.sourceUploadRefused": "Source upload failed: {reason}",
     "importExport.errors.sourceUploadFailed": "Source upload failed",
-    "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
-    "importExport.errors.artifactBindingRefused": "Artifact binding failed: {reason}",
-    "importExport.errors.artifactBindingFailed": "Artifact binding failed",
+    "importExport.errors.artifactBindingNetworkFailed": "Couldn't attach original file: {detail}",
+    "importExport.errors.artifactBindingRefused": "Couldn't attach original file: {reason}",
+    "importExport.errors.artifactBindingFailed": "Couldn't attach original file",
 
     // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
     "importExport.errors.unchainableTargetCells": plural({
       one:
-        "Import failed: {count} of the {total} selected lines has no event to chain the " +
-        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
-        "finish loading, then import again.",
+        "Import failed: {count} of the {total} selected lines is not ready to receive a translation yet, so nothing was saved. Close and reopen the file so its lines finish loading, then import again.",
       other:
         "Import failed: {count} of the {total} selected lines have no event to chain the " +
         "translation onto, so nothing was saved. Close and reopen the file so its lines " +
@@ -1349,7 +1360,7 @@ export const importExport = defineNamespace({
         "serves any of them.",
     }),
     "importExport.dcs.resyncRemovalWarning": plural({
-      one: "{count} cell will be removed — translations attached to them will be hidden.",
+      one: "{count} cell will be removed — translations attached to it will be hidden.",
       other: "{count} cells will be removed — translations attached to them will be hidden.",
     }),
     "importExport.dcs.resyncRepaired": plural({
@@ -1364,10 +1375,10 @@ export const importExport = defineNamespace({
     "importExport.dcs.stagePreprod": "Pre-release",
     "importExport.dcs.stageProd": "Released (prod)",
     "importExport.dcs.subjectFilterLabel": "Subject",
-    "importExport.dcs.syncTokenError": "Could not mint a sync token for this project.",
+    "importExport.dcs.syncTokenError": "Could not verify permission to sync this project.",
     "importExport.dcs.trackingHead": "tracking HEAD",
     "importExport.dcs.trackingRelease": "tracking release",
-    "importExport.dcs.unsupportedResourceTooltip": "Aquilla can't import this resource type yet (tracked in AQU-615)",
+    "importExport.dcs.unsupportedResourceTooltip": "Aquilla can't import this resource type yet.",
     "importExport.dcs.updateAvailable": plural({
       one: "{oldRef} → {newRef}, {count} file changed",
       other: "{oldRef} → {newRef}, {count} files changed",
@@ -1383,10 +1394,10 @@ export const importExport = defineNamespace({
     "importExport.linked.removedUpstreamBadge": "removed upstream",
     "importExport.linked.repinRoleRequired": "Reviewer or above required to accept a change; project lead required to " +
       "accept in bulk.",
-    "importExport.linked.selectForBulkAriaLabel": "Select {cell} for bulk repin",
+    "importExport.linked.selectForBulkAriaLabel": "Select {cell} to accept in bulk",
     "importExport.linked.skippedRetranslatedBadge": "skipped — retranslated since",
     "importExport.linked.syncBatchHeading": "Sync batch — {date}",
-    "importExport.linked.syncTokenError": "could not obtain a sync token",
+    "importExport.linked.syncTokenError": "could not verify permission to sync this project",
     "importExport.linked.tombstonedLine": "This line was removed upstream.",
     "importExport.linked.tombstonedTranslationKept": "Its translation is kept: {translation}",
 
@@ -1434,8 +1445,7 @@ export const importExport = defineNamespace({
       "nothing is written to the file until someone approves them.",
     "importExport.proposals.directExplainer": "These translations are written straight into the file as " +
       "committed text.",
-    "importExport.proposals.notStaged": "The proposals could not be staged for review (the plan came back " +
-      "\"{status}\"). Nothing was written.",
+    "importExport.proposals.notStaged": "The proposals could not be staged for review (status: {status}). Nothing was written.",
     "importExport.proposals.tooMany": "This would propose {count} cells, more than the {max} a single review can " +
       "show. Narrow the selection (or import in smaller files) so the reviewer can see every proposal.",
     "importExport.proposals.nothingToStage": "Every selected row already matches the current translation, so " +
@@ -1461,6 +1471,8 @@ export const importExport = defineNamespace({
     "importExport.reimport.title": "Re-import {name}",
     "importExport.reimport.oneFile": "Choose one file to re-import.",
     "importExport.reimport.oneDocument": "Re-import takes one document, not a project or a set of books.",
+    "importExport.reimport.mediaCannotReplace": "{fileName} is a recording or film, so it can't replace what's in {name}. You can bring it in as a new file instead.",
+    "importExport.reimport.importMediaAsNew": "Import as a new file",
     "importExport.reimport.update": "Update this file",
     "importExport.reimport.updatedCopy": "Make updated copy",
     "importExport.reimport.blankCopy": "Make a blank copy",
@@ -1497,7 +1509,7 @@ export const importExport = defineNamespace({
     "importExport.preview.epubRoleEmpty": "No text",
     "importExport.preview.includeEpubMember": "Include {title}",
     "importExport.preview.headerSummary": "Preview — {cells} across {files}",
-    "importExport.preview.instructions": "Review what will be imported, then click Confirm to upload.",
+    "importExport.preview.instructions": "Review what will be imported, then click Confirm import to upload.",
     "importExport.preview.needsCarefulReview": "Needs careful review",
     "importExport.preview.recipeNote": "Recipe: {name}. The original is preserved; translated round-trip is not " +
       "yet verified.",
@@ -1593,15 +1605,13 @@ export const importExport = defineNamespace({
     "importExport.review.rivalNotPlaced": "Not placed",
     "importExport.review.rivalOnLine": "Now on: {source}",
     "importExport.review.rowContestedPill": "Contested",
-    "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
+    "importExport.review.rowSharedTiming": "Same timing as another cue — check which is which",
     "importExport.review.rowSharedTimingPill": "Same timing",
     "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.rowSourceDiffersPill": "Source differs",
     "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
     "importExport.review.rowBridgedPill": "Bridged verses",
-    "importExport.review.rowBridged": "The uploaded file joins verses {first}-{last} into one translation, " +
-      "but this file keeps them as separate lines. The whole text goes on verse {first}; " +
-      "the rest of the range gets no text of its own",
+    "importExport.review.rowBridged": "The uploaded file joins verses {first}–{last} into one translation, but this file keeps them as separate lines. The whole text goes on verse {first}; the rest of the range gets no text of its own.",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
@@ -1774,6 +1784,28 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.option.importAll.title": "Import them all",
     "importExport.translationCheck.option.importAll.description": "Adds every file to the project as new source text, those included.",
     "importExport.review.useOtherFile": "Import into {fileName} instead",
+    // AQU-2426: importing and splitting recordings.
+    "importExport.recordingChoice.title": "Import {name}",
+    "importExport.recordingChoice.titleMany": plural({ one: "Import {count} recording", other: "Import {count} recordings" }),
+    "importExport.recordingChoice.description": "No subtitle file came with this recording. Bring it in whole, or transcribe it to find its lines.",
+    "importExport.recordingChoice.descriptionMany": plural({ one: "None of them came with a subtitle file. Choose once for all {count}.", other: "None of them came with a subtitle file. Choose once for all {count}." }),
+    "importExport.recordingChoice.wholeNote": "Whole, it comes in as one line, and you can split it into lines later from its ⋯ menu.",
+    "importExport.recordingChoice.wholeNoteMany": "Whole, each comes in as one line, and you can split them into lines later from their ⋯ menu.",
+    "importExport.recordingChoice.captionsNotRead": "{name} is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    "importExport.recordingChoice.captionsNotReadMany": plural({
+      one: "{count} of these is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+      other: "{count} of these are over {maxSize}, so they were not checked for captions inside them. If they have any, import them as subtitle files along with them.",
+    }),
+    "importExport.recordingChoice.inAll": "In all",
+    "importExport.recordingChoice.list": "Recordings to import",
+    "importExport.recordingChoice.importWhole": plural({ one: "Import whole recording", other: "Import whole recordings" }),
+    "importExport.recordingChoice.importTranscribe": "Import and transcribe…",
+    "importExport.recordingChoice.whyNot": "Why you can't transcribe here",
+    "importExport.recordingChoice.costTitle": "Import and transcribe {name}",
+    "importExport.recordingChoice.costTitleMany": plural({ one: "Import and transcribe {count} recording", other: "Import and transcribe {count} recordings" }),
+    "importExport.recordingChoice.transcribeAndImport": "Transcribe and import",
+    "importExport.recordingChoice.findsLines": "It finds the lines from the words, at sentence ends and real pauses, and fills in each line's text.",
+    "importExport.recordingChoice.later": "You can import the recording whole now and transcribe it later.",
   },
   context: {
     _context: {
@@ -2469,6 +2501,18 @@ export const importExport = defineNamespace({
           count: "Optional pre-rendered '(n/m)' progress suffix, or empty string.",
         },
       },
+      "importExport.upload.mediaNeedsEveryLanguage": {
+        description:
+          "Line on the Upload files panel, and its error when an audio or video file is dropped, for a " +
+          "Project Lead who may not import media: an imported recording is shared by every language, so it " +
+          "needs access to every language of the project, and his does not cover them all. 'Maintainer' is " +
+          "the project role name; match the members screen.",
+      },
+      "importExport.upload.mediaAccessChecking": {
+        description:
+          "Same place, shown briefly (or while offline) while the app asks the server whether this person " +
+          "may import audio or video.",
+      },
       "importExport.upload.readingFile": {
         description: "Parse-phase progress label on the Upload files panel for a file whose format is recognized.",
         placeholders: { fileName: "Name of the file being read — not translated." },
@@ -2887,6 +2931,12 @@ export const importExport = defineNamespace({
           "the technical audio format a broadcast studio asks for — keep the numbers and units as they " +
           "are. The choice is remembered with the rest of the export dialog.",
       },
+      "importExport.dialog.monoLoudness": { description: "Label of an option in the Export dialog's audio settings: how loud evened-out mono takes are written. Two choices follow.", maxLength: 32 },
+      "importExport.dialog.monoLoudnessHeard": { description: "Choice for 'Mono loudness' (the default): mono takes at the loudness people hear them at (played on both speakers).", maxLength: 32 },
+      "importExport.dialog.monoLoudnessMeter": { description: "Choice for 'Mono loudness': mono takes written about 3 dB louder, so a loudness meter that counts the one channel once reads the target.", maxLength: 48 },
+      "importExport.dialog.monoLoudnessHeld": { description: "Shown in amber under 'Mono loudness' when the meter reading is picked: how many evened-out takes can't be raised the extra 3 dB (they would distort, or the raise would pass the 12 dB limit that keeps hiss down).", placeholders: { count: "How many takes." } },
+      "importExport.dialog.monoLoudnessInfoLabel": { description: "Screen-reader name of the (i) beside 'Mono loudness'; it opens the explanation." },
+      "importExport.dialog.monoLoudnessInfo": { description: "The explanation the (i) beside 'Mono loudness' opens: why a mono file measures 3 dB under how it sounds, and when to pick the meter reading." },
       "importExport.dialog.lineAudioWavHint": {
         description:
           "Hint under the convert-to-WAV checkbox on the Audio by line export: the WAV files are for " +
@@ -4057,6 +4107,18 @@ export const importExport = defineNamespace({
       "importExport.reimport.oneDocument": {
         description:
           "Error shown when the chosen upload is a multi-book project or otherwise not a single document.",
+      },
+      "importExport.reimport.mediaCannotReplace": {
+        description:
+          "Shown on a file's Re-import when the chosen upload is an audio or video file, which cannot update a document in place. A button to import it as a new file follows.",
+        placeholders: {
+          fileName: "The chosen audio or video file's name. Do not translate.",
+          name: "The name of the file being re-imported. Do not translate.",
+        },
+      },
+      "importExport.reimport.importMediaAsNew": {
+        description:
+          "Button under the message that a recording or film can't replace a file: imports the chosen audio or video as a new file, through the ordinary import.",
       },
       "importExport.reimport.update": {
         description:
@@ -5416,6 +5478,25 @@ export const importExport = defineNamespace({
           count: "Number of values that carried a translation into the exported document.",
         },
       },
+      // AQU-2426: importing and splitting recordings.
+      "importExport.recordingChoice.title": { description: "Title of the last step of importing an audio or video file that came with no subtitle file: the person chooses to bring it in whole or transcribe it.", placeholders: { name: "The recording's file name, e.g. 'Session 4.mp3'." } },
+      "importExport.recordingChoice.titleMany": { description: "Title of the last step of importing several audio or video files that came with no subtitle file; one choice covers all of them.", placeholders: { count: "How many recordings (always 2 or more)." } },
+      "importExport.recordingChoice.description": { description: "Description under the title of the last import step for one recording with no subtitle file. Says why there is a choice. 'Lines' are the file's rows of text and audio." },
+      "importExport.recordingChoice.descriptionMany": { description: "Description under the title when several recordings with no subtitle file are imported together; one choice applies to all.", placeholders: { count: "How many recordings (always 2 or more)." } },
+      "importExport.recordingChoice.wholeNote": { description: "Note under the recording's name in the last import step: what 'Import whole recording' does. '⋯' is the More menu." },
+      "importExport.recordingChoice.wholeNoteMany": { description: "Same note as importExport.recordingChoice.wholeNote, for several recordings." },
+      "importExport.recordingChoice.captionsNotRead": { description: "Note in the last import step when ONE film (.mp4) or recording (.m4a) was too big to be read for captions stored inside it, so it is offered as if it had none. Says so and what to do.", placeholders: { name: "The file's name, e.g. 'Episode 101.mp4'.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.captionsNotReadMany": { description: "The same note when SEVERAL of the files being imported were too big to be read for captions stored inside them.", placeholders: { count: "How many files were not checked.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.inAll": { description: "Label of the total row under a list of recordings to import, before their total length.", maxLength: 20 },
+      "importExport.recordingChoice.list": { description: "Accessible name of the list of recordings in the last import step (screen readers only)." },
+      "importExport.recordingChoice.importWhole": { description: "Button in the last import step: bring the recording in as one line, without transcribing it. Singular or plural by how many recordings are being imported.", maxLength: 32 },
+      "importExport.recordingChoice.importTranscribe": { description: "Button in the last import step: transcribe the recording to find its lines; the next step shows what it will cost before anything runs. The ellipsis means a step follows.", maxLength: 32 },
+      "importExport.recordingChoice.whyNot": { description: "Accessible label of the (i) button beside a greyed 'Import and transcribe…' (screen readers only); a click opens the reason." },
+      "importExport.recordingChoice.costTitle": { description: "Title of the step that shows what transcribing one recording will cost, before it runs.", placeholders: { name: "The recording's file name." } },
+      "importExport.recordingChoice.costTitleMany": { description: "Title of the cost step when several recordings are transcribed together.", placeholders: { count: "How many recordings." } },
+      "importExport.recordingChoice.transcribeAndImport": { description: "Primary button of the cost step: import the recording(s) and transcribe them, finding their lines.", maxLength: 32 },
+      "importExport.recordingChoice.findsLines": { description: "Note in the cost step: what transcribing does to the recording." },
+      "importExport.recordingChoice.later": { description: "Added after the reason transcription isn't available, in the last import step." },
     },
   },
   surfaces: [],

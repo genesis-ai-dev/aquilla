@@ -47,9 +47,15 @@ function DialogContent({
   children,
   showCloseButton = true,
   closeDisabled = false,
+  overlay = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * False for a NON-MODAL window (Root `modal={false}`): no dimmer behind it,
+   * so the page stays usable while it is open (AQU-2664's Even out window).
+   */
+  overlay?: boolean
   /**
    * Greys out the built-in X. Pair it with a Root that refuses to close while
    * busy so the affordance matches the behaviour instead of looking live and
@@ -60,7 +66,7 @@ function DialogContent({
   const t = useT()
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {overlay ? <DialogOverlay /> : null}
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

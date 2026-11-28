@@ -1,5 +1,5 @@
 import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
-import { EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
+import { EXTENSION_DOCUMENT, EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -36,7 +36,7 @@ export class Workspace {
    *  renders the same row anatomy (data-cell-id, data-cell-type, the read
    *  view, the action rail and its aria-labels), so journeys run unchanged. */
   private get root(): Page | FrameLocator {
-    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
+    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME).frameLocator(EXTENSION_DOCUMENT) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */
@@ -88,7 +88,7 @@ export class Workspace {
     const dialog = this.page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
-    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByLabel("Film name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()
@@ -101,15 +101,33 @@ export class Workspace {
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
     await dialog.getByLabel("Use original audio or video", { exact: true }).check()
+    await expect(dialog.getByTestId("youtube-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
     await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
     await dialog.getByRole("button", { name: "Preview import" }).click()
-    await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
-      .toBeVisible({ timeout: 30_000 })
   }
 
+  /** The original media came with captions: publish them with the film. */
   async confirmYouTubeOriginalMedia(): Promise<void> {
-    await this.page.getByRole("button", { name: "Import media and link the film" }).click()
+    const confirm = this.page.getByRole("button", { name: "Import media and link the film" })
+    await expect(confirm).toBeVisible({ timeout: 30_000 })
+    await confirm.click()
     await this.waitForImportSettled()
+  }
+
+  /**
+   * AQU-2426: a recording with no subtitle file stops at a choice — nothing
+   * is cut or transcribed on its own. "whole" brings it in as one line;
+   * "transcribe" goes through the cost step and starts transcription.
+   */
+  async answerRecordingChoice(choice: "whole" | "transcribe"): Promise<void> {
+    const dialog = this.page.getByTestId("recording-import-choice")
+    await expect(dialog).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    if (choice === "whole") {
+      await dialog.getByTestId("recording-import-whole").click()
+    } else {
+      await dialog.getByTestId("recording-import-transcribe").click()
+      await dialog.getByTestId("recording-import-transcribe-go").click()
+    }
   }
 
   async importPayload(payload: FilePayload): Promise<void> {
@@ -128,9 +146,11 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import media without companion or embedded captions. */
-  async importMediaFile(filePath: string): Promise<void> {
-    await this.chooseImportFiles(filePath)
+  /** Import media without companion or embedded captions, answering the
+   *  AQU-2426 recording choice. */
+  async importMediaFile(filePath: string, choice: "whole" | "transcribe"): Promise<void> {
+    await this.chooseImportFiles(filePath, { media: true })
+    await this.answerRecordingChoice(choice)
     await this.waitForImportSettled()
   }
 
@@ -144,8 +164,9 @@ export class Workspace {
    * rule themselves, against `modalDialogs()`, so the settle heuristic here
    * would only add a second, flakier copy of it.
    */
-  async startMediaImport(filePath: string, fileName: string): Promise<void> {
-    await this.chooseImportFiles(filePath)
+  async startMediaImport(filePath: string, fileName: string, choice: "whole" | "transcribe"): Promise<void> {
+    await this.chooseImportFiles(filePath, { media: true })
+    await this.answerRecordingChoice(choice)
     await this.waitForFileInSidebar(fileName)
   }
 
@@ -154,13 +175,13 @@ export class Workspace {
     media: FilePayload,
     captions: FilePayload,
   ): Promise<void> {
-    await this.chooseImportFiles([media, captions])
+    await this.chooseImportFiles([media, captions], { media: true })
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
-    await this.chooseImportFiles(media)
+    await this.chooseImportFiles(media, { media: true })
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
@@ -182,7 +203,9 @@ export class Workspace {
   }
 
   sourceAudioClips(): Locator {
-    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+    // A source recording clip's ⋯ button (AQU-2426) is `tl-card-<id>-more`;
+    // count the clips, not their buttons.
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]:not([data-testid$="-more"])')
   }
 
   async previewCaptionTrack(captions: FilePayload): Promise<void> {
@@ -388,6 +411,7 @@ export class Workspace {
    * ImportDialog's Upload Files panel, and select `filePath`. */
   private async chooseImportFiles(
     filePath: string | FilePayload | string[] | FilePayload[],
+    { media = false } = {},
   ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
@@ -403,6 +427,9 @@ export class Workspace {
     // has hydrated, which trips Playwright's strict mode.
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    if (media) {
+      await expect(this.page.getByTestId("upload-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
+    }
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 
@@ -539,7 +566,7 @@ export class Workspace {
       .filter({ visible: true })
       .first()
     const moreButton = this.page.getByRole("banner")
-      .getByRole("button", { name: /^More$/i })
+      .getByRole("button", { name: /^More actions$/i })
 
     // Wait for cold project hydration before choosing the available surface.
     // An already-open dialog is also valid (for example, setup opened it).
@@ -772,6 +799,16 @@ export class Workspace {
 
   cellRow(index = 0): Locator {
     return this.root.locator("[data-cell-id]").nth(index)
+  }
+
+  /**
+   * AQU-599: the always-visible badge on a row that carries an open thread
+   * ("1 open comment — view comments"). The hover rail's comment button is
+   * named only "1 open comment", so the "— view comments" tail is what tells
+   * the two apart.
+   */
+  commentBadge(index = 0): Locator {
+    return this.cellRow(index).getByRole("button", { name: /open comments? — view comments$/i })
   }
 
   private editableTarget(index: number): Locator {
@@ -1327,10 +1364,10 @@ export class Workspace {
     await expect(this.cellRow(index).getByRole("checkbox", { name: /^Selected cell/ })).toBeVisible()
   }
 
-  /** The selection bar's "Validate text" — bulk-validates the selected rows.
-   *  Its name carries the eligible count ("Validate text 2"). */
+  /** The selection bar's "Validate text cells" — bulk-validates the selected rows.
+   *  Its name carries the eligible count ("Validate text cells 2"). */
   async validateSelection(): Promise<void> {
-    await this.page.getByRole("button", { name: /^Validate text \d+$/ }).click()
+    await this.page.getByRole("button", { name: /^Validate text cells \d+$/ }).click()
   }
 
   /** Remove the current user's validation and wait for the row state to settle. */
@@ -1394,7 +1431,7 @@ export class Workspace {
 
   /** Open the workspace header ⋯ overflow menu (project-scoped actions). */
   async openHeaderOverflowMenu(): Promise<void> {
-    const moreBtn = this.page.getByRole("button", { name: /^More$/i })
+    const moreBtn = this.page.getByRole("button", { name: /^More actions$/i })
     await expect(moreBtn).toBeVisible({ timeout: 10_000 })
     await moreBtn.click()
   }
@@ -1572,7 +1609,12 @@ export class Workspace {
     return this.page.getByTestId("lane-switcher")
   }
 
-  /** Switch the active target lane. Pass `""` for the default lane. */
+  /**
+   * Switch the active target lane by its tag. Since AQU-1594 a project's first
+   * target lane is tagged with its language ("fr"; "Swahili" on a project from
+   * `seedProjectWithFile`), not `""`. Read the tag with `readActiveLane()`
+   * before switching away if the spec needs to come back to it.
+   */
   async switchLane(tag: string): Promise<void> {
     await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
     await this.laneSwitcher().click()

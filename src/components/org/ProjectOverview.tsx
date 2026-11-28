@@ -1513,15 +1513,34 @@ export function ProjectOverview() {
   // source-language label can find it. It is not a target lane. Listing it
   // here put the source language in the Languages table and, because the
   // former default target also uses lane "", opened two staff popovers.
-  const projectLanes: PortfolioLane[] = (audio?.lanes ?? []).filter((lane) => lane.role !== "source")
+  // AQU-2655: memoized on the portfolio row's own lanes, so the lane table's
+  // rows and column definitions (and the plan picker below) keep their identity
+  // across the overview's other renders instead of being rebuilt on every one.
+  const audioLanes = audio?.lanes
+  const projectLanes = useMemo<PortfolioLane[]>(
+    () => (audioLanes ?? []).filter((lane) => lane.role !== "source"),
+    [audioLanes],
+  )
   // AQU-1458: an archived lane is not another active language. The progress
   // tabs stay hidden for a single active lane.
   // AQU-2194: the Languages section, though, renders for ANY target language,
   // one included. Its row's ⋯ → Staff… is where a person is put on a language,
   // and a one-language project needs that as much as a five-language one
   // (Come and See, Oct 26). It still renders when only an archived lane is left.
-  const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
-  const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
+  const activeProjectLanes = useMemo(
+    () => projectLanes.filter((lane) => lane.archived !== true),
+    [projectLanes],
+  )
+  const archivedProjectLanes = useMemo(
+    () => projectLanes.filter((lane) => lane.archived === true),
+    [projectLanes],
+  )
+  const projectTargetLanes = project?.targetLanes
+  const projectTargetLanguage = project?.targetLanguage
+  const laneTableExtraLanes = useMemo(
+    () => extraRegistryLanes(projectTargetLanes, projectTargetLanguage),
+    [projectTargetLanes, projectTargetLanguage],
+  )
   const showLaneTabs = activeProjectLanes.length > 1
   const showLanguages = activeProjectLanes.length > 0 || archivedProjectLanes.length > 0
   // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
@@ -2304,8 +2323,8 @@ export function ProjectOverview() {
                       ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects.`
                       : "Archive this project? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects."
                   }
-                  confirmLabel="Archive"
-                  checkboxLabel="I understand this project will be hidden from the active list."
+                  confirmLabel={t("org.projectOverview.archive")}
+                  checkboxLabel={t("org.projectOverview.archiveConfirmCheckbox")}
                   variant="destructive"
                   onConfirm={() => {
                     void handleArchive()
@@ -2536,7 +2555,7 @@ export function ProjectOverview() {
                   lanes={activeProjectLanes}
                   archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
-                  extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
+                  extraLanes={laneTableExtraLanes}
                   assignLanes={assignLanes}
                   staffedLaneIds={staffedLaneIds}
                   teamLanes={teamLanes}

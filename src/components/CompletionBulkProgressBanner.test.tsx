@@ -2,10 +2,21 @@
 // summary when a batch run ends with skipped cells, instead of quietly
 // disappearing (the store keeps `finished: true` progress around for this).
 
+import { type ReactElement } from "react"
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { Toaster } from "@/components/ui/toast"
 import { CompletionBulkProgressBanner, CompletionBatchStatusHost } from "./CompletionBulkProgressBanner"
+
+function renderToast(ui: ReactElement = <CompletionBulkProgressBanner />) {
+  return render(
+    <>
+      <Toaster />
+      {ui}
+    </>,
+  )
+}
 import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
@@ -28,13 +39,13 @@ describe("CompletionBulkProgressBanner", () => {
   })
 
   it("renders nothing when idle", () => {
-    const { container } = render(<CompletionBulkProgressBanner />)
-    expect(container).toBeEmptyDOMElement()
+    renderToast()
+    expect(screen.queryByTestId("completion-batch-status")).not.toBeInTheDocument()
   })
 
   it("shows a progress bar while a batch is running", () => {
     resetBatchCompletionState(90)
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     expect(screen.getByText("Translating")).toBeInTheDocument()
     expect(screen.getByText("0/90")).toBeInTheDocument()
   })
@@ -43,7 +54,7 @@ describe("CompletionBulkProgressBanner", () => {
     // completeBatch used to `return` here, so the click produced no banner at
     // all and the feature looked broken until a reload.
     reportBatchCompletionUnavailable()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
     expect(screen.getByText(/AI service unavailable/)).toBeInTheDocument()
     expect(screen.queryByText("Translating")).not.toBeInTheDocument()
@@ -56,7 +67,7 @@ describe("CompletionBulkProgressBanner", () => {
   it("does not talk over a batch that is still generating (AQU-1377)", () => {
     resetBatchCompletionState(90)
     reportBatchCompletionUnavailable()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
     // The live progress bar is the more useful thing on screen.
     expect(screen.getByText("Translating")).toBeInTheDocument()
@@ -69,10 +80,10 @@ describe("CompletionBulkProgressBanner", () => {
     incrementBatchCompletionFailed(runId, 30)
     clearBatchCompletionProgress(runId)
 
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
     expect(screen.getByText(/30 of 90 cells failed/)).toBeInTheDocument()
-    expect(screen.getByText(/60 completed/)).toBeInTheDocument()
+    expect(screen.getByText(/60 drafted/)).toBeInTheDocument()
     // Must NOT silently render nothing / a stale progress bar.
     expect(screen.queryByText("Translating")).not.toBeInTheDocument()
   })
@@ -82,7 +93,7 @@ describe("CompletionBulkProgressBanner", () => {
     incrementBatchCompletionFailed(runId, 5)
     clearBatchCompletionProgress(runId)
 
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     fireEvent.click(screen.getByLabelText("Dismiss"))
 
     expect(screen.queryByText(/cells failed/)).not.toBeInTheDocument()
@@ -93,8 +104,8 @@ describe("CompletionBulkProgressBanner", () => {
     for (let i = 0; i < 10; i++) incrementBatchCompletionDone(runId)
     clearBatchCompletionProgress(runId)
 
-    const { container } = render(<CompletionBulkProgressBanner />)
-    expect(container).toBeEmptyDOMElement()
+    renderToast()
+    expect(screen.queryByTestId("completion-batch-status")).not.toBeInTheDocument()
   })
 })
 
@@ -117,7 +128,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
   it("names the file and shows the elapsed time while running", () => {
     vi.useFakeTimers()
     const runId = start()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     act(() => {
       recordBatchCompletionDone(runId, IDS.slice(0, 5))
       vi.advanceTimersByTime(65_000)
@@ -131,7 +142,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
   it("shows completion — a finished run does not just disappear", () => {
     vi.useFakeTimers()
     const runId = start()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     act(() => {
       vi.advanceTimersByTime(125_000)
       recordBatchCompletionDone(runId, IDS)
@@ -150,7 +161,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
   it("a run the user watched start to finish clears its own completion line", () => {
     vi.useFakeTimers()
     const runId = start()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     act(() => {
       vi.advanceTimersByTime(8_000)
       recordBatchCompletionDone(runId, IDS)
@@ -172,7 +183,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
       reason: "Request timed out",
     })))
     finishBatchCompletion(runId)
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
     expect(screen.getByRole("alert")).toHaveAttribute("data-outcome", "failed")
     expect(screen.getByText(/10 of 12 cells failed/)).toBeInTheDocument()
@@ -190,9 +201,9 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
     const runId = start()
     recordBatchCompletionDone(runId, IDS.slice(0, 4))
     finishBatchCompletion(runId, { error: new Error("Failed to fetch") })
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
-    expect(screen.getByText(/8 of 12 cells failed — 4 completed/)).toBeInTheDocument()
+    expect(screen.getByText(/8 of 12 cells failed — 4 drafted/)).toBeInTheDocument()
     expect(screen.getByText("Drafting stopped unexpectedly: Failed to fetch")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry 8 cells" })).toBeInTheDocument()
   })
@@ -202,7 +213,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
     recordBatchCompletionDone(runId, IDS.slice(0, 3))
     cancelBatchCompletion()
     finishBatchCompletion(runId)
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
 
     expect(screen.getByText("Stopped — 3 of 12 cells drafted.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Draft the remaining 9 cells" })).toBeInTheDocument()
@@ -213,7 +224,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
     const resumer = vi.fn(() => true)
     const unregister = registerBatchCompletionResumer("p1", resumer)
     const runId = start()
-    render(<CompletionBulkProgressBanner />)
+    renderToast()
     act(() => {
       recordBatchCompletionDone(runId, IDS.slice(0, 2))
       vi.advanceTimersByTime(STALL_CEILING_MS + 30_000)
@@ -235,6 +246,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
     finishBatchCompletion(runId, { error: new Error("boom") })
     render(
       <MemoryRouter>
+        <Toaster />
         <CompletionBulkProgressBanner />
       </MemoryRouter>,
     )
@@ -258,13 +270,14 @@ describe("CompletionBatchStatusHost — visible away from the editor (AQU-2654)"
 
   it("shows the run app-wide when the editor's banner is not mounted", () => {
     resetBatchCompletionState(40, { scope: { projectId: "p1", fileId: "f1", fileName: "Guide.docx" } })
-    render(<CompletionBatchStatusHost />)
+    renderToast(<CompletionBatchStatusHost />)
     expect(screen.getByText("Translating Guide.docx")).toBeInTheDocument()
     expect(screen.getByText("0/40")).toBeInTheDocument()
   })
 
   it("stands down while the editor shows the banner inline, and takes over when it unmounts", () => {
     resetBatchCompletionState(40, { scope: { fileName: "Guide.docx" } })
+    render(<Toaster />)
     const editor = render(<CompletionBulkProgressBanner />)
     render(<CompletionBatchStatusHost />)
     expect(screen.getAllByText("Translating Guide.docx")).toHaveLength(1)

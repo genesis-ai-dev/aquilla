@@ -48,6 +48,19 @@ describe("toast secondary action (AQU-1486)", () => {
   })
 })
 
+describe("toast stack", () => {
+  it("keeps every open toast's close button available", async () => {
+    render(<Toaster />)
+    act(() => {
+      toast.add({ timeout: 0, title: "First notice" })
+      toast.add({ timeout: 0, title: "Second notice" })
+    })
+    await screen.findByText("First notice")
+    await screen.findByText("Second notice")
+    expect(screen.getAllByRole("button", { name: "Close notification" })).toHaveLength(2)
+  })
+})
+
 describe("toast button row (AQU-2175)", () => {
   const rowOf = (el: HTMLElement) => el.closest("[data-slot='toast-actions']")
 
@@ -76,7 +89,7 @@ describe("toast button row (AQU-2175)", () => {
     expect(row).not.toContainElement(message)
 
     // The close X stays out of the button row, in the message row.
-    const close = screen.getByLabelText("Close toast")
+    const close = screen.getByLabelText("Close notification")
     expect(rowOf(close)).toBeNull()
   })
 
@@ -112,6 +125,30 @@ describe("toast pulse (AQU-2125)", () => {
       toast.update(id, { type: "success", title: "30 lines now carry a character" })
     })
     expect(pulseOf("30 lines now carry a character")).not.toHaveAttribute("data-pulsing")
+  })
+
+  it("settles a rejected promise on the same toast, still", async () => {
+    render(<Toaster />)
+    let rejectPromise: (error: unknown) => void = () => {}
+    const pending = new Promise<boolean>((_resolve, reject) => {
+      rejectPromise = reject
+    })
+    act(() => {
+      void toast.promise(pending, {
+        loading: { title: "Generating a new voice for this line…" },
+        success: { title: "New voice ready" },
+        error: { title: "Couldn't generate a voice for this line" },
+      }).catch(() => {})
+    })
+    await screen.findByText("Generating a new voice for this line…")
+    await act(async () => {
+      rejectPromise(new Error("failed"))
+      await pending.catch(() => {})
+    })
+    expect(screen.getByText("Couldn't generate a voice for this line")).toBeInTheDocument()
+    expect(screen.queryByText("Generating a new voice for this line…")).toBeNull()
+    expect(document.querySelectorAll("[data-slot='toast']")).toHaveLength(1)
+    expect(pulseOf("Couldn't generate a voice for this line")).not.toHaveAttribute("data-pulsing")
   })
 
   it("still pulses when the same toast is raised again", async () => {

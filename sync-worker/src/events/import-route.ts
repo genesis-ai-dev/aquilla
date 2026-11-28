@@ -25,9 +25,14 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyDocScope, verifySyncToken } from '../auth'
+import { verifyDocScope, verifySyncToken, type SyncTokenClaims } from '../auth'
+import type { EventKind, RawEvent } from './types'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
-import { ROLE } from './role-policy'
+import { ROLE, requiredRoleFor } from './role-policy'
+import { audioEventRefusal, STORED_TAKE_COLUMNS, type StoredTake } from './audio-event-rules'
+import { loadTargetLanes } from './lane-read-wall'
+import { laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { fileScopeRefusal } from '../audio-write-guard'
 import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { withCors } from '../cors'
@@ -162,6 +167,7 @@ export interface ImportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   ProjectSync?: DurableObjectNamespace
+  LANE_READ_WALL?: string
 }
 
 interface ImportFileMeta {
@@ -288,6 +294,58 @@ function isImportBody(x: unknown): x is ImportBody {
     (b.video === undefined || (b.video !== null && typeof b.video === 'object' && !Array.isArray(b.video))) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
+}
+
+/**
+ * The first refusal the audio rules give any of this finish's attachments
+ * (audio-event-rules.ts), or null. The caller's file answer, the project's
+ * lanes and the takes already stored under these audio ids are each read at
+ * most once, and only when a rule needs them, so a 20,000-cue import costs a
+ * few reads rather than one per attachment.
+ */
+async function importAttachmentRefusal(
+  db: AquillaDb,
+  env: ImportRouteEnv,
+  claims: SyncTokenClaims,
+  projectId: string,
+  fileId: string,
+  events: PersistedEvent[],
+): Promise<{ status: 403 | 422; reason: string } | null> {
+  const once = <T>(load: () => Promise<T>) => {
+    let pending: Promise<T> | undefined
+    return () => (pending ??= load())
+  }
+  const fileRefusal = once(() => fileScopeRefusal(db, claims, projectId, fileId))
+  const loadLanes = once(() => loadTargetLanes(db, projectId))
+  const storedTakes = once(async () => {
+    const audioIds = [...new Set(events.map((event) => (event.payload as { audioId: string }).audioId))]
+    const byKey = new Map<string, StoredTake>()
+    for (let i = 0; i < audioIds.length; i += BULK_ROWS) {
+      const page = audioIds.slice(i, i + BULK_ROWS)
+      const rows = await db
+        .prepare(
+          `SELECT a.cell_id, a.audio_id, ${STORED_TAKE_COLUMNS} FROM cell_audio a
+             LEFT JOIN lanes l ON l.id = a.lane_id
+            WHERE a.project_id = ? AND a.file_id = ? AND a.audio_id IN (${page.map(() => '?').join(', ')})`,
+        )
+        .bind(projectId, fileId, ...page)
+        .all<StoredTake & { cell_id: string; audio_id: string }>()
+      for (const { cell_id, audio_id, ...take } of rows.results) byKey.set(`${cell_id}\0${audio_id}`, take)
+    }
+    return byKey
+  })
+  const storedTake = async (cellId: string, audioId: string) =>
+    (await storedTakes()).get(`${cellId}\0${audioId}`) ?? null
+  const wallOn = laneReadWallEnabled(env.LANE_READ_WALL)
+  const requiredRole = requiredRoleFor('cell.audio.attach')
+  for (const event of events) {
+    const refused = await audioEventRefusal({
+      db, claims, raw: event as RawEvent<EventKind>, wallOn, laneReadWall: env.LANE_READ_WALL,
+      requiredRole, loadLanes, storedTake, fileRefusal,
+    })
+    if (refused) return refused
+  }
+  return null
 }
 
 /**
@@ -643,6 +701,18 @@ export async function handleBulkImportRequest(
           serverTs: eventTs++,
         } as PersistedEvent<'cell.audio.attach'>)
       }
+      // AQU-2682 / AQU-2685: each attachment is a `cell.audio.attach`, held
+      // to the rules the events route applies to the same attach
+      // (audio-event-rules.ts), whatever role it names: source audio needs
+      // Project Lead and every language, an existing source clip may only be
+      // changed by a Maintainer, and every other attach meets the caller's
+      // file and language limits. Checked before anything below is written,
+      // so a refusal leaves the staged file hidden and no attach row behind.
+      // The file answer, the lanes and the stored takes are each read once.
+      if (finalizeEvents.length > 0) {
+        const refused = await importAttachmentRefusal(db, env, auth.claims, body.projectId, body.fileId, finalizeEvents)
+        if (refused) return withCors(new Response(refused.reason, { status: refused.status }), request)
+      }
       if (finalizeEvents.length > 0) {
         const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]
         const audioIds = [...new Set((body.attachments ?? []).map((attachment) => attachment.audioId))]
@@ -938,6 +1008,71 @@ export async function handleBulkImportRequest(
       Response.json({ error: 'DB batch failed' }, { status: 500 }),
       request,
     )
+  }
+
+  // AQU-2777: an import target that names no lane addresses the former default
+  // lane (legacy_tag ''), and the bridge spliced into the batch below mints
+  // that lane only on a project with NO target lane at all (AQU-1615). So on a
+  // project whose one target lane carries a real language — what picking a
+  // target language at project creation gives you — nothing resolved
+  // `cells.lane_id`, the NOT NULL column rejected the chunk, and the importer
+  // saw a 500 "DB batch failed" it then retried (the SDBH localized edition
+  // repro). AQU-2554 fixed the source side of that import; this is the target
+  // side, and it is the same family as AQU-1900 / AQU-1902.
+  //
+  // An import's targets are a bulk pre-fill sent with no file open, so the
+  // dialog has no active lane to name. With exactly one unarchived target lane
+  // there is only one lane they can mean: name it on the events BEFORE they are
+  // stored, which is where every other target write has its lane resolved
+  // (AQU-1902) — so the event log, the chain slot and the projection all agree,
+  // and a replay resolves the same lane. With more than one, the import must
+  // not choose for the user: that is a 422 the dialog can report, not a 500 it
+  // retries (AQU-1900's answer on /events).
+  if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
+    let laneRows: { id: string; legacy_tag: string | null; archived_at: string | null }[]
+    try {
+      laneRows = (
+        await db
+          .prepare(
+            `SELECT id, legacy_tag, archived_at FROM lanes
+              WHERE project_id = ? AND role = 'target'`,
+          )
+          .bind(body.projectId)
+          .all<{ id: string; legacy_tag: string | null; archived_at: string | null }>()
+      ).results
+    } catch (err) {
+      console.error('[import] target lane lookup failed:', err)
+      return withCors(Response.json({ error: 'DB batch failed' }, { status: 500 }), request)
+    }
+    // A project that has the '' lane (legacy) resolves as it always did, and one
+    // with no target lane at all gets the bridge below. Neither is touched here.
+    const hasDefaultLane = laneRows.some((lane) => (lane.legacy_tag ?? null) === '')
+    if (laneRows.length > 0 && !hasDefaultLane) {
+      const candidates = laneRows.filter(
+        (lane) => lane.archived_at == null && typeof lane.legacy_tag === 'string' && lane.legacy_tag !== '',
+      )
+      if (candidates.length !== 1) {
+        // Short enough to survive the client's 200-character detail slice
+        // (bulk-import.ts), which is what the import dialog shows the user.
+        return withCors(
+          Response.json(
+            {
+              error: candidates.length === 0
+                ? 'this project has no target language an import can fill'
+                : 'this import named no target language and this project has more than one; open a file in the language to fill, or import the source only',
+              lanes: candidates.map((lane) => lane.legacy_tag),
+            },
+            { status: 422 },
+          ),
+          request,
+        )
+      }
+      const targetLang = candidates[0]!.legacy_tag as string
+      for (const event of targetEvents) {
+        if (laneOfEvent(event.kind, event.payload) !== '') continue
+        event.payload = { ...(event.payload as Record<string, unknown>), targetLang }
+      }
+    }
   }
 
   try {

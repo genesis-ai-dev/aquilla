@@ -47,6 +47,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { createMenuHandle } from "@/components/ui/menu-parts"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -384,6 +385,8 @@ interface DataTableProps<TData, TValue> {
    * present, the body is a LegendList so large directories stay cheap to paint.
    */
   fillHeight?: boolean
+  /** Use one scrollport for sticky columns as well as sticky headers. */
+  stickyColumns?: boolean
   /**
    * Keep every row in the DOM as one plain HTML table, with no row windowing.
    *
@@ -434,6 +437,7 @@ function DataTable<TData, TValue>({
   className,
   tableClassName,
   fillHeight = false,
+  stickyColumns = false,
   plainRows = false,
   footer,
   hasMore = false,
@@ -481,7 +485,7 @@ function DataTable<TData, TValue>({
   const showEmpty = !loading && !hasRows && emptyStateNode
   const statusLabel = loadingLabel ?? t("common.loadingSpinner")
   const visibleColumnCount = table.getVisibleLeafColumns().length
-  const virtualize = fillHeight && hasRows && !loading && !showEmpty
+  const virtualize = fillHeight && !stickyColumns && hasRows && !loading && !showEmpty
   const columnWidthHints = React.useMemo(
     () =>
       table.getVisibleLeafColumns().map((col) =>
@@ -518,7 +522,7 @@ function DataTable<TData, TValue>({
       return (
         <DataTableVirtualRowTable table={table} tableClassName={tableClassName}>
           {menuItems ? (
-            <DataTableRowMenu rowProps={rowProps} items={menuItems}>
+            <DataTableRowMenu rowId={row.id} rowProps={rowProps} items={menuItems}>
               {cells}
             </DataTableRowMenu>
           ) : (
@@ -544,6 +548,13 @@ function DataTable<TData, TValue>({
   const bodyRef = React.useRef<HTMLTableSectionElement>(null)
 
   /**
+   * AQU-2655: one ⋯ menu root for the whole table. Each row's ⋯ button is a
+   * detached trigger of it that carries its row id, so a closed menu costs a
+   * row one trigger instead of a whole menu root.
+   */
+  const [rowActionsMenu] = React.useState(() => createMenuHandle<string>())
+
+  /**
    * Row windowing for the plain table (AQU-2708): with a bounded scroll parent
    * only the rows near the scrollport are mounted, so an uncapped list — every
    * project the platform has ever had — costs a screenful of rows to paint
@@ -558,7 +569,7 @@ function DataTable<TData, TValue>({
     getRowKey: (index) => tableRows[index]?.id ?? index,
     estimateRowPx: dense ? 36 : 44,
     enabled:
-      !fillHeight && !plainRows && !renderSubRow && hasRows && !loading && !showEmpty,
+      (!fillHeight || stickyColumns) && !plainRows && !renderSubRow && hasRows && !loading && !showEmpty,
     bodyRef,
   })
 
@@ -584,7 +595,7 @@ function DataTable<TData, TValue>({
     return (
       <React.Fragment key={row.id}>
         {menuItems ? (
-          <DataTableRowMenu rowProps={rowProps} items={menuItems}>
+          <DataTableRowMenu rowId={row.id} rowProps={rowProps} items={menuItems}>
             {cells}
           </DataTableRowMenu>
         ) : (
@@ -619,6 +630,7 @@ function DataTable<TData, TValue>({
 
   return (
     <DataTableSortingContext.Provider value={sorting}>
+    <RowActionsMenuContext.Provider value={rowActionsMenu}>
       <div
         className={cn(
           "flex w-full min-w-0 flex-col",
@@ -703,7 +715,7 @@ function DataTable<TData, TValue>({
             footer={loadMoreFooter}
           />
         ) : (
-          <Table className={tableClassName}>
+          <Table className={tableClassName} data-sorting={sorting.map((item) => `${item.id}:${item.desc ? "desc" : "asc"}`).join(",")}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -792,7 +804,31 @@ function DataTable<TData, TValue>({
           </Table>
         )}
       </div>
+      {/* Rendered even for a table without row menus, so a ⋯ button in one
+          still opens (an empty menu), as it did when it owned its root. */}
+      <DropdownMenu handle={rowActionsMenu}>
+          {({ payload }) => {
+            // The row as it is now, not as it was when the menu opened.
+            const row = typeof payload === "string"
+              ? table.getCoreRowModel().rowsById[payload]
+              : undefined
+            return (
+              <DropdownMenuContent
+                align="end"
+                className={ROW_MENU_CLASS}
+                // The popup is portalled out of the table, but React still
+                // bubbles its events along the React tree. Rows are often
+                // clickable; pressing an item must not count as a click on
+                // whatever contains the table either.
+                onClick={(event) => event.stopPropagation()}
+              >
+                {row ? renderRowMenuItems?.(row.original) : null}
+              </DropdownMenuContent>
+            )
+          }}
+        </DropdownMenu>
       </div>
+    </RowActionsMenuContext.Provider>
       </DataTableSortingContext.Provider>
   )
 }
@@ -843,37 +879,42 @@ const ROW_MENU_CLASS = "w-auto min-w-40"
 
 /**
  * Lets the ⋯ button in an actions cell open the same items as its row, without
- * every caller having to hand them to the button as well.
+ * every caller having to hand them to the button as well: the table's one menu
+ * root (its handle) and the id of the row the button sits in. The menu asks
+ * `renderRowMenuItems` for that row's items when it opens.
  */
-const RowMenuItemsContext = React.createContext<React.ReactNode>(null)
+const RowActionsMenuContext = React.createContext<ReturnType<typeof createMenuHandle<string>> | null>(null)
+const RowMenuRowIdContext = React.createContext<string | null>(null)
 
 /**
  * A row's menu, reachable by right-clicking the row or by pressing its ⋯ button.
  *
  * This needs two roots rather than one: Base UI anchors a context menu's popup to
  * the pointer, so the same root cannot also anchor to a button. The row owns the
- * context-menu root; the button owns the menu root, inside its own cell — a
- * non-modal popup renders focus guards next to itself, and a `<tr>` may only
- * contain cells.
+ * context-menu root; the button is a detached trigger of the table's one menu
+ * root, which sits outside the `<table>` — a non-modal popup renders focus
+ * guards next to itself, and a `<tr>` may only contain cells.
  */
 function DataTableRowMenu({
+  rowId,
   rowProps,
   children,
   items,
 }: {
+  rowId: string
   rowProps: React.ComponentProps<typeof TableRow>
   children: React.ReactNode
   items: React.ReactNode
 }) {
   return (
-    <RowMenuItemsContext.Provider value={items}>
+    <RowMenuRowIdContext.Provider value={rowId}>
       <ContextMenu>
         <ContextMenuTrigger render={<TableRow {...rowProps} />}>
           {children}
         </ContextMenuTrigger>
         <ContextMenuContent className={ROW_MENU_CLASS}>{items}</ContextMenuContent>
       </ContextMenu>
-    </RowMenuItemsContext.Provider>
+    </RowMenuRowIdContext.Provider>
   )
 }
 
@@ -903,12 +944,14 @@ function DataTableRowActionsButton({
   React.ComponentProps<typeof DropdownMenuTrigger>,
   "children" | "render" | "className" | "disabled" | "aria-label" | "onClick"
 >) {
-  const items = React.useContext(RowMenuItemsContext)
+  const handle = React.useContext(RowActionsMenuContext)
+  const rowId = React.useContext(RowMenuRowIdContext)
 
   return (
-    <DropdownMenu>
       <DropdownMenuTrigger
         {...props}
+        handle={handle ?? undefined}
+        payload={rowId ?? undefined}
         data-row-actions=""
         aria-label={label}
         disabled={disabled}
@@ -933,17 +976,6 @@ function DataTableRowActionsButton({
       >
         {busy ? <Spinner /> : <MoreHorizontal className="size-4" />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className={ROW_MENU_CLASS}
-        // The popup is portalled out of the table, but React still bubbles its
-        // events along the React tree — through the row. Rows are often
-        // clickable, so pressing an item must not also count as a row click.
-        onClick={(event) => event.stopPropagation()}
-      >
-        {items}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 

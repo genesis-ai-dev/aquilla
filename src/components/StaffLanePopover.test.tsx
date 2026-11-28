@@ -1,21 +1,17 @@
 // AQU-538 §3.4 — StaffLanePopover: the one-gesture staffing control.
 //
 // Pins under test:
-//   - Happy path: picking a not-yet-member and confirming issues POST
-//     membership at the picked role, then PUT scopes merged with whatever
-//     that user already had (never clobbering other lanes/files).
-//   - Existing-member: if the picked person already holds >= the picked
-//     role, the POST membership call is skipped (never a downgrade) but the
-//     scope PUT still runs.
+//   - AQU-2322: the Add writes nothing itself. It opens Give access
+//     pre-filled with the person, the picked role and this lane (by id), so
+//     the grant goes through that dialog's dry run and the additive
+//     lane-grant route, never membership POST + scope PUT from here.
 //   - AQU-2004: there is no lead path here at all — no "Leads see all
 //     languages" note, no "Add as lead" button, and no catalog in any locale
 //     still carrying those retired messages.
 //   - AQU-2027: maintainers and above can't be lane-limited. Someone the
-//     roster shows at 600+ gets a note and no Add; if the scope PUT is still
-//     refused for that reason (the route's real LANE_SCOPE_ABOVE_CEILING_ERROR),
-//     the popover shows the same note, not the raw server error. Someone
-//     already on the project at or above the picked role keeps their role,
-//     and the sentence says so ("stays a Project Lead").
+//     roster shows at 600+ gets a note and no Add. Someone already on the
+//     project at or above the picked role keeps their role, and the sentence
+//     says so ("stays a Project Lead").
 //   - AQU-1998 Remove: the popover lists who is already scoped to the lane and
 //     takes one of them off it — their other lanes and file limits written
 //     through untouched, a lane-limited project lead listed like anyone else
@@ -35,8 +31,8 @@ import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
+import { OverviewLaneTable } from "@/components/org/OverviewLaneTable"
 import { CATALOGS } from "@/lib/i18n/messages/all"
-import { LANE_SCOPE_ABOVE_CEILING_ERROR } from "@/lib/lanes/scope-ids"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
@@ -194,15 +190,64 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
   }
 })
 
+// AQU-2324: the staffed list reads the scope VIEW — the same scopes, plus the
+// person's lane grants. It delegates to mockFetchMemberScopes so every scope
+// test above still drives it, and adds whatever `laneGrants` holds for a user.
+const laneGrants = vi.hoisted(() => ({ byUser: {} as Record<number, { laneId: string; name: string; level: number }[]> }))
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: mockFetchMemberScopes,
+  // The real Languages table (rendered once below) reads the scope view too.
+  fetchMemberScopeView: async (jwt: string, projectId: string, userId: number) => {
+    const scopes = await mockFetchMemberScopes(jwt, projectId, userId)
+    const grants = laneGrants.byUser[userId]
+    return {
+      scopes: scopes ?? [],
+      laneNames: {},
+      ...(grants ? { laneAccess: { memberRoleLevel: 400, readWallEnabled: true, grants, targetLanes: [] } } : {}),
+    }
+  },
   putMemberScopes: mockPutMemberScopes,
   fetchMemberLaneAssignments: mockFetchMemberLaneAssignments,
+}))
+
+// AQU-2324: a grant-only row's Remove opens this dialog; the stub shows what for.
+vi.mock("@/components/org/access/RemoveAccessDialog", () => ({
+  RemoveAccessDialog: ({ orgId, person, grants }: { orgId: number; person: { userId?: string }; grants: { type: string; id: string }[] }) => (
+    <div
+      data-testid="remove-access-launch"
+      data-org={orgId}
+      data-user={person.userId}
+      data-grants={grants.map((g) => `${g.type}:${g.id}`).join(",")}
+    />
+  ),
+}))
+
+// AQU-2324: the "Manage access" door shows only for a member of the org.
+vi.mock("@/context/OrgContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/context/OrgContext")>()),
+  useActiveOrgOptional: () => ({ orgs: [{ id: 1 }] }),
+}))
+
+// AQU-2322: the Add opens Give access; the stub shows what it was pre-filled with.
+vi.mock("@/components/org/access/GiveAccessLauncher", () => ({
+  GiveAccessLauncher: ({ orgId, request }: { orgId: number; request: { userId?: string; roleLevel?: number; place?: { type: string; id: string } } | null }) =>
+    request ? (
+      <div
+        data-testid="give-access-launch"
+        data-org={orgId}
+        data-user={request.userId}
+        data-role={request.roleLevel}
+        data-place={request.place ? `${request.place.type}:${request.place.id}` : ""}
+      />
+    ) : null,
 }))
 
 vi.mock("@/lib/sync/assignments", () => ({
   unassignAssignment: mockUnassignAssignment,
 }))
+
+// The Languages table mounts one Assign dialog; it has its own suite.
+vi.mock("@/components/AssignModal", () => ({ AssignModal: () => null }))
 
 function openPopover() {
   fireEvent.click(screen.getByRole("button", { name: /staff spanish/i }))
@@ -215,6 +260,7 @@ function pickMaria() {
 beforeEach(() => {
   mockRoster = {}
   mockProjectMembers = []
+  laneGrants.byUser = {}
   mockAddProjectMember.mockClear()
   mockFetchMemberScopes.mockClear()
   mockFetchMemberScopes.mockResolvedValue([])
@@ -228,93 +274,32 @@ beforeEach(() => {
 })
 
 describe("StaffLanePopover", () => {
-  it("happy path: POSTs membership at the picked role then PUTs merged scopes", async () => {
-    renderPopover()
+  it("hands the Add to Give access pre-filled with the person, role and lane, and writes nothing itself (AQU-2322)", async () => {
+    renderPopover(1, "ln-es")
     openPopover()
     expect(screen.getByTestId("staff-lane-scope-title")).toHaveTextContent("Add people to Mark › Spanish")
     pickMaria()
-
     fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
-    await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
-      scopeLanes: ["es"],
-    })
-
-    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-    expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
-      { kind: "lane", value: "es" },
-    ])
-
-    await waitFor(() =>
-      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
-        /maria will join as a reviewer on mark, spanish language lane only/i,
-      ),
-    )
-  })
-
-  it("merges the new lane scope with existing scopes instead of clobbering them", async () => {
-    mockFetchMemberScopes.mockResolvedValue([
-      { kind: "lane", value: "fr" },
-      { kind: "file", value: "GEN" },
-    ])
-
-    renderPopover()
-    openPopover()
-    pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-
-    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-    const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
-    expect(scopes).toEqual(
-      expect.arrayContaining([
-        { kind: "lane", value: "fr" },
-        { kind: "file", value: "GEN" },
-        { kind: "lane", value: "es" },
-      ]),
-    )
-    expect(scopes).toHaveLength(3)
-  })
-
-  // AQU-1607: a lane scope is a lane id, so staffing a lane whose id the row
-  // knows writes that id — the lane's language cannot say which of two
-  // same-language lanes was staffed.
-  it("writes the lane's id when the caller passes one, replacing a tag row for it", async () => {
-    mockFetchMemberScopes.mockResolvedValue([
-      { kind: "lane", value: "es" },
-      { kind: "lane", value: "fr" },
-    ])
-
-    renderPopover(1, "ln-es")
-    openPopover()
-    pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-
-    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-    const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
-    expect(scopes).toEqual([
-      { kind: "lane", value: "fr" },
-      { kind: "lane", value: "ln-es" },
-    ])
-  })
-
-  it("skips the membership POST when the person already holds >= the picked role", async () => {
-    mockProjectMembers = [
-      {
-        userId: 10,
-        username: "maria",
-        role: { level: 400, name: "contributor", source: "override" },
-        secondarySources: [],
-      },
-    ]
-
-    renderPopover()
-    openPopover()
-    pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-
-    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+    const launch = await screen.findByTestId("give-access-launch")
+    expect(launch).toHaveAttribute("data-org", "1")
+    expect(launch).toHaveAttribute("data-user", "10")
+    expect(launch).toHaveAttribute("data-role", "300")
+    expect(launch).toHaveAttribute("data-place", "lane:ln-es")
+    // The old write path is gone: no membership POST, no scope replace-set.
     expect(mockAddProjectMember).not.toHaveBeenCalled()
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    // The popover steps aside so the dialog is on top.
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+  })
+
+  it("a lane the row knows only by its tag opens Give access with the place left to choose", async () => {
+    renderPopover(1)
+    openPopover()
+    pickMaria()
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
+    expect(await screen.findByTestId("give-access-launch")).toHaveAttribute("data-place", "")
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
   })
 
   // AQU-2004 — the popover used to end in a dashed box promising "Leads see
@@ -330,12 +315,9 @@ describe("StaffLanePopover", () => {
     const popover = screen.getByTestId("staff-lane-popover")
     expect(popover).not.toHaveTextContent(/broader access|see all languages/i)
     expect(screen.queryByRole("button", { name: /as lead/i })).not.toBeInTheDocument()
-    // The lane-scoped add is the only submit left, and it still works.
+    // The lane-scoped add is the only submit left; it opens Give access at a lane role (AQU-2322).
     fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-    await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
-      scopeLanes: ["es"],
-    })
+    expect(await screen.findByTestId("give-access-launch")).toHaveAttribute("data-role", "300")
   })
 
   // Same guard one layer down: a translated note or lead link would reappear
@@ -350,26 +332,6 @@ describe("StaffLanePopover", () => {
       retired.filter((key) => key in catalog).map((key) => `${locale}: ${key}`),
     )
     expect(survivors).toEqual([])
-  })
-
-  // AQU-2027: the route's refusal text is the shared constant, so this is the
-  // exact string the server sends — the old test faked a wording the route had
-  // stopped sending, which is how the raw error reached operators unnoticed.
-  it("shows the 'already sees every language' note when the server refuses a maintainer+", async () => {
-    mockPutMemberScopes.mockRejectedValue(new Error(LANE_SCOPE_ABOVE_CEILING_ERROR))
-
-    renderPopover()
-    openPopover()
-    pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-
-    await waitFor(() =>
-      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
-        /maria is a maintainer or above on this project, so they already see every language/i,
-      ),
-    )
-    // Not treated as an error state.
-    expect(screen.queryByText(LANE_SCOPE_ABOVE_CEILING_ERROR)).not.toBeInTheDocument()
   })
 
   it("offers no Add for someone the roster shows at maintainer or above", async () => {
@@ -392,6 +354,7 @@ describe("StaffLanePopover", () => {
     const add = screen.getByRole("button", { name: /spanish language lane only/i })
     expect(add).toBeDisabled()
     fireEvent.click(add)
+    expect(screen.queryByTestId("give-access-launch")).not.toBeInTheDocument()
     expect(mockAddProjectMember).not.toHaveBeenCalled()
     expect(mockPutMemberScopes).not.toHaveBeenCalled()
   })
@@ -410,16 +373,9 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    const preview = /maria stays a project lead on mark, spanish language lane only/i
+    const preview = /maria remains project lead on mark, spanish language lane only/i
     expect(screen.getByTestId("staff-lane-popover")).toHaveTextContent(preview)
-    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as a reviewer/i)
-
-    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-
-    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-    // Never a downgrade: no membership write for someone already above the pick.
-    expect(mockAddProjectMember).not.toHaveBeenCalled()
-    await waitFor(() => expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(preview))
+    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as reviewer/i)
   })
 
   it("filters the org roster by the search query", async () => {
@@ -522,14 +478,10 @@ describe("StaffLanePopover", () => {
       fireEvent.click(screen.getByText("kean"))
       fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
-      await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-      expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "kean", 300, {
-        scopeLanes: ["es"],
-      })
-      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 22, [
-        { kind: "lane", value: "es" },
-      ])
+      // AQU-2322: the project invitee is handed to Give access, which writes the lane grant.
+      expect(await screen.findByTestId("give-access-launch")).toHaveAttribute("data-user", "22")
+      expect(mockAddProjectMember).not.toHaveBeenCalled()
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
     })
 
     it("tells a non-org-member project admin that they can't see the roster", () => {
@@ -731,6 +683,53 @@ describe("StaffLanePopover", () => {
       expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
         { kind: "lane", value: "ln-fr" },
       ])
+    })
+
+    // AQU-2324: Give access writes a lane GRANT and no scope row. A list that
+    // read scopes alone left that person off the lane they can open — and a
+    // scopes PUT for them would send an empty set, which means every lane.
+    it("lists someone on this lane through a grant alone, and removes them through the grant's dry run, never a scopes PUT", async () => {
+      staffRoster()
+      scopesByUser({ 10: [{ kind: "lane", value: "ln-es" }], 11: [] })
+      laneGrants.byUser = { 11: [{ laneId: "ln-es", name: "Spanish", level: 400 }] }
+
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-11")).toBeInTheDocument())
+      expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      // One lane grant is not "their last lane": dropping it narrows access.
+      expect(screen.queryByTestId("staff-lane-last-lane-note-11")).not.toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-remove-11")).toBeEnabled()
+
+      fireEvent.click(screen.getByTestId("staff-lane-remove-11"))
+
+      const launch = await screen.findByTestId("remove-access-launch")
+      expect(launch).toHaveAttribute("data-user", "11")
+      expect(launch).toHaveAttribute("data-grants", "lane:ln-es")
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    })
+
+    it("does not list a grant on another lane", async () => {
+      staffRoster()
+      scopesByUser({ 10: [], 11: [] })
+      laneGrants.byUser = { 11: [{ laneId: "ln-fr", name: "French", level: 400 }] }
+
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-empty")).toBeInTheDocument())
+    })
+
+    it("opens this lane on the Places lens from Manage access", async () => {
+      staffRoster()
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      expect(await screen.findByRole("link", { name: "Manage access" })).toHaveAttribute(
+        "href",
+        "/orgs/1/access?place=lane:ln-es",
+      )
     })
 
     // The trap the members matrix still falls into: an empty lane list means
@@ -1006,10 +1005,8 @@ describe("StaffLanePopover", () => {
       fireEvent.click(screen.getByText("mark"))
       fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
-      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
-      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 11, [
-        { kind: "lane", value: "es" },
-      ])
+      expect(await screen.findByTestId("give-access-launch")).toHaveAttribute("data-user", "11")
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
     })
   })
 
@@ -1036,7 +1033,7 @@ describe("StaffLanePopover", () => {
       expect(screen.getByRole("button", { name: /spanish language lane only/i })).toBeInTheDocument()
 
       fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
-      await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
+      expect(await screen.findByTestId("give-access-launch")).toBeInTheDocument()
       expect(onRowClick).not.toHaveBeenCalled()
     })
 
@@ -1048,5 +1045,77 @@ describe("StaffLanePopover", () => {
       expect(onRowClick).toHaveBeenCalledTimes(1)
       expect(onRowClick).toHaveBeenCalledWith({ lane: "es", label: "Spanish (es)" })
     })
+  })
+
+  // AQU-2322: the walk of PR 2180 clicked Add and got no dialog. The table's
+  // columns depend on which lane's popover is open, so closing the popover
+  // rebuilds the actions cell and remounts it; a request held in the popover
+  // was gone before the launcher could read it. The real table, not a stand-in.
+  it("in the project's Languages table, Add opens Give access though the table remounts the popover as it closes (AQU-2322)", async () => {
+    render(
+      <MemoryRouter>
+        <OverviewLaneTable
+          projectId="proj-1"
+          projectName="Mark"
+          orgId={1}
+          jwt="jwt-pm"
+          lanes={[{ lane: "es", laneId: "ln-es", name: "Spanish", role: "target", totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null }]}
+          defaultLanguageLabel="English"
+          extraLanes={[]}
+          files={[]}
+          roleLevel={700}
+          author="pm"
+          canManageLanes
+          canAddLanguage={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId("overview-lane-people-es"))
+    pickMaria()
+    fireEvent.click(await screen.findByRole("button", { name: /spanish language lane only/i }))
+
+    const launch = await screen.findByTestId("give-access-launch")
+    expect(launch).toHaveAttribute("data-user", "10")
+    expect(launch).toHaveAttribute("data-place", "lane:ln-es")
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+  })
+
+  // AQU-2324: the walk of PR 2198 found the same remount behind Remove. On the
+  // Languages table a grant-only row's Remove closed the popover and nothing
+  // opened: the removal was held in the popover's state, and the table threw
+  // that away as it rebuilt the cell. The org Projects table, which does not
+  // remount it, showed the dialog.
+  it("in the project's Languages table, a grant-only row's Remove opens the grant's dry run though the table remounts the popover (AQU-2324)", async () => {
+    mockProjectMembers = [
+      { userId: 11, username: "mark", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    laneGrants.byUser = { 11: [{ laneId: "ln-es", name: "Spanish", level: 400 }] }
+    render(
+      <MemoryRouter>
+        <OverviewLaneTable
+          projectId="proj-1"
+          projectName="Mark"
+          orgId={1}
+          jwt="jwt-pm"
+          lanes={[{ lane: "es", laneId: "ln-es", name: "Spanish", role: "target", totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null }]}
+          defaultLanguageLabel="English"
+          extraLanes={[]}
+          files={[]}
+          roleLevel={700}
+          author="pm"
+          canManageLanes
+          canAddLanguage={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId("overview-lane-people-es"))
+    fireEvent.click(await screen.findByTestId("staff-lane-remove-11"))
+
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+    const launch = await screen.findByTestId("remove-access-launch")
+    expect(launch).toHaveAttribute("data-org", "1")
+    expect(launch).toHaveAttribute("data-user", "11")
+    expect(launch).toHaveAttribute("data-grants", "lane:ln-es")
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
   })
 })

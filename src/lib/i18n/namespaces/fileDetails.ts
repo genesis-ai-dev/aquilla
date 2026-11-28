@@ -18,7 +18,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
     // Media redesign slice 2: a language that counts its recordings.
-    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} approved",
+    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} validated",
     "fileDetails.bothProgressValue": "{done} of {total} lines done on text and audio",
     "fileDetails.rename": "Rename",
     "fileDetails.reimport": "Re-import",
@@ -31,14 +31,16 @@ export const fileDetails = defineNamespace({
     _context: {
       description:
         "The 'File details' modal, opened from a file row's overflow (⋯) menu in the " +
-        "workspace sidebar. Shows a metadata table (label on the left, value on the " +
+        "workspace sidebar and from the editor's File options menu, under This file. " +
+        "Shows a metadata table (label on the left, value on the " +
         "right) followed by a column of file action buttons; actions the user lacks " +
         "permission for are disabled with an explanatory sentence underneath.",
     },
     keys: {
       "fileDetails.menuItem": {
         description:
-          "Menu item in the file row's overflow menu that opens the File details modal. " +
+          "Menu item in the file row's overflow menu and the editor's File options menu " +
+          "that opens the File details modal. " +
           "Noun phrase naming what will be shown, not an action verb.",
         maxLength: 24,
       },

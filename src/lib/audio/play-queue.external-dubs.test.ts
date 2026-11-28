@@ -24,6 +24,7 @@ import {
   updateExternalDubCells,
   getExternalDubsSnapshot,
   setQueueAudibility,
+  setQueueTimingMode,
   planTargetOverlay,
   type PlayContext,
 } from "./play-queue"
@@ -142,6 +143,25 @@ describe("dubs driven by a linked picture", () => {
     const cells = [line("a", 10, 12, 1500)]
     expect(planTargetOverlay(cells, 0, new Set(), "advance", 10.1).kind).toBe("keep")
     expect(planTargetOverlay(cells, 0, new Set(), "advance", 10.1, { masterIsExternal: true }).kind).toBe("fire")
+  })
+
+  // AQU-2253: a file with a film may switch timing now. Following the source
+  // the picture drives the dubs; the workspace starts that driver in the same
+  // commit that tells the queue the mode changed — and the queue's stop on a
+  // flip used to drop the context the driver had just been given, so the film
+  // played on with every take silent.
+  it("a timing switch made while the picture takes over leaves its dubs sounding", async () => {
+    setQueueTimingMode("audioFirst")
+    try {
+      startExternalDubs(ctxFor([line("a", 10, 12, 1500)]))
+      setQueueTimingMode("dubbing")
+      setExternalDubsPlaying(true)
+      tickExternalDubs(10.1)
+      await settle()
+      expect(poolIds()).toEqual(["a"])
+    } finally {
+      setQueueTimingMode("dubbing")
+    }
   })
 
   it("does not fire before the take is due", async () => {

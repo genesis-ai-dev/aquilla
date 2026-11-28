@@ -6,6 +6,8 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Run the type-check as `pnpm typecheck`, in scripts and workflows too. It is the same `tsc -b` under a 6 GiB heap; a bare `tsc -b` gets Node's default ceiling (about 4 GiB at best), which the app project (about 4.8 GB) fits only while GC keeps up, and when it stops fitting every PR's preview, the dev deploy and release-verify go red together.
+
 Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
 plus environment/artifact checks. They run no tests, lint, or secret scans.
 QA tests the published preview; its green check proves compilation only.
@@ -19,14 +21,16 @@ and required checks are green. `ci.yml` is that check: lint (including
 `pnpm neon:check`. The base is `dev`, the label is not `on hold`, and the
 pull request is not stacked on an open parent. GitHub Actions does not click
 merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
-merges. (One exception: `desktop-release-cut.yml` merges the version-bump pull
+merges. (Two exceptions. `desktop-release-cut.yml` merges the version-bump pull
 request it opened itself, and only when the diff is the four version files;
-`docs/DESKTOP-RELEASES.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
+`docs/DESKTOP-RELEASES.md`. `i18n-fill.yml` merges the translation pull request
+it opened itself, and only when the diff is generated locale catalogs;
+`docs/decisions/0021-translations-are-filled-after-the-merge.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
 again. `walk-status.yml` reports the walk on the PR's head as the `qa-walk`
 status (pending until a browser walk is posted at that head).
-`scripts/release-plan.mjs` reads the same comment later and keeps the PR off
-the release line when the walk failed (`WALK_POLICY=strict`: unless it is
-`PASS` or `none`) — as it does for a PR whose files touch a holding risk area
+`scripts/release-plan.mjs` reads the same comment later, and since 2026-11-27
+no walk verdict keeps a PR off the release line (`WALK_POLICY=fail-only` or
+`strict` restores a hold; `docs/RELEASE-RISK-GATES.md` §7). What holds is a PR whose files touch a holding risk area
 (`risk:*` labels, `docs/RELEASE-RISK-GATES.md`) until that area's gate check is
 green on the PR's head or a person adds `release:approved`.
 
@@ -35,15 +39,27 @@ green on the PR's head or a person adds `release:approved`.
 | `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy. Still a required check. It does not run unit tests, lint, or the secret scan. |
 | `.github/workflows/ci.yml` | every pull request to `dev`, and `workflow_dispatch` | lint, `i18n:check`, the secret scan, unit tests, worker tests, and `pnpm neon:check`. Required on `dev` once a run there is green. Typecheck, the Vite build, Tauri, and the IDML browser suite stay on `workflow_dispatch`. |
 | Grok walk | comment on the PR, not a check | `PASS` at the head sha. `FLAKY` and `BLOCKED` are a checker bug; walk again. |
-| Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | a `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. It does not run on pull requests. |
-| Adversarial Jev | the advisory `pr` job on every non-draft PR into `dev`, plus the 09:00 UTC nightly against deployed `dev` and `workflow_dispatch` | the `pr` job attacks the PR's own preview, keeps one sticky comment, and files no tickets; it goes red only when the harness said nothing about the commit (`HARNESS UNAVAILABLE`, `NOT RUN`, `NOT VERIFIED` — AQU-1899). The nightly files Linear tickets. Neither affects the cut or the deploy. |
+| Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | advisory since 2026-11-27: the deploy neither waits for it nor holds on a `FAIL` (`docs/RELEASE-RISK-GATES.md` §7). It does not run on pull requests. |
+| Adversarial Jev | the 09:00 UTC nightly against deployed `dev`, and `workflow_dispatch`. No per-PR job since 2026-11-27 | the nightly files Linear tickets. It does not affect the cut or the deploy. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
+
+**UI text is translated after the merge (AQU-2792).** A pull request adds the English
+message and its context notes, and leaves the locale catalogs alone. `i18n:check` reads
+the branch's English (context notes, retired words) and does not fail on a string that is
+not translated yet. When the pull request reaches `dev`, `.github/workflows/i18n-fill.yml`
+translates what is new or reworded into every locale (`pnpm i18n:fill`) and lands it as a
+catalog-only pull request of its own. Do not translate in a feature branch, and never
+grow `src/lib/i18n/translation-baseline.json` by hand. `pnpm i18n:coverage` says whether
+`dev` is fully translated. The full workflow is in `docs/I18N-CONTEXT-CATALOG.md`, under
+"Translation coverage".
 
 Branch protection requires the `ci.yml` jobs that always report a status
 (`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,
 `agent-worker-tests`) and the Cloudflare preview. `unit` aggregates the three
 `unit (shard N/3)` matrix jobs that split the root Vitest suite (AQU-1991); its
-name is what protection pins. Admins are exempt
+name is what protection pins. `sync-worker-tests` and `auth-worker-tests`
+aggregate their own shards the same way (three and two), and those shards run
+only when that worker changed. Admins are exempt
 (`enforce_admins` is false). The gate only works if that account does not merge
 around a red check.
 

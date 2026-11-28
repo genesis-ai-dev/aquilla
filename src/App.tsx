@@ -1,6 +1,8 @@
 import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, matchPath, type Location } from "react-router-dom"
+import { ACCESS_AUDIT_REDIRECT } from "@/lib/access/people-lens"
+import { TeamToAccessRedirect } from "@/pages/TeamToAccessRedirect"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgOverview } from "@/components/org/OrgOverview"
@@ -169,16 +171,13 @@ const ProjectSettingsDialog = lazy(() =>
 const OrgAccessPage = lazy(() =>
   import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
 )
-const OrgAccessAuditPage = lazy(() =>
-  import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
+const OrgAccessPersonPage = lazy(() =>
+  import("@/pages/OrgAccessPersonPage").then((m) => ({ default: m.OrgAccessPersonPage })),
 )
 // AQU-1958: org-wide comments view — the project Comments page's list across
 // every project in the org the caller can see.
 const OrgCommentsPage = lazy(() =>
   import("@/pages/OrgCommentsPage").then((m) => ({ default: m.OrgCommentsPage })),
-)
-const MembersPage = lazy(() =>
-  import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
 const Settings = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.Settings })),
@@ -221,12 +220,6 @@ const OAuthConsent = lazy(() =>
 )
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
-)
-const TeamsList = lazy(() =>
-  import("@/components/org/TeamsList").then((m) => ({ default: m.TeamsList })),
-)
-const TeamDetail = lazy(() =>
-  import("@/components/org/TeamDetail").then((m) => ({ default: m.TeamDetail })),
 )
 const TeamSettingsIndex = lazy(() =>
   import("@/pages/TeamSettings").then((m) => ({ default: m.TeamSettingsIndex })),
@@ -473,8 +466,8 @@ export default function App() {
           <AiModelConsentDialog />
           <AiModelDownloadChip />
           <AudioBulkProgressBanner />
-          {/* AQU-2654: batch drafting keeps running after the user leaves the
-              editor — its progress, completion and failure follow them. */}
+          {/* Batch drafting keeps running after the user leaves the editor.
+              Its progress, completion and failure are a bottom-right toast. */}
           <CompletionBatchStatusHost />
           <GlobalAudioShortcuts />
           <VersionBadge />
@@ -561,18 +554,20 @@ function AppRoutes() {
           <Route path="archived" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
           <Route path="archived/files" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
           <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
-          <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
-          <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
+          {/* People & access is the one place for people, folders (teams) and access. */}
+          <Route path="teams" element={<Navigate to="../access" replace relative="path" />} />
+          <Route path="teams/:groupId" element={<TeamToAccessRedirect />} />
           <Route path="teams/:groupId/settings" element={<OrgLazyRoute><TeamSettingsIndex /></OrgLazyRoute>} />
           <Route
             path="teams/:groupId/settings/identity"
             element={<Navigate to=".." replace relative="path" />}
           />
-          <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
-          <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="members" element={<Navigate to="../access" replace relative="path" />} />
+          <Route path="members/matrix" element={<Navigate to="../../access" replace relative="path" />} />
           <Route path="comments" element={<OrgLazyRoute><OrgCommentsPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
-          <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
+          <Route path="access/people/:userId" element={<OrgLazyRoute><OrgAccessPersonPage /></OrgLazyRoute>} />
+          <Route path="access-audit" element={<Navigate to={ACCESS_AUDIT_REDIRECT} replace relative="path" />} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />

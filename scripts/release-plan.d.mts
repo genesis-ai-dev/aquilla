@@ -49,8 +49,8 @@ export interface UnreleasedPr extends FileClassification {
   files?: string[]
 }
 
-/** How a walk verdict is read: `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
-export type WalkPolicy = "fail-only" | "strict"
+/** How a walk verdict is read: `advisory` (the default) holds on none, `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
+export type WalkPolicy = "advisory" | "fail-only" | "strict"
 export const WALK_POLICIES: WalkPolicy[]
 export const DEFAULT_WALK_POLICY: WalkPolicy
 
@@ -87,7 +87,7 @@ export function isDocsOrTestOnly(files: string[]): boolean
 /**
  * True when every file is a generated locale catalog
  * (`src/lib/i18n/messages/<locale>.ts`, never `en.ts`, `index.ts` or `all.ts`)
- * or the source-hash sidecar beside them. The one kind of direct commit the
+ * or the source-hash sidecar and translation baseline beside them. The one kind of direct commit the
  * release line picks without a person.
  */
 export function isLocaleCatalogOnly(files: string[]): boolean

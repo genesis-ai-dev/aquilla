@@ -241,9 +241,16 @@ export function rewriteTestLaneResolve(sql: string): string {
       `(SELECT aquilla_test_resolve_source_lane(${project}))`)
 }
 
+/**
+ * Switches the fill on for the session. A session setting, so it is not part
+ * of a dumped data directory: a database loaded from the harness template
+ * (db/shared/test-pg-harness.ts) runs this again, as does every reset.
+ */
+export const TEST_LANE_FILL_ON_SQL = `SELECT set_config('aquilla.test_lane_fill', 'on', false)`
+
 export async function installTestLaneFill(
   exec: (sql: string) => Promise<unknown>,
 ): Promise<void> {
   await exec(TEST_LANE_FILL_SQL)
-  await exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
+  await exec(TEST_LANE_FILL_ON_SQL)
 }

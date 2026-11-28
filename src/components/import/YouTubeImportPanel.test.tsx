@@ -13,7 +13,7 @@ vi.mock("@/lib/import", async importOriginal => ({
 
 import { YouTubeImportPanel } from "./YouTubeImportPanel"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
-import { createMediaFileCommit } from "@/lib/import"
+import { createMediaFileCommit, probeMediaDurationMs } from "@/lib/import"
 import { embeddedSubtitleFixture } from "@/lib/parsers/__fixtures__/embedded-subtitles"
 import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
@@ -157,11 +157,33 @@ describe("YouTubeImportPanel", () => {
     expect(publish).toHaveBeenCalledTimes(2)
   })
 
+  // Import map X-D-silent-cue-drop (Nov 2): a cue with a typo in its time
+  // vanished from the preview and the import without a word.
+  it("says how many cue times it could not read, as Upload files does", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Import a caption export"))
+    await selectFile(makeFile(`WEBVTT
+
+00:00:01.000 --> 00:00:02.000
+Hello world
+
+00:00:xx.000 --> 00:00:12.000
+Lost words
+`, "Captions.vtt"))
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /preview captions/i }))
+    })
+    await waitFor(() => expect(screen.getByText(/hello world/i)).toBeInTheDocument())
+    expect(screen.getByTestId("youtube-captions-unreadable")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
+  })
+
   it("links a picture without requiring captions", async () => {
     const onImported = vi.fn()
     renderPanel({ onImported })
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), {
+    fireEvent.change(screen.getByLabelText("Film name"), {
       target: { value: "My video" },
     })
     expect(screen.queryByLabelText("Your caption export")).not.toBeInTheDocument()
@@ -175,7 +197,12 @@ describe("YouTubeImportPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Link film" }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
   })
-  it("offers automatic captions from original media with the YouTube picture", async () => {
+  // AQU-2426: original media with no captions asks whole or transcribed; the
+  // recording is never cut or transcribed without that choice.
+  it.each([
+    ["Import whole recording", "whole"],
+    ["Transcribe and import", "transcribe"],
+  ] as const)("original media with no captions: %s, with the YouTube picture", async (button, mode) => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({
       id: "media1", name: "clip.mp3", type: "audio", createdAt: "2026-10-01",
@@ -187,16 +214,107 @@ describe("YouTubeImportPanel", () => {
     await selectFile(new File(["audio"], "clip.mp3", { type: "audio/mpeg" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("dialog")
-    fireEvent.click(screen.getByRole("button", { name: "Import media and link the film" }))
+    expect(screen.queryByRole("button", { name: "Transcribe audio" })).not.toBeInTheDocument()
+    if (mode === "transcribe") {
+      fireEvent.click(screen.getByRole("button", { name: "Import and transcribe…" }))
+      expect(await screen.findByText("Requests")).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole("button", { name: button }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
     expect(createMediaFileCommit).toHaveBeenCalledWith(
       expect.objectContaining({ name: "clip.mp3" }), "audio",
       expect.objectContaining({
         mediaPictureUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         mediaTextSource: undefined,
+        mediaMode: mode,
       }),
     )
   })
+  // Import map D#20: the same 2 GB limit was told three ways; this one had no
+  // number and lumped an empty file in with it.
+  it("says an original over the limit is, the importer's way, and an empty one is empty", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    const huge = new File(["x"], "Episode 101.mov", { type: "video/quicktime" })
+    Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
+    await selectFile(huge)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByText("Episode 101.mov is larger than 2 GB, so it can't be imported. Save a smaller copy and import that.")).toBeInTheDocument()
+
+    await selectFile(new File([], "Empty.mov", { type: "video/quicktime" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByText("Empty.mov is empty.")).toBeInTheDocument()
+  })
+
+  // AQU-2344 (review, Nov 9): looking for captions inside an .mp4 reads the
+  // whole file into memory. Upload files only does that up to the source
+  // ceiling; this door did it for a 1.8 GB episode, which stalls or fails on a
+  // phone. It has the same guard now, and both doors say the file was not
+  // checked.
+  it("does not read a big film into memory to look for captions, and says it wasn't checked", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    const episode = new File(["x"], "Episode 101.mp4", { type: "video/mp4" })
+    Object.defineProperty(episode, "size", { value: 1.8 * 1024 * 1024 * 1024 })
+    const read = vi.spyOn(episode, "arrayBuffer")
+    await selectFile(episode)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByTestId("recording-import-choice")).toBeInTheDocument()
+    expect(read).not.toHaveBeenCalled()
+    expect(screen.getByTestId("recording-import-captions-unread")).toHaveTextContent(
+      "Episode 101.mp4 is over 95.0 MB, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    )
+  })
+
+  it("a small original with no captions inside gets no such note", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    await selectFile(new File(["x"], "clip.mp3", { type: "audio/mpeg" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByTestId("recording-import-choice")).toBeInTheDocument()
+    expect(screen.queryByTestId("recording-import-captions-unread")).toBeNull()
+  })
+
+  // AQU-2682 review: original media is stored as the file's source audio, so
+  // it meets the same "every language" answer as Upload files.
+  it("refuses original media with the reason before it is read or uploaded", async () => {
+    const REASON = "Importing audio or video needs access to every language."
+    renderPanel({ mediaDisabledReason: REASON })
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    expect(screen.getByTestId("youtube-media-disabled")).toHaveTextContent(REASON)
+    const media = new File(["audio"], "clip.mp4", { type: "video/mp4" })
+    const readBytes = vi.spyOn(media, "arrayBuffer")
+    await selectFile(media)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(REASON)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(readBytes).not.toHaveBeenCalled()
+    expect(probeMediaDurationMs).not.toHaveBeenCalled()
+    expect(createMediaFileCommit).not.toHaveBeenCalled()
+  })
+
+  it("refuses the import when the answer turns to no while the preview is open", async () => {
+    const REASON = "Importing audio or video needs access to every language."
+    const onImported = vi.fn()
+    const view = renderPanel({ onImported })
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    await selectFile(new File(["audio"], "clip.mp3", { type: "audio/mpeg" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    await screen.findByRole("dialog")
+    view.rerender(<YouTubeImportPanel ctx={{ projectId: "p1", author: "dev", getToken: vi.fn(async () => "token") }}
+      onImported={onImported} mediaDisabledReason={REASON} />)
+    // With no captions inside, the branch's whole-or-transcribed choice opens.
+    fireEvent.click(screen.getByRole("button", { name: "Import whole recording" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(REASON)
+    expect(createMediaFileCommit).not.toHaveBeenCalled()
+    expect(onImported).not.toHaveBeenCalled()
+  })
+
   it("reviews and edits embedded captions in original media", async () => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({
@@ -227,7 +345,7 @@ describe("YouTubeImportPanel", () => {
   it("invalidates a prepared picture when the caption source changes", async () => {
     renderPanel()
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), { target: { value: "My picture" } })
+    fireEvent.change(screen.getByLabelText("Film name"), { target: { value: "My picture" } })
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("button", { name: "Link film" })
     fireEvent.click(screen.getByLabelText("Import a caption export"))

@@ -32,6 +32,13 @@ from`. Resolve as a key-level union, the base's hash winning on overlap, and dro
 longer exist. Re-serialise with `JSON.stringify(all, null, 2) + "\n"`; a byte-identical
 round-trip proves there are no duplicate keys.
 
+**`src/lib/i18n/translation-baseline.json`.** The keys each locale may still show in English
+(AQU-2740). Never hand-merge or union it: take the base's side whole, finish resolving the
+catalogs and `source-hashes.json`, then run `pnpm i18n:baseline` (prune only). Untranslated
+keys of the branch's own are not a conflict to fix: the fill job translates them once the
+branch is on `dev` (AQU-2792). Never add them to the baseline. A feature branch should carry
+no change to this file or to the locale catalogs at all.
+
 **`eslint-suppressions.json`.** Counts are per file and all-or-nothing: one violation over the
 count un-suppresses every violation in that file. A branch can therefore appear to introduce
 dozens of lint errors it did not write. Attribute by running eslint on the same files in the

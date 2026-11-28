@@ -1,7 +1,7 @@
 /**
  * AQU-2459 Phase B: Assignment member cells across BOTH materialized and virtual
  * source files without mutating the `assignment_member_cells` database view
- * (keeping migration 0213 100% additive for zero-downtime production rollouts).
+ * (keeping migration 0214 100% additive for zero-downtime production rollouts).
  *
  * - Non-virtual files (`COALESCE(f.source_virtual, FALSE) = FALSE`): read through
  *   the existing `assignment_member_cells` view (live range resolution for

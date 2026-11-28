@@ -222,7 +222,7 @@ function isUndefinedColumnErr(err: unknown): boolean {
 /**
  * Look up a single file's virtual head metadata. Returns null when the file
  * does not exist, is not virtual (`source_virtual = FALSE`), or has no head
- * revision row yet. Safe on databases predating migration 0213.
+ * revision row yet. Safe on databases predating migration 0214.
  */
 export async function getVirtualFileHead(
   db: AquillaDb,

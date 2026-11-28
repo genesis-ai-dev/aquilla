@@ -385,6 +385,8 @@ export const ms: Catalog = {
   "error.monday.sync": "Tidak dapat menghantar projek ini ke Monday.",
   "error.airtable.loadConnection": "Tidak dapat memuatkan status sambungan Airtable.",
   "error.airtable.connect": "Tidak dapat menyambungkan Airtable. Cuba lagi.",
+  "error.airtable.tokenRejected": "Airtable tidak menerima token ini. Pastikan anda menyalinnya sepenuhnya dan token itu belum dipadamkan.",
+  "error.airtable.missingScopes": "Token ini memerlukan kebenaran akses tambahan dalam Airtable: tambahkan {scopes} padanya, kemudian tampalkannya semula.",
   "error.airtable.unreachable": "Tidak dapat mengakses Airtable. Cuba lagi dalam seminit.",
   "error.airtable.disconnect": "Tidak dapat memutuskan sambungan Airtable.",
   "error.airtable.loadBases": "Tidak dapat memuatkan pangkalan Airtable anda.",

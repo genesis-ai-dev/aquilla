@@ -5389,6 +5389,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -10764,6 +10766,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -16123,6 +16127,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -21511,6 +21517,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -28173,6 +28181,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -34837,6 +34847,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -41569,6 +41581,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -48352,6 +48366,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -55047,6 +55063,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -63690,6 +63708,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -72337,6 +72357,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },
@@ -90085,6 +90107,8 @@
     "importExport.recordingChoice.later": "208c0c4264b49613",
     "workspace.transcribeBadge.waitingForLimitPill": "a1e53a6e288cd0db",
     "workspace.transcribeBadge.waitingForLimitTooltip": "d4d3d760a08e4a86",
+    "error.airtable.tokenRejected": "c1d3f78e23b9c7c5",
+    "error.airtable.missingScopes": "9cb9eb92775ae9ed",
     "editor.column.resizeSplit": "5e65bdf17ab2b9fd",
     "editor.column.splitValue": "e15295c60a73c189"
   },

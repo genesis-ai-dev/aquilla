@@ -387,6 +387,8 @@ export const zh_Hans: Catalog = {
   "error.monday.sync": "无法将此项目推送至 Monday。",
   "error.airtable.loadConnection": "无法加载 Airtable 连接状态。",
   "error.airtable.connect": "无法连接 Airtable。请重试。",
+  "error.airtable.tokenRejected": "Airtable 未接受此令牌。请确认你已完整复制令牌，且令牌未被删除。",
+  "error.airtable.missingScopes": "此令牌需要更多 Airtable 访问权限：为其添加 {scopes}，然后重新粘贴令牌。",
   "error.airtable.unreachable": "无法访问 Airtable。请一分钟后重试。",
   "error.airtable.disconnect": "无法断开 Airtable 连接。",
   "error.airtable.loadBases": "无法加载你的 Airtable 数据库。",

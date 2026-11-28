@@ -388,6 +388,8 @@ export const ru: Catalog = {
   "error.monday.sync": "Не удалось отправить этот проект в Monday.",
   "error.airtable.loadConnection": "Не удалось загрузить состояние подключения к Airtable.",
   "error.airtable.connect": "Не удалось подключить Airtable. Попробуйте ещё раз.",
+  "error.airtable.tokenRejected": "Airtable не принял этот токен. Проверьте, что вы скопировали его целиком и что он не был удалён.",
+  "error.airtable.missingScopes": "Этому токену нужны дополнительные разрешения в Airtable: добавьте к нему {scopes}, затем вставьте его ещё раз.",
   "error.airtable.unreachable": "Не удалось связаться с Airtable. Повторите попытку через минуту.",
   "error.airtable.disconnect": "Не удалось отключить Airtable.",
   "error.airtable.loadBases": "Не удалось загрузить ваши базы Airtable.",

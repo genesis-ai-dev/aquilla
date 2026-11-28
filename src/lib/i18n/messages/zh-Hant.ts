@@ -387,6 +387,8 @@ export const zh_Hant: Catalog = {
   "error.monday.sync": "無法將此專案推送至 Monday。",
   "error.airtable.loadConnection": "無法載入 Airtable 連線狀態。",
   "error.airtable.connect": "無法連線至 Airtable。請重試。",
+  "error.airtable.tokenRejected": "Airtable 未接受此權杖。請確認你已完整複製權杖，且權杖未被刪除。",
+  "error.airtable.missingScopes": "此權杖需要更多 Airtable 存取權限：為其新增 {scopes}，然後重新貼上權杖。",
   "error.airtable.unreachable": "無法存取 Airtable。請一分鐘後重試。",
   "error.airtable.disconnect": "無法中斷 Airtable 連線。",
   "error.airtable.loadBases": "無法載入你的 Airtable 資料庫。",

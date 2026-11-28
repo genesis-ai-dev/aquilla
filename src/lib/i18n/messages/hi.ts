@@ -406,6 +406,8 @@ export const hi: Catalog = {
   "error.monday.newBoard": "Monday में नया बोर्ड नहीं बन सका।",
   "error.airtable.loadConnection": "Airtable कनेक्शन की स्थिति लोड नहीं हो सकी।",
   "error.airtable.connect": "Airtable से कनेक्ट नहीं हो सका। फिर से कोशिश करें।",
+  "error.airtable.tokenRejected": "Airtable ने यह टोकन स्वीकार नहीं किया। जाँचें कि आपने इसे पूरा कॉपी किया है और इसे हटाया नहीं गया है।",
+  "error.airtable.missingScopes": "इस टोकन को Airtable में और अनुमतियाँ चाहिए: इसमें {scopes} जोड़ें, फिर इसे दोबारा पेस्ट करें।",
   "error.airtable.unreachable": "Airtable से संपर्क नहीं हो सका। एक मिनट बाद फिर से कोशिश करें।",
   "error.airtable.disconnect": "Airtable से कनेक्शन नहीं हटाया जा सका।",
   "error.airtable.loadBases": "आपके Airtable बेस लोड नहीं हो सके।",

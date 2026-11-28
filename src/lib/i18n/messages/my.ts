@@ -387,6 +387,8 @@ export const my: Catalog = {
   "error.monday.sync": "ဤပရောဂျက်ကို Monday သို့ မပို့နိုင်ပါ။",
   "error.airtable.loadConnection": "Airtable ချိတ်ဆက်မှု အခြေအနေကို ဖွင့်၍ မရပါ။",
   "error.airtable.connect": "Airtable ကို ချိတ်ဆက်၍ မရပါ။ ထပ်မံကြိုးစားပါ။",
+  "error.airtable.tokenRejected": "Airtable က ဤတိုကင်ကို လက်မခံပါ။ တိုကင်တစ်ခုလုံးကို ကူးယူထားပြီး ၎င်းကို မဖျက်ရသေးကြောင်း စစ်ဆေးပါ။",
+  "error.airtable.missingScopes": "ဤတိုကင်သည် Airtable တွင် ဝင်ရောက်အသုံးပြုခွင့်များ ထပ်မံလိုအပ်ပါသည်။ ၎င်းတွင် {scopes} ကို ထည့်ပြီးနောက် တိုကင်ကို ထပ်မံကူးထည့်ပါ။",
   "error.airtable.unreachable": "Airtable ကို ဆက်သွယ်၍ မရပါ။ တစ်မိနစ်ကြာလျှင် ထပ်မံကြိုးစားပါ။",
   "error.airtable.disconnect": "Airtable ချိတ်ဆက်မှုကို ဖြုတ်၍ မရပါ။",
   "error.airtable.loadBases": "သင်၏ Airtable ဒေတာဘေ့စ်များကို ဖွင့်၍ မရပါ။",

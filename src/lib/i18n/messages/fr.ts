@@ -379,6 +379,8 @@ export const fr: Catalog = {
   "error.monday.sync": "Impossible de pousser ce projet vers Monday.",
   "error.airtable.loadConnection": "Impossible de charger l'état de la connexion à Airtable.",
   "error.airtable.connect": "Impossible de connecter Airtable. Réessayez.",
+  "error.airtable.tokenRejected": "Airtable n'a pas accepté ce jeton. Vérifiez que vous l'avez copié en entier et qu'il n'a pas été supprimé.",
+  "error.airtable.missingScopes": "Ce jeton a besoin de droits supplémentaires dans Airtable : ajoutez-lui {scopes}, puis collez-le à nouveau.",
   "error.airtable.unreachable": "Impossible de joindre Airtable. Réessayez dans une minute.",
   "error.airtable.disconnect": "Impossible de déconnecter Airtable.",
   "error.airtable.loadBases": "Impossible de charger vos bases Airtable.",

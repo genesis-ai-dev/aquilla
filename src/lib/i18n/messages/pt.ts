@@ -403,6 +403,8 @@ export const pt: Catalog = {
   "error.monday.newBoard": "Não foi possível criar o novo quadro no Monday.",
   "error.airtable.loadConnection": "Não foi possível carregar o status da conexão com o Airtable.",
   "error.airtable.connect": "Não foi possível conectar o Airtable. Tente novamente.",
+  "error.airtable.tokenRejected": "O Airtable não aceitou este token. Confira se você copiou todo o token e se ele não foi excluído.",
+  "error.airtable.missingScopes": "Este token precisa de mais permissões no Airtable: adicione {scopes} a ele e cole-o novamente.",
   "error.airtable.unreachable": "Não foi possível acessar o Airtable. Tente novamente em um minuto.",
   "error.airtable.disconnect": "Não foi possível desconectar o Airtable.",
   "error.airtable.loadBases": "Não foi possível carregar suas bases do Airtable.",

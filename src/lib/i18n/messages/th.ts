@@ -387,6 +387,8 @@ export const th: Catalog = {
   "error.monday.sync": "ไม่สามารถส่งโปรเจกต์นี้ไปยัง Monday ได้",
   "error.airtable.loadConnection": "โหลดสถานะการเชื่อมต่อ Airtable ไม่สำเร็จ",
   "error.airtable.connect": "เชื่อมต่อ Airtable ไม่สำเร็จ โปรดลองอีกครั้ง",
+  "error.airtable.tokenRejected": "Airtable ไม่ยอมรับโทเค็นนี้ โปรดตรวจสอบว่าคุณคัดลอกโทเค็นครบถ้วนและโทเค็นยังไม่ถูกลบ",
+  "error.airtable.missingScopes": "โทเค็นนี้ต้องมีสิทธิ์เข้าถึง Airtable เพิ่มเติม: เพิ่ม {scopes} ให้โทเค็น แล้ววางโทเค็นอีกครั้ง",
   "error.airtable.unreachable": "ติดต่อ Airtable ไม่สำเร็จ โปรดลองอีกครั้งในอีกหนึ่งนาที",
   "error.airtable.disconnect": "ยกเลิกการเชื่อมต่อ Airtable ไม่สำเร็จ",
   "error.airtable.loadBases": "โหลดฐานข้อมูล Airtable ของคุณไม่สำเร็จ",

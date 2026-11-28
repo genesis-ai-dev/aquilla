@@ -47,9 +47,11 @@ describe("media with supplied subtitle cues", () => {
     })
     const posts = requests.filter(request => request.init.method === "POST")
       .map(request => JSON.parse(String(request.init.body)))
-    expect(posts[0].cells).toEqual([
-      expect.objectContaining({ medium: "media", startMs: 200, endMs: 700, sequenceIndex: 0 }),
-      expect.objectContaining({ medium: "media", startMs: 1000, endMs: 1800, sequenceIndex: 1 }),
+    const revisionPost = posts.find(body => Array.isArray(body.units))
+    expect(revisionPost?.virtual).toBe(true)
+    expect(revisionPost?.units).toEqual([
+      expect.objectContaining({ medium: "media", startMs: 200, endMs: 700, sequenceIndex: 0, transcription: "First phrase" }),
+      expect.objectContaining({ medium: "media", startMs: 1000, endMs: 1800, sequenceIndex: 1, transcription: "Second phrase" }),
     ])
     expect(posts.at(-1).attachments).toEqual([
       expect.objectContaining({ transcription: "First phrase", trimStartMs: 200, trimEndMs: 700 }),

@@ -505,7 +505,9 @@ export class Workspace {
     const confirm = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirm).toBeVisible({ timeout: 10_000 })
     const reconciled = this.page.waitForResponse(
-      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      (response) =>
+        (response.url().endsWith("/import/reconcile") || response.url().endsWith("/revisions"))
+        && response.request().method() === "POST",
       { timeout: 30_000 },
     )
     await confirm.click()
@@ -529,7 +531,9 @@ export class Workspace {
     const update = this.page.getByRole("button", { name: /^Update this file$/i })
     await expect(update).toBeVisible({ timeout: 30_000 })
     const reconciled = this.page.waitForResponse(
-      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      (response) =>
+        (response.url().endsWith("/import/reconcile") || response.url().endsWith("/revisions"))
+        && response.request().method() === "POST",
       { timeout: 30_000 },
     )
     await update.click()

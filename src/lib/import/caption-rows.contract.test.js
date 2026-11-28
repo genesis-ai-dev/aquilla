@@ -16,6 +16,8 @@ import { deriveTracksForFile } from '../timeline/tracks'
 import { handleBulkImportRequest } from '../../../sync-worker/src/events/import-route'
 import { handleSourceUploadRequest } from '../../../sync-worker/src/events/source-upload-route'
 import { handleOriginalDownloadRequest } from '../../../sync-worker/src/events/original-download-route'
+import { handleRevisionsRequest } from '../../../sync-worker/src/events/revisions-route'
+import { loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
 import { makeTestDb } from '../../../sync-worker/src/__tests__/helpers/pg-test-db'
 import { makeTestToken } from '../../../sync-worker/src/__tests__/helpers/auth'
 
@@ -43,7 +45,8 @@ async function harness(settings = '{}') {
       async get(key) {
         const bytes = objects.get(key)
         return bytes ? { body: bytes, size: bytes.byteLength,
-          async arrayBuffer() { return bytes } } : null
+          async arrayBuffer() { return bytes },
+          async text() { return new TextDecoder().decode(bytes) } } : null
       },
     },
   }
@@ -53,6 +56,7 @@ async function harness(settings = '{}') {
     const request = new Request(String(url), init)
     const response = await handleBulkImportRequest(request, env)
       ?? await handleSourceUploadRequest(request, env)
+      ?? await handleRevisionsRequest(request, env)
     if (!response) throw new Error(`Unhandled request: ${request.url}`)
     const body = init?.method === 'POST' && typeof init.body === 'string'
       ? JSON.parse(init.body) : null
@@ -72,9 +76,27 @@ async function harness(settings = '{}') {
   const files = async () => (await store.pg.query(
     `SELECT id, name, role, kind, anchor_file_id, deleted_at, cell_count,
             meta::jsonb AS meta FROM files ORDER BY id`)).rows
-  const rows = async fileId => (await store.pg.query(
-    `SELECT value, value_html, type, start_ms, end_ms, sequence_index, medium, metadata
-       FROM cells WHERE file_id = $1 AND side = 'source' ORDER BY start_ms`, [fileId])).rows
+  const rows = async fileId => {
+    const pgRows = (await store.pg.query(
+      `SELECT value, value_html, type, start_ms, end_ms, sequence_index, medium, metadata
+         FROM cells WHERE file_id = $1 AND side = 'source' ORDER BY start_ms`, [fileId])).rows
+    if (pgRows.length > 0) return pgRows
+    const vf = await loadVirtualSourceFile(store.db, env.SNAPSHOTS, 'p', fileId)
+    if (!vf) return []
+    return vf.rows
+      .filter(r => r.tombstoned_at == null)
+      .sort((a, b) => (a.start_ms ?? 0) - (b.start_ms ?? 0))
+      .map(r => ({
+        value: r.value,
+        value_html: r.value_html,
+        type: r.type,
+        start_ms: r.start_ms,
+        end_ms: r.end_ms,
+        sequence_index: r.sequence_index,
+        medium: r.medium,
+        metadata: r.metadata,
+      }))
+  }
   const original = async fileId => {
     const token = await makeTestToken(SECRET, { projectId: 'p', fileId, role: 800 })
     return handleOriginalDownloadRequest(new Request(

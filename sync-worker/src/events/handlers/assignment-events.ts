@@ -34,6 +34,8 @@ import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
 import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
 import { planKeysJoinSql, unitSectionKeyExpr } from '../../../../db/shared/plan-keys'
+import type { LoadedVirtualFile, VirtualSourceRow } from '../../../../db/shared/virtual-source-store'
+import { resolveVirtualPlanKeys } from '../virtual-progress'
 import type { DispatchResult } from './types'
 
 /** Cell ids per INSERT for a 'cells' scope — keeps one statement's parameter
@@ -52,6 +54,8 @@ export function handleAssignmentEvent(
   /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
    *  once per request via allocateSeqRange, outside the write transaction). */
   serverSeq: number,
+  /** AQU-2459 Phase B: preloaded virtual source files for assignment scope resolution. */
+  virtualFiles?: ReadonlyMap<string, LoadedVirtualFile>,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -140,35 +144,61 @@ export function handleAssignmentEvent(
     //    replay never re-resolves an old one under this rule. What a range
     //    scope covers TODAY is re-derived on read instead, from the scope row
     //    written below (AQU-1629), by this same chapter key.
+    const pushVirtualAssignmentRows = (fileId: string, matchedRows: readonly VirtualSourceRow[]) => {
+      for (let i = 0; i < matchedRows.length; i += CELL_SCOPE_CHUNK) {
+        const chunk = matchedRows.slice(i, i + CELL_SCOPE_CHUNK)
+        if (chunk.length === 0) continue
+        const values = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')
+        const binds: unknown[] = []
+        for (const r of chunk) {
+          binds.push(p.assignmentId, fileId, r.cell_id, r.canonical_ref, r.start_ms, r.type)
+        }
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id, canonical_ref, start_ms, type)
+               VALUES ${values}
+               ON CONFLICT DO NOTHING`,
+            )
+            .bind(...binds),
+        )
+      }
+    }
+
     const chaptersByFile = new Map<string, Set<string>>()
     for (const entry of p.scope) {
+      const vf = virtualFiles?.get(entry.fileId)
       if (entry.cellIds) {
-        // AQU-1628: an explicit line set ('cells' scope — the editor's current
-        // selection). Resolved against the live cells projection like every
-        // other scope, so an id that no longer exists simply drops out and
-        // cells_total below counts what was actually assigned. Chunked because
-        // a selection can be larger than one statement's parameter budget.
-        for (let i = 0; i < entry.cellIds.length; i += CELL_SCOPE_CHUNK) {
-          const chunk = entry.cellIds.slice(i, i + CELL_SCOPE_CHUNK)
-          if (chunk.length === 0) continue
-          stmts.push(
-            db
-              .prepare(
-                `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
-                 SELECT ?, file_id, cell_id FROM cells
-                 WHERE project_id = ? AND file_id = ? AND side = 'source'
-                   AND cell_id IN (${chunk.map(() => '?').join(', ')})
-                 ON CONFLICT DO NOTHING`,
-              )
-              .bind(p.assignmentId, event.projectId, entry.fileId, ...chunk),
-          )
+        if (vf) {
+          const matched: VirtualSourceRow[] = []
+          for (const id of entry.cellIds) {
+            const row = vf.byCellId.get(id)
+            if (row) matched.push(row)
+          }
+          pushVirtualAssignmentRows(entry.fileId, matched)
+        } else {
+          for (let i = 0; i < entry.cellIds.length; i += CELL_SCOPE_CHUNK) {
+            const chunk = entry.cellIds.slice(i, i + CELL_SCOPE_CHUNK)
+            if (chunk.length === 0) continue
+            stmts.push(
+              db
+                .prepare(
+                  `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+                   SELECT ?, file_id, cell_id FROM cells
+                   WHERE project_id = ? AND file_id = ? AND side = 'source'
+                     AND cell_id IN (${chunk.map(() => '?').join(', ')})
+                   ON CONFLICT DO NOTHING`,
+                )
+                .bind(p.assignmentId, event.projectId, entry.fileId, ...chunk),
+            )
+          }
         }
       } else if (entry.chapter) {
         const chapters = chaptersByFile.get(entry.fileId) ?? new Set<string>()
-        // Trimmed like the board's key: the picker offers the raw text before
-        // the verse colon (getFileChapters), the board trims it.
         chapters.add(entry.chapter.trim())
         chaptersByFile.set(entry.fileId, chapters)
+      } else if (vf) {
+        pushVirtualAssignmentRows(entry.fileId, vf.rows)
       } else {
         stmts.push(
           db
@@ -182,19 +212,6 @@ export function handleAssignmentEvent(
         )
       }
 
-      // AQU-1629: record the RANGE, not only what it resolved to. The rows
-      // above are a snapshot of the cells that existed at this instant, and
-      // nothing re-resolved them, so a line added to the chapter or file
-      // afterwards never joined the assignment — the assignee's progress could
-      // read done over a chapter that still had open work. `assignment_scopes`
-      // lets the read side re-resolve the scope against live `cells` on every
-      // read (view `assignment_member_cells`, migration 0147), by the same
-      // plan-board chapter key the snapshot above was resolved with (AQU-1493).
-      //
-      // Deliberately NOT written for a 'cells' entry: an explicit selection is
-      // exactly the lines the manager picked, and must not silently acquire
-      // new ones. The branch is the same `entry.cellIds` test as above, so a
-      // scope kind and its entries can never disagree about which it is.
       if (!entry.cellIds) {
         stmts.push(
           db
@@ -203,31 +220,38 @@ export function handleAssignmentEvent(
                VALUES (?, ?, ?)
                ON CONFLICT DO NOTHING`,
             )
-            // '' = the whole file (a 'books' scope); see the column comment. A
-            // chapter is trimmed exactly as the key it is matched against
-            // above — the view compares the two for equality.
             .bind(p.assignmentId, entry.fileId, entry.chapter?.trim() ?? ''),
         )
       }
     }
     for (const [fileId, chapterSet] of chaptersByFile) {
-      const chapters = [...chapterSet]
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
-             SELECT ?, c.file_id, c.cell_id
-               FROM cells c
-               ${planKeysJoinSql('c', 'ik')}
-              WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'
-                AND ${unitSectionKeyExpr('c', 'ik')} IN (${chapters.map(() => '?').join(', ')})
-             ON CONFLICT DO NOTHING`,
-          )
-          .bind(
-            p.assignmentId, event.projectId, fileId,
-            ...chapters,
-          ),
-      )
+      const vf = virtualFiles?.get(fileId)
+      if (vf) {
+        const { keys } = resolveVirtualPlanKeys(vf.rows)
+        const matched = vf.rows.filter((r) => {
+          const k = keys.get(r.cell_id)?.sectionKey ?? ''
+          return chapterSet.has(k)
+        })
+        pushVirtualAssignmentRows(fileId, matched)
+      } else {
+        const chapters = [...chapterSet]
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+               SELECT ?, c.file_id, c.cell_id
+                 FROM cells c
+                 ${planKeysJoinSql('c', 'ik')}
+                WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'
+                  AND ${unitSectionKeyExpr('c', 'ik')} IN (${chapters.map(() => '?').join(', ')})
+               ON CONFLICT DO NOTHING`,
+            )
+            .bind(
+              p.assignmentId, event.projectId, fileId,
+              ...chapters,
+            ),
+        )
+      }
     }
 
     // 3. Stamp the resolved denominator.

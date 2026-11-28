@@ -111,6 +111,9 @@ export interface CellRow {
    *  Only populated for target-side rows that have been committed against a
    *  source. Null on source-side rows and target-owned cells. */
   sourceEventId: string | null
+  /** AQU-2459 Phase B: 122-bit normalized source content hash emitted on virtual
+   *  source rows so target commits pin directly to source content hash. */
+  sourceContentHash?: string | null
   lastEditor: string | null
   lastEditAt: number
   validated: boolean

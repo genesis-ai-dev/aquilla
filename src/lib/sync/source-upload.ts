@@ -296,3 +296,105 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
   }
   throw lastError ?? new Error(t("importExport.errors.artifactBindingFailed"))
 }
+
+export interface BindSourceArtifactBatchArgs {
+  projectId: string
+  artifactId: string
+  bindings: Array<{ fileId: string; memberPath?: string }>
+  profileId: string
+  profileVersion: string
+  fidelity: "native" | "verified-recipe" | "content-only" | "preserved-only"
+  bindingRole?: "support" | "target"
+  targetLang?: string
+  getToken: (fileId: string) => Promise<string | null>
+  fetchFn?: typeof fetch
+  baseUrl?: string
+  signal?: AbortSignal
+  retryDelaysMs?: readonly number[]
+}
+
+/**
+ * AQU-2459 Phase B: bind one shared package artifact to many files in a single
+ * HTTP request (`POST /api/v1/projects/:projectId/source-bindings/batch`),
+ * replacing 65 serial requests on a whole-Bible Paratext import.
+ */
+export async function bindSourceArtifactBatch(args: BindSourceArtifactBatchArgs): Promise<void> {
+  if (args.bindings.length === 0) return
+  if (args.bindings.length === 1) {
+    return bindSourceArtifact({
+      projectId: args.projectId,
+      fileId: args.bindings[0].fileId,
+      artifactId: args.artifactId,
+      memberPath: args.bindings[0].memberPath,
+      profileId: args.profileId,
+      profileVersion: args.profileVersion,
+      fidelity: args.fidelity,
+      bindingRole: args.bindingRole,
+      targetLang: args.targetLang,
+      getToken: args.getToken,
+      fetchFn: args.fetchFn,
+      baseUrl: args.baseUrl,
+      signal: args.signal,
+      retryDelaysMs: args.retryDelaysMs,
+    })
+  }
+  throwIfSourceUploadAborted(args.signal)
+  let token = await args.getToken(args.bindings[0].fileId)
+  if (!token) throw new Error(t("importExport.errors.couldNotGetUploadToken"))
+  const origin = args.baseUrl ?? syncWorkerHttpOrigin()
+  const url = `${origin}/api/v1/projects/${encodeURIComponent(args.projectId)}/source-bindings/batch`
+  const fetchFn = args.fetchFn ?? fetch
+  const delays = args.retryDelaysMs ?? IMPORT_RETRY_DELAYS_MS
+  const body = JSON.stringify({
+    artifactId: args.artifactId,
+    bindingRole: args.bindingRole ?? "support",
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    profileId: args.profileId,
+    profileVersion: args.profileVersion,
+    fidelity: args.fidelity,
+    bindings: args.bindings.map((b) => ({ fileId: b.fileId, memberPath: b.memberPath ?? "" })),
+  })
+
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    throwIfSourceUploadAborted(args.signal)
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body,
+        signal: args.signal,
+      })
+    } catch (error) {
+      throwIfSourceUploadAborted(args.signal)
+      lastError = new Error(
+        t("importExport.errors.artifactBindingNetworkFailed", { detail: error instanceof Error ? error.message : String(error) }),
+      )
+    }
+
+    if (response) {
+      if (response.ok) return
+      const detail = await response.text().catch(() => "")
+      lastError = new SourceUploadHttpError(sourceUploadRefusalMessage("binding", response.status, detail), response.status, {
+        cause: `HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
+      })
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.bindings[0].fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForSourceRetry(delays[attempt], args.signal)
+    }
+  }
+  throw lastError ?? new Error(t("importExport.errors.artifactBindingFailed"))
+}

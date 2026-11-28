@@ -9,6 +9,10 @@
 
 import { visibleSourceSql } from '../../hidden-cells-scope'
 import { resolveLane, type RequiredLaneRef } from '../../../../../db/shared/lane-ref'
+import {
+  loadVirtualSourceFile,
+  type ManifestR2Bucket,
+} from '../../../../../db/shared/virtual-source-store'
 
 export interface CellPair {
   cellId: string
@@ -207,13 +211,56 @@ export async function resolveFileByBook(
 export async function selectCellPairs(
   db: AquillaDb,
   projectId: string,
-  scope: { fileId: string; range?: RefRange } & RequiredLaneRef,
+  scope: { fileId: string; range?: RefRange; r2?: ManifestR2Bucket } & RequiredLaneRef,
 ): Promise<CellPair[]> {
   // AQU-1610: the lane is required and is matched by `lane_id`, so no caller
   // can pair one lane's source cells with another lane's target rows — which
   // a shared tag silently did. The source side is `side = 'source'`, with no
   // `target_lang = ''`: a source row's lane is the project's source lane.
   const { laneId } = await resolveLane(db, projectId, scope)
+
+  // AQU-2459 Phase B: virtual source files store source cells in R2 manifests.
+  const virtualFile = scope.r2
+    ? await loadVirtualSourceFile(db, scope.r2, projectId, scope.fileId)
+    : null
+  if (virtualFile) {
+    const tRes = await db
+      .prepare(
+        `SELECT cell_id, value AS target_value, validated, ai_drafted, source_event_id AS target_based_on
+         FROM cells
+         WHERE project_id = ? AND file_id = ? AND side = 'target' AND lane_id = ?`,
+      )
+      .bind(projectId, scope.fileId, laneId)
+      .all<{
+        cell_id: string
+        target_value: string | null
+        validated: number | null
+        ai_drafted: number | null
+        target_based_on: string | null
+      }>()
+    const targetByCell = new Map((tRes.results ?? []).map((r) => [r.cell_id, r]))
+    let pairs: CellPair[] = virtualFile.rows
+      .filter((s) => s.hidden_at == null && s.tombstoned_at == null)
+      .map((s) => {
+        const t = targetByCell.get(s.cell_id)
+        return {
+          cellId: s.cell_id,
+          canonicalRef: s.canonical_ref,
+          sequenceIndex: s.sequence_index,
+          anchorCellId: s.anchor_cell_id,
+          source: s.value,
+          target: t?.target_value ?? "",
+          validated: Number(t?.validated ?? 0) === 1,
+          aiDrafted: Number(t?.ai_drafted ?? 0) === 1,
+          sourceHead: s.event_id,
+          targetBasedOn: t?.target_based_on ?? null,
+          hasTargetRow: t !== undefined,
+        }
+      })
+    if (scope.range) pairs = pairs.filter((p) => inRange(p.canonicalRef, scope.range!))
+    return orderPairs(pairs)
+  }
+
   const lanePredicate = " AND t.lane_id = ?"
   const { results } = await db
     .prepare(

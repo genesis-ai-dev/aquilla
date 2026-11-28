@@ -63,7 +63,7 @@ bibleCheck.post(
     const lane = { targetLang: body.targetLang ?? "" }
     const [ctx, pairs] = await Promise.all([
       loadProjectContext(db, projectId, lane),
-      selectCellPairs(db, projectId, { fileId: body.fileId, ...lane }),
+      selectCellPairs(db, projectId, { fileId: body.fileId, ...lane, r2: c.env.SNAPSHOTS }),
     ])
     // The wave's own loader: a layer whose insides do not compile is `invalid`, not a 500.
     const bible = await prepareBibleWave(

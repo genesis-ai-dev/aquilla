@@ -360,6 +360,8 @@ export interface CellCommitInput {
   parentId: string | null
   /** AD-9 staleness pin: source row's `event_id`. Null for target-owned cells. */
   sourceEventId?: string | null
+  /** AQU-2459 Phase B: 122-bit source content hash observed at commit time. */
+  sourceContentHash?: string | null
   /**
    * AQU-538 / AQU-1902: the target lane this commit addresses — REQUIRED. `''`
    * names only a legacy project's default lane row (or a project with no target
@@ -437,6 +439,9 @@ function targetCellCommitEventInput(
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
+        : {}),
+      ...(input.sourceContentHash !== undefined
+        ? { sourceContentHash: input.sourceContentHash }
         : {}),
       ...targetLaneFields(input),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
@@ -2586,6 +2591,8 @@ export interface TargetCellRepinInput {
   cellId: string
   /** The (now-current) source row's event_id to pin the target to. */
   sourceEventId: string
+  /** AQU-2459 Phase B: the (now-current) source unit's 122-bit content hash. */
+  sourceContentHash?: string | null
   /** The target row's event_id as observed when the reviewer opened the
    *  review panel. The server no-ops the update if the head has since
    *  moved (a translator re-committed) — the fresher pin wins. */
@@ -2621,6 +2628,7 @@ export async function emitTargetCellRepin(input: TargetCellRepinInput): Promise<
     author: input.author,
     payload: {
       sourceEventId: input.sourceEventId,
+      ...(input.sourceContentHash !== undefined ? { sourceContentHash: input.sourceContentHash } : {}),
       expectedTargetEventId: input.expectedTargetEventId,
       ...targetLaneFields(input),
     },

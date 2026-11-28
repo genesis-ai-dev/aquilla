@@ -51,6 +51,11 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import {
+  loadProjectVirtualSourceFiles,
+  loadVirtualSourceFile,
+  type LoadedVirtualFile,
+} from "../../../db/shared/virtual-source-store"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { laneLanguageForTag } from "../../../src/lib/lanes/lane-language"
 import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
@@ -125,6 +130,8 @@ const WORKER_COMPILE_LABELS: CompileLabels = {
 
 export interface PromptPreviewEnv {
   AQUILLA_PG?: AquillaDb
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface CellRow {
@@ -285,7 +292,7 @@ export interface PromptPreviewBody {
  */
 export async function buildPromptPreview(
   db: AquillaDb,
-  args: { projectId: string; cellId: string; targetLang: string; fileId?: string },
+  args: { projectId: string; cellId: string; targetLang: string; fileId?: string; r2?: R2Bucket },
 ): Promise<{ ok: true; body: PromptPreviewBody } | { ok: false; response: Response }> {
   const { projectId, cellId, targetLang } = args
 
@@ -298,12 +305,49 @@ export async function buildPromptPreview(
   const cellBinds: unknown[] = args.fileId
     ? [projectId, cellId, args.fileId]
     : [projectId, cellId]
-  const cell = await db.prepare(cellSql).bind(...cellBinds).first<CellRow>()
+  let cell = await db.prepare(cellSql).bind(...cellBinds).first<CellRow>()
+  let virtualFile: LoadedVirtualFile | null = null
+  if (!cell && args.r2) {
+    if (args.fileId) {
+      virtualFile = await loadVirtualSourceFile(db, args.r2, projectId, args.fileId)
+      const vr = virtualFile?.byCellId.get(cellId)
+      if (vr) {
+        cell = {
+          file_id: vr.file_id,
+          canonical_ref: vr.canonical_ref,
+          value: vr.value,
+          medium: vr.medium,
+          transcription: vr.transcription,
+          sequence_index: vr.sequence_index,
+        }
+      }
+    } else {
+      const vfs = await loadProjectVirtualSourceFiles(db, args.r2, projectId)
+      for (const vf of vfs) {
+        const vr = vf.byCellId.get(cellId)
+        if (vr) {
+          virtualFile = vf
+          cell = {
+            file_id: vr.file_id,
+            canonical_ref: vr.canonical_ref,
+            value: vr.value,
+            medium: vr.medium,
+            transcription: vr.transcription,
+            sequence_index: vr.sequence_index,
+          }
+          break
+        }
+      }
+    }
+  }
   if (!cell) {
     return {
       ok: false,
       response: externalError("not_found", "no source cell with that id in this project", 404),
     }
+  }
+  if (!virtualFile && args.r2) {
+    virtualFile = await loadVirtualSourceFile(db, args.r2, projectId, cell.file_id)
   }
   const fileId = cell.file_id
   const sourceText = effectiveSource(cell)
@@ -501,6 +545,7 @@ export async function buildPromptPreview(
         targetLang,
         count: precedingCount,
         sequenceIndex: cell.sequence_index,
+        virtualFile,
       })
     : []
 
@@ -514,7 +559,7 @@ export async function buildPromptPreview(
       topK,
     })
     const corpus = await loadCorpus(
-      { AQUILLA_PG: db },
+      { AQUILLA_PG: db, SNAPSHOTS: args.r2 },
       { projectId, validatedOnly: true, excludeCellId: cellId, targetLang },
     )
     corpusSize = corpus.cells.length
@@ -535,6 +580,7 @@ export async function buildPromptPreview(
     targetLang,
     query: sourceText,
     limit: topK * 2,
+    virtualFile,
   })
 
   // The cell is kept out by id (as the editor does), never by source text: an
@@ -708,11 +754,36 @@ async function loadPrecedingContext(
     targetLang: string
     count: number
     sequenceIndex: number | null
+    virtualFile?: LoadedVirtualFile | null
   },
 ): Promise<{ source: string; target: string }[]> {
   // A null sequence_index means the projection never ordered this cell; there
   // is no "preceding" to speak of, so the window is empty rather than wrong.
   if (args.sequenceIndex === null) return []
+
+  if (args.virtualFile) {
+    const tRes = await db
+      .prepare(
+        `SELECT cell_id, value FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'target'
+            AND ${targetLaneDualReadSql("cells")}
+            AND validated = 1 AND value != ''`,
+      )
+      .bind(args.projectId, args.fileId, ...targetLaneDualReadBinds(args.projectId, args.targetLang))
+      .all<{ cell_id: string; value: string }>()
+    const tById = new Map((tRes.results ?? []).map((t) => [t.cell_id, t.value]))
+    const pairs: Array<{ seq: number; source: string; target: string }> = []
+    for (const s of args.virtualFile.rows) {
+      if (s.sequence_index === null || s.sequence_index >= args.sequenceIndex) continue
+      const target = tById.get(s.cell_id)
+      if (!target) continue
+      const source = effectiveSource(s)
+      if (!source.trim() || !target.trim()) continue
+      pairs.push({ seq: s.sequence_index, source, target })
+    }
+    pairs.sort((a, b) => b.seq - a.seq)
+    return pairs.slice(0, args.count).reverse().map(({ source, target }) => ({ source, target }))
+  }
 
   const rows = await db
     .prepare(
@@ -760,43 +831,68 @@ async function loadValidatedFallback(
     targetLang: string
     query: string
     limit: number
+    virtualFile?: LoadedVirtualFile | null
   },
 ): Promise<ValidatedPair[]> {
   if (args.limit <= 0) return []
-  const rows = await db
-    .prepare(
-      "SELECT s.cell_id AS cell_id, s.value AS value, s.medium AS medium, " +
-        "s.transcription AS transcription, s.sequence_index AS sequence_index, " +
-        "t.value AS target_value, t.validated AS target_validated " +
-        "FROM cells s " +
-        "JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
-        targetLaneDualReadSql("t") +
-        " " +
-        "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
-        "  AND s.cell_id != ? AND t.validated = 1 AND t.value != '' " +
-        "ORDER BY s.sequence_index NULLS LAST, s.cell_id " +
-        // Bounded scan: the client ranks its whole open file, but the file can
-        // be tens of thousands of cells. 20x the requested limit is a wide
-        // enough net for token overlap while staying a cheap query.
-        "LIMIT ?",
-    )
-    .bind(
-      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
-      args.projectId,
-      args.fileId,
-      args.cellId,
-      Math.min(2000, args.limit * 20),
-    )
-    .all<ContextRow>()
+  let pairs: ValidatedPair[]
+  if (args.virtualFile) {
+    const tRes = await db
+      .prepare(
+        `SELECT cell_id, value FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'target'
+            AND ${targetLaneDualReadSql("cells")}
+            AND validated = 1 AND value != ''`,
+      )
+      .bind(args.projectId, args.fileId, ...targetLaneDualReadBinds(args.projectId, args.targetLang))
+      .all<{ cell_id: string; value: string }>()
+    const tById = new Map((tRes.results ?? []).map((t) => [t.cell_id, t.value]))
+    pairs = []
+    for (const s of args.virtualFile.rows) {
+      if (s.cell_id === args.cellId) continue
+      const target = tById.get(s.cell_id)
+      if (!target) continue
+      const source = effectiveSource(s)
+      if (!source.trim() || !target.trim()) continue
+      pairs.push({ cellId: s.cell_id, source, target })
+      if (pairs.length >= Math.min(2000, args.limit * 20)) break
+    }
+  } else {
+    const rows = await db
+      .prepare(
+        "SELECT s.cell_id AS cell_id, s.value AS value, s.medium AS medium, " +
+          "s.transcription AS transcription, s.sequence_index AS sequence_index, " +
+          "t.value AS target_value, t.validated AS target_validated " +
+          "FROM cells s " +
+          "JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
+          "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+          targetLaneDualReadSql("t") +
+          " " +
+          "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
+          "  AND s.cell_id != ? AND t.validated = 1 AND t.value != '' " +
+          "ORDER BY s.sequence_index NULLS LAST, s.cell_id " +
+          // Bounded scan: the client ranks its whole open file, but the file can
+          // be tens of thousands of cells. 20x the requested limit is a wide
+          // enough net for token overlap while staying a cheap query.
+          "LIMIT ?",
+      )
+      .bind(
+        ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+        args.projectId,
+        args.fileId,
+        args.cellId,
+        Math.min(2000, args.limit * 20),
+      )
+      .all<ContextRow>()
 
-  const pairs = rows.results
-    .map((row) => ({
-      cellId: row.cell_id,
-      source: effectiveSource(row),
-      target: row.target_value ?? "",
-    }))
-    .filter((p) => p.source.trim() && p.target.trim())
+    pairs = rows.results
+      .map((row) => ({
+        cellId: row.cell_id,
+        source: effectiveSource(row),
+        target: row.target_value ?? "",
+      }))
+      .filter((p) => p.source.trim() && p.target.trim())
+  }
 
   const query = args.query.trim()
   if (!query) return pairs.slice(0, args.limit)
@@ -836,6 +932,7 @@ export async function handlePromptPreview(
     cellId,
     targetLang,
     ...(fileId ? { fileId } : {}),
+    r2: env.SNAPSHOTS,
   })
   if (!result.ok) return result.response
   return Response.json(result.body)

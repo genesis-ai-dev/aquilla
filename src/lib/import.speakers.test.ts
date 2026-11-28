@@ -13,9 +13,17 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import { emitParsedFile, importFile } from "./import"
 
 interface CapturedBody {
-  projectId: string
-  fileId: string
-  cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
+  projectId?: string
+  fileId?: string
+  cells?: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string; metadata?: Record<string, unknown> }>
+  units?: Array<{ cellId?: string; text: string; metadata?: Record<string, unknown> }>
+}
+
+function capturedCells(bodies: readonly CapturedBody[]): Array<{ cellId: string; metadata?: Record<string, unknown> }> {
+  return bodies.flatMap((b) => [
+    ...(b.cells ?? []).map((c) => ({ cellId: c.cellId, metadata: c.metadata })),
+    ...(b.units ?? []).filter((u) => typeof u.cellId === "string").map((u) => ({ cellId: u.cellId!, metadata: u.metadata })),
+  ])
 }
 
 let captured: CapturedBody[]
@@ -31,7 +39,11 @@ beforeEach(() => {
       const body = JSON.parse(String(init?.body)) as CapturedBody
       captured.push(body)
       return new Response(
-        JSON.stringify({ accepted: body.cells.length, fileId: body.fileId }),
+        JSON.stringify(
+          Array.isArray(body.units)
+            ? { noop: false, revisionN: 1, eventId: "rev-evt-1" }
+            : { accepted: body.cells?.length ?? 0, fileId: body.fileId },
+        ),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
     }),
@@ -98,7 +110,7 @@ describe("import — speakerPairs cellId consistency (single-parse invariant)", 
     )
 
     // Collect all cellIds that were actually uploaded.
-    const uploadedCellIds = new Set(captured.flatMap((b) => b.cells.map((c) => c.cellId)))
+    const uploadedCellIds = new Set(capturedCells(captured).map((c) => c.cellId))
 
     // Every speakerPair (with or without a speaker) must reference a real uploaded cell.
     for (const { cellId } of speakerPairs) {
@@ -143,7 +155,7 @@ describe("import — speakerPairs cellId consistency (single-parse invariant)", 
     expect(refs).toHaveLength(1)
     expect(refs[0].cellCount).toBe(3)
 
-    const uploadedCellIds = new Set(captured.flatMap((b) => b.cells.map((c) => c.cellId)))
+    const uploadedCellIds = new Set(capturedCells(captured).map((c) => c.cellId))
 
     // All speakerPairs must reference cells that were actually uploaded.
     for (const { cellId } of speakerPairs) {
@@ -175,7 +187,7 @@ describe("import — a fresh import names each line with its speaker (AQU-2125)"
     const file = new File([vttContent], "scene.vtt", { type: "text/vtt" })
     const { speakerPairs } = await importFile(file, { projectId: "p-named", author: "tester", getToken })
 
-    const uploaded = captured.flatMap((b) => b.cells) as Array<{ cellId: string; metadata?: Record<string, unknown> }>
+    const uploaded = capturedCells(captured)
     const byId = new Map(uploaded.map((c) => [c.cellId, c]))
     const named = speakerPairs.filter((p) => p.speaker)
     expect(named.map((p) => [p.speaker, p.castNamed])).toEqual([["JESUS", true], ["PHILIP", true]])

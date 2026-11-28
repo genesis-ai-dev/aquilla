@@ -21,11 +21,14 @@ import { verifyTokenForProject } from "../auth"
 import { CELL_ROW_COLUMNS, mapCellRow, type CellRowRaw } from "./cell-row-serialize"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
 import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibleLanesForRead } from "./lane-read-wall"
+import { loadProjectVirtualSourceFiles } from "../../../db/shared/virtual-source-store"
 
 export interface CellsByRefEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/cells\/by-ref$/
@@ -101,7 +104,70 @@ export async function handleCellsByRefRequest(request: Request, env: CellsByRefE
   binds.push(BY_REF_MAX_ROWS + 1)
 
   const { results } = await db.prepare(parts.join(" ")).bind(...binds).all<CellRowRaw & { file_id: string }>()
-  const truncated = results.length > BY_REF_MAX_ROWS
-  const rows = (truncated ? results.slice(0, BY_REF_MAX_ROWS) : results).map((r) => ({ ...mapCellRow(r), fileId: r.file_id }))
-  return Response.json({ cells: rows, truncated })
+  const pgRows = results.map((r) => ({ ...mapCellRow(r), fileId: r.file_id }))
+
+  // AQU-2459 Phase B: include matching source rows from virtual files.
+  const virtualFiles = env.SNAPSHOTS
+    ? await loadProjectVirtualSourceFiles(db, env.SNAPSHOTS, projectId, { fileIds: files })
+    : []
+  if (virtualFiles.length === 0) {
+    const truncated = pgRows.length > BY_REF_MAX_ROWS
+    return Response.json({ cells: truncated ? pgRows.slice(0, BY_REF_MAX_ROWS) : pgRows, truncated })
+  }
+
+  const refSet = refs.length > 0 ? new Set(refs) : null
+  const prefixText = prefix ?? ""
+  const existingSourceKeys = new Set(
+    pgRows.filter((r) => r.side === "source").map((r) => `${r.fileId}\0${r.cellId}`),
+  )
+  const merged = [...pgRows]
+  for (const vf of virtualFiles) {
+    for (const row of vf.rows) {
+      if (row.tombstoned_at != null || !row.canonical_ref) continue
+      const matches = refSet ? refSet.has(row.canonical_ref) : row.canonical_ref.startsWith(prefixText)
+      if (!matches) continue
+      if (existingSourceKeys.has(`${row.file_id}\0${row.cell_id}`)) continue
+      merged.push({
+        cellId: row.cell_id,
+        side: "source",
+        targetLang: "",
+        value: row.value,
+        valueHtml: row.value_html,
+        type: row.type,
+        canonicalRef: row.canonical_ref,
+        anchorCellId: row.anchor_cell_id,
+        eventId: row.event_id,
+        sourceEventId: null,
+        lastEditor: row.last_editor,
+        lastEditAt: row.last_edit_at,
+        validated: false,
+        aiDrafted: false,
+        aiDraft: null,
+        wordCount: row.word_count,
+        endorsementCount: 0,
+        startMs: row.start_ms,
+        endMs: row.end_ms,
+        medium: row.medium,
+        sequenceIndex: row.sequence_index,
+        transcription: row.transcription,
+        cameraState: row.camera_state,
+        metadata: row.metadata,
+        laneId: row.lane_id,
+        ...(row.hidden_at != null ? { hidden: true as const } : {}),
+        fileId: row.file_id,
+      })
+    }
+  }
+  merged.sort((a, b) => {
+    if (a.fileId !== b.fileId) return a.fileId < b.fileId ? -1 : 1
+    const ra = a.canonicalRef ?? ""
+    const rb = b.canonicalRef ?? ""
+    if (ra !== rb) return ra < rb ? -1 : 1
+    const sa = a.sequenceIndex ?? Number.POSITIVE_INFINITY
+    const sb = b.sequenceIndex ?? Number.POSITIVE_INFINITY
+    if (sa !== sb) return sa - sb
+    return a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0
+  })
+  const truncated = merged.length > BY_REF_MAX_ROWS
+  return Response.json({ cells: truncated ? merged.slice(0, BY_REF_MAX_ROWS) : merged, truncated })
 }

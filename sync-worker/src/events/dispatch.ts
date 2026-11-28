@@ -31,6 +31,7 @@ import { handleFileDelete, handleFileRestore } from './handlers/file-delete-rest
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleTermEvent, type TermEventKind } from './handlers/term-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
+import type { LoadedVirtualFile } from '../../../db/shared/virtual-source-store'
 import type { DispatchOutcome } from './handlers/types'
 
 export type { DispatchResult, DispatchOutcome } from './handlers/types'
@@ -61,6 +62,10 @@ export interface DispatchOptions {
    * cell.unvalidate events. Default 1 (N=1 projects: byte-identical behavior).
    */
   validationCount?: number
+  /** AQU-2459 Phase B: tombstone virtual source overlays on source.cell.delete. */
+  virtualSourceTombstone?: boolean
+  /** AQU-2459 Phase B: preloaded virtual source files for assignment.create scope resolution. */
+  virtualFiles?: ReadonlyMap<string, LoadedVirtualFile>
 }
 
 /**
@@ -314,6 +319,7 @@ export function dispatchEvent(
           authed as AuthorizedEvent<AssignmentEventKind>,
           serverTs,
           opts.serverSeq,
+          opts.virtualFiles,
         ),
       }
 

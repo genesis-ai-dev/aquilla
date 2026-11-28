@@ -43,6 +43,8 @@ import {
 import { buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
 import type { EventPayloads } from './types'
 import {
   ensureTargetLaneStmt,
@@ -149,6 +151,8 @@ export async function mergeSibling(
      * treated as if it did not exist: never folded, never named in a refusal.
      */
     readableDonorLaneIds?: ReadonlySet<string> | null
+    /** AQU-2459 Phase B: R2 bucket for virtual source files on the host project. */
+    r2?: ManifestR2Bucket
   },
 ): Promise<MergeSiblingResult> {
   const { hostProjectId, donorProjectId, lane } = args
@@ -202,11 +206,27 @@ export async function mergeSibling(
         .all<HostSourceRow>()
     ).results ?? []
 
-  const hostByCell = new Map<string, { fileId: string; eventId: string }>()
+  const hostByCell = new Map<string, { fileId: string; eventId: string; sourceContentHash?: string }>()
   for (const r of hostSourceRows) {
     // First source row per cell_id wins; the shared-cell_id invariant means
     // cell ids are unique per host anyway.
     if (!hostByCell.has(r.cell_id)) hostByCell.set(r.cell_id, { fileId: r.file_id, eventId: r.event_id })
+  }
+  const virtualHostFileIds = new Set<string>()
+  if (args.r2) {
+    const vFiles = await loadProjectVirtualSourceFiles(db, args.r2, hostProjectId)
+    for (const vf of vFiles) {
+      virtualHostFileIds.add(vf.head.fileId)
+      for (const s of vf.rows) {
+        if (!hostByCell.has(s.cell_id)) {
+          hostByCell.set(s.cell_id, {
+            fileId: vf.head.fileId,
+            eventId: s.event_id,
+            sourceContentHash: s.revision_content_hash,
+          })
+        }
+      }
+    }
   }
 
   const skipped: MergeSkip[] = []
@@ -230,6 +250,7 @@ export async function mergeSibling(
       // AD-9 staleness pin: the merged translation was made against the host's
       // current source head (the parent we chain on).
       sourceEventId: host.eventId,
+      ...(host.sourceContentHash ? { sourceContentHash: host.sourceContentHash } : {}),
     }
     const base = {
       id: eventId,
@@ -316,10 +337,19 @@ export async function mergeSibling(
   const touchedFiles = new Set<string>()
   for (const p of persisted) if (p.fileId) touchedFiles.add(p.fileId)
   for (const fileId of touchedFiles) {
-    await db.batch([
-      fileCountersRecomputeStmt(db, hostProjectId, fileId, now),
-      ...fullProgressRecomputeStmts(db, hostProjectId, fileId, now),
-    ])
+    if (virtualHostFileIds.has(fileId) && args.r2) {
+      const vStmts = await buildVirtualFileProgressStmts(db, args.r2, {
+        projectId: hostProjectId,
+        fileId,
+        updatedAt: now,
+      })
+      if (vStmts && vStmts.length > 0) await db.batch(vStmts)
+    } else {
+      await db.batch([
+        fileCountersRecomputeStmt(db, hostProjectId, fileId, now),
+        ...fullProgressRecomputeStmts(db, hostProjectId, fileId, now),
+      ])
+    }
   }
 
   return {
@@ -386,6 +416,8 @@ export interface MergeSiblingRouteEnv {
   SYNC_SECRET_KEY?: string
   /** AQU-730: "1" or "true" turns the lane read wall on. */
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 export async function handleMergeSiblingRequest(
@@ -473,6 +505,7 @@ export async function handleMergeSiblingRequest(
       lane,
       donorLaneId: donorLaneId || undefined,
       readableDonorLaneIds,
+      r2: env.SNAPSHOTS,
     })
   } catch (err) {
     // AQU-1602: an unchoosable donor lane is the caller's to resolve, not a

@@ -16,6 +16,10 @@ import { applyRenderingLaneScope, renderingLaneScope } from "./rendering-lane-sc
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { visibleSourceSql } from "./hidden-cells-scope"
 import { inCountedFileSql } from "../../../db/shared/counted-files"
+import {
+  loadProjectVirtualSourceFiles,
+  type ManifestR2Bucket,
+} from "../../../db/shared/virtual-source-store"
 
 /** Stop a pathological project from holding the request open. */
 const MAX_SCAN = 50_000
@@ -215,6 +219,7 @@ export async function queryConceptOccurrences(
   concept: ConceptMatchInput,
   termMatching: TermMatchingSettings | undefined,
   opts: { offset: number; limit: number; lane?: string },
+  r2?: ManifestR2Bucket,
 ): Promise<TermOccurrencePage> {
   const lane = opts.lane ?? ""
   const scope = await renderingLaneScope(db, projectId, lane)
@@ -278,6 +283,81 @@ export async function queryConceptOccurrences(
     if (scanned >= MAX_SCAN) {
       scanComplete = false
       break
+    }
+  }
+
+  // AQU-2459 Phase B: scan virtual source files (whose source units live in R2
+  // manifests rather than Postgres `cells`), pairing against sparse target rows.
+  if (r2 && scanned < MAX_SCAN) {
+    const virtualFiles = await loadProjectVirtualSourceFiles(db, r2, projectId)
+    for (const vf of virtualFiles) {
+      if (scanned >= MAX_SCAN) {
+        scanComplete = false
+        break
+      }
+      const matchedUnits: Array<{
+        cellId: string
+        original: string
+        canonicalRef: string | null
+        eventId: string
+      }> = []
+      for (const s of vf.rows) {
+        if (s.hidden_at != null || s.tombstoned_at != null || !s.value) continue
+        if (scanned >= MAX_SCAN) {
+          scanComplete = false
+          break
+        }
+        scanned += 1
+        const hits = surfacesIn(matcher, s.value)
+        if (hits.length === 0) continue
+        let live = false
+        for (const hit of hits) {
+          const surface = hit.normalize("NFC")
+          const excluded = excludedKeys.has(formKey(surface, resolved.foldMarks, caseSensitive))
+          const existing = forms.get(surface)
+          if (existing) existing.count += 1
+          else forms.set(surface, { surface, count: 1, excluded })
+          if (!excluded) live = true
+        }
+        if (!live) continue
+        matchedUnits.push({
+          cellId: s.cell_id,
+          original: s.value,
+          canonicalRef: s.canonical_ref,
+          eventId: s.event_id,
+        })
+      }
+      if (matchedUnits.length === 0) continue
+      const ph = matchedUnits.map(() => "?").join(", ")
+      const tRes = await db
+        .prepare(
+          `SELECT cell_id, value, value_html, event_id FROM cells
+            WHERE project_id = ? AND file_id = ? AND side = 'target'
+              AND ${targetLaneDualReadSql()} AND cell_id IN (${ph})`,
+        )
+        .bind(projectId, vf.head.fileId, ...targetLaneDualReadBinds(projectId, lane), ...matchedUnits.map((u) => u.cellId))
+        .all<{ cell_id: string; value: string; value_html: string | null; event_id: string }>()
+      const tByCell = new Map((tRes.results ?? []).map((r) => [r.cell_id, r]))
+      for (const u of matchedUnits) {
+        const t = tByCell.get(u.cellId)
+        const translated = t?.value ?? ""
+        const verdict = verdictForKnownMatch(judged, translated)
+        if (verdict === "enforced") enforced += 1
+        else infringed += 1
+        total += 1
+        if (total > opts.offset && occurrences.length < opts.limit) {
+          occurrences.push({
+            cellId: u.cellId,
+            fileId: vf.head.fileId,
+            original: u.original,
+            translated,
+            translatedHtml: t?.value_html ?? null,
+            context: u.canonicalRef ?? "",
+            sourceEventId: u.eventId,
+            targetEventId: t?.event_id ?? null,
+          })
+        }
+      }
     }
   }
 

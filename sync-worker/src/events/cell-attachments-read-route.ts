@@ -22,10 +22,13 @@
 // so a token for project A cannot read project B's attachments.
 
 import { verifyTokenForProject } from '../auth'
+import { loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
 
 export interface CellAttachmentsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface AttachmentRowRaw {
@@ -152,6 +155,17 @@ export async function handleCellAttachmentsReadRequest(
   const rows = result.results ?? []
   const truncated = rows.length > ATTACHMENTS_MAX_ROWS
   const page = truncated ? rows.slice(0, ATTACHMENTS_MAX_ROWS) : rows
+
+  if (env.SNAPSHOTS && page.some((r) => r.cell_ref == null)) {
+    const vf = await loadVirtualSourceFile(env.AQUILLA_PG, env.SNAPSHOTS, projectId, fileId)
+    if (vf) {
+      for (const row of page) {
+        if (row.cell_ref == null) {
+          row.cell_ref = vf.byCellId.get(row.cell_id)?.canonical_ref ?? null
+        }
+      }
+    }
+  }
 
   return Response.json({ attachments: page.map(toOut), truncated })
 }

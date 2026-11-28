@@ -18,6 +18,7 @@ import {
   publishStagedImport,
   type TargetCommit,
 } from "./sync/bulk-import"
+import { buildSyntheticRevision } from "./sync/revision-import"
 import { assertSourceUploadSize, bindSourceArtifact, uploadSourceOriginal } from "./sync/source-upload"
 
 export type SdbhImportPhase = "parse" | "source" | "target"
@@ -158,6 +159,12 @@ export async function importSdbh(
       cells,
       targets,
       targetLang: ctx.targetLang,
+      revision: buildSyntheticRevision({
+        stamp: "sdbh-import-v2",
+        fileType: "sdbh",
+        cells,
+        preserveCellIds: true,
+      }),
       deferPublication: true,
       getToken: ctx.getToken,
       signal: ctx.signal,

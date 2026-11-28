@@ -810,6 +810,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     cellId: body.context?.cellId,
     lane: resolvedLaneId,
     aliases,
+    r2: env.SNAPSHOTS,
   }
 
   // Situational grounding: resolve the focused file's name/kind and the
@@ -1512,6 +1513,7 @@ async function runReadTool(args: ReadArgs, t: ToolCallEnv): Promise<string> {
     focusedFileId: t.stageCtx.fileId,
     lane: t.stageCtx.lane,
     aliases: t.aliases,
+    r2: t.env.SNAPSHOTS,
   })
   t.send({
     type: "code_result",
@@ -1530,6 +1532,7 @@ async function runExamplesTool(args: ExamplesArgs, t: ToolCallEnv): Promise<stri
     projectId: t.stageCtx.projectId,
     lane: t.stageCtx.lane,
     aliases: t.aliases,
+    r2: t.env.SNAPSHOTS,
   })
   t.send({
     type: "code_result",
@@ -1549,6 +1552,7 @@ async function runSearchTool(args: SearchArgs, t: ToolCallEnv): Promise<string> 
     focusedFileId: t.stageCtx.fileId,
     lane: t.stageCtx.lane,
     aliases: t.aliases,
+    r2: t.env.SNAPSHOTS,
   })
   t.send({
     type: "code_result",
@@ -1581,6 +1585,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       lane: t.stageCtx.lane,
       aliases: t.aliases,
       stageCtx: t.stageCtx,
+      r2: t.env.SNAPSHOTS,
       sourceLanguage: t.draft.sourceLanguage,
       targetLanguage: t.draft.targetLanguage,
       translationInstructions: t.draft.translationInstructions,

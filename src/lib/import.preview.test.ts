@@ -45,10 +45,14 @@ beforeEach(() => {
           sha256: headers.get("X-Source-Sha256"),
         }), { status: 200, headers: { "Content-Type": "application/json" } })
       }
-      const body = JSON.parse(String(init?.body)) as CapturedBody
+      const body = JSON.parse(String(init?.body)) as CapturedBody & { units?: unknown[] }
       captured.push(body)
       return new Response(
-        JSON.stringify({ accepted: body.cells.length, fileId: body.fileId }),
+        JSON.stringify(
+          Array.isArray(body.units)
+            ? { noop: false, revisionN: 1, eventId: "rev-evt-1" }
+            : { accepted: body.cells?.length ?? 0, fileId: body.fileId },
+        ),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
     }),

@@ -903,6 +903,7 @@ type PreparedCompletionDraft = {
 type RetryCompletionDraft = PreparedCompletionDraft & {
   rebasedParent: string
   sourceEventId: string | null
+  sourceContentHash?: string | null
 }
 
 // AQU-1104: the store keeps a summary's identity across commits for cells the
@@ -7657,6 +7658,7 @@ export function ProjectWorkspace() {
     // sparkle flow never shows "Saved" over a draft with no visible effect.
     let parentId = resolveTargetCommitParentId(commitCell)
     let sourceEventIdPin = commitCell.sourceEventId ?? null
+    let sourceContentHashPin = commitCell.sourceContentHash
     let eventId = ""
     let draftDeadLettered = false
     // AQU-1901: refused outright (a lane or validation 4xx inside the 200, or
@@ -7670,6 +7672,7 @@ export function ProjectWorkspace() {
           cellId: cell.id,
           parentId,
           sourceEventId: sourceEventIdPin,
+          ...(sourceContentHashPin ? { sourceContentHash: sourceContentHashPin } : {}),
           value: completed.value,
           ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
           author,
@@ -7741,6 +7744,7 @@ export function ProjectWorkspace() {
               )
               parentId = rebasedParent
               if (sourceRow?.eventId) sourceEventIdPin = sourceRow.eventId
+              if (sourceRow?.sourceContentHash) sourceContentHashPin = sourceRow.sourceContentHash
               continue
             }
           }
@@ -7846,6 +7850,7 @@ export function ProjectWorkspace() {
       cellId: draft.cell.id,
       parentId,
       sourceEventId: liveCell.sourceEventId ?? null,
+      ...(liveCell.sourceContentHash ? { sourceContentHash: liveCell.sourceContentHash } : {}),
       value: completed.value,
       ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
       author: draft.author,
@@ -7997,6 +8002,7 @@ export function ProjectWorkspace() {
             ...item,
             rebasedParent,
             sourceEventId: sourceRow?.eventId ?? item.liveCell.sourceEventId ?? null,
+            sourceContentHash: sourceRow?.sourceContentHash ?? item.liveCell.sourceContentHash,
           })
         }
 
@@ -8014,6 +8020,7 @@ export function ProjectWorkspace() {
             cellId: item.draft.cell.id,
             parentId: item.rebasedParent,
             sourceEventId: item.sourceEventId,
+            ...(item.sourceContentHash ? { sourceContentHash: item.sourceContentHash } : {}),
             value: item.completed.value,
             ...(item.completed.valueHtml ? { valueHtml: item.completed.valueHtml } : {}),
             author: item.draft.author,
@@ -8150,6 +8157,7 @@ export function ProjectWorkspace() {
       // parentId must be the current chain head so AD-2 makes this the winner.
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
+      ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
       value: promoted.value,
       ...(promoted.valueHtml !== undefined ? { valueHtml: promoted.valueHtml } : {}),
       author: currentUsername,
@@ -12173,6 +12181,7 @@ export function ProjectWorkspace() {
       cellId: cell.id,
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
+      ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
       value: "",
       valueHtml: "",
       author: currentUsername,
@@ -12233,6 +12242,7 @@ export function ProjectWorkspace() {
       cellId: cell.id,
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
+      ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
       value: "",
       valueHtml: "",
       author: currentUsername,
@@ -12427,6 +12437,7 @@ export function ProjectWorkspace() {
       cellId: cell.id,
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
+      ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
       value: updatedText,
       valueHtml: updatedText,
       author: currentUsername,
@@ -13114,6 +13125,7 @@ export function ProjectWorkspace() {
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
+        ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
         value: replacement.value,
         ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
         author: currentUsername,
@@ -18473,6 +18485,7 @@ export function ProjectWorkspace() {
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
+        ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
         value: text.value,
         ...(text.valueHtml !== undefined ? { valueHtml: text.valueHtml } : {}),
         author: currentUsername,
@@ -19453,6 +19466,7 @@ export function ProjectWorkspace() {
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
+        ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
         value: snapshot.value,
         valueHtml: snapshot.valueHtml,
         author: currentUsername,

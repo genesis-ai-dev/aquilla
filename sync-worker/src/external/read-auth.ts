@@ -49,6 +49,8 @@ export interface ExternalReadsEnv {
   LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link (changesets/pending). */
   BASE_URL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 /** Credential-only gate (no project in play yet) — used by /me, /projects and

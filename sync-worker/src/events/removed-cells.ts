@@ -34,6 +34,7 @@
 // document.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 
 export interface RemovedCell {
   cellId: string
@@ -82,6 +83,7 @@ export async function removedCellsForFile(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  r2?: ManifestR2Bucket,
 ): Promise<RemovedCell[]> {
   try {
     const deleted = await db
@@ -97,32 +99,34 @@ export async function removedCellsForFile(
     const candidates = (deleted.results ?? []).map((r) => r.cell_id).filter(Boolean)
     if (candidates.length === 0) return []
 
-    // Condition 2. A cell whose source row is still there was not removed —
-    // the delete lost its chain slot, or a later create put it back.
-    //
-    // `IN (${placeholders})` rather than `= ANY(?)`: the codebase's consistent
-    // convention for id-list lookups, because the array-binding semantics of
-    // ANY through the shim are unproven (see link-sync.ts).
-    const livePlaceholders = candidates.map(() => '?').join(', ')
-    const live = await db
-      .prepare(
-        `SELECT cell_id
-           FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source'
-            AND cell_id IN (${livePlaceholders})`,
-      )
-      .bind(projectId, fileId, ...candidates)
-      .all<{ cell_id: string }>()
-    const stillThere = new Set((live.results ?? []).map((r) => r.cell_id))
-
-    const gone = candidates.filter((id) => !stillThere.has(id))
+    const vf = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+    let gone: string[]
+    if (vf) {
+      // On a virtual file, a live cell is in `vf.byCellId`; a deleted cell was
+      // tombstoned on its sparse overlay (so it is NOT in `vf.byCellId`).
+      gone = candidates.filter((id) => !vf.byCellId.has(id))
+    } else {
+      // Condition 2. A cell whose source row is still there was not removed —
+      // the delete lost its chain slot, or a later create put it back.
+      const livePlaceholders = candidates.map(() => '?').join(', ')
+      const live = await db
+        .prepare(
+          `SELECT cell_id
+             FROM cells
+            WHERE project_id = ? AND file_id = ? AND side = 'source'
+              AND tombstoned_at IS NULL
+              AND cell_id IN (${livePlaceholders})`,
+        )
+        .bind(projectId, fileId, ...candidates)
+        .all<{ cell_id: string }>()
+      const stillThere = new Set((live.results ?? []).map((r) => r.cell_id))
+      gone = candidates.filter((id) => !stillThere.has(id))
+    }
     if (gone.length === 0) return []
 
-    // Where each one sat. The NEWEST create wins: an import chunk can carry
-    // more than one create for a cell id (buildBulkSourceCellCreateStmt dedupes
-    // last-wins), so ordering by server_seq matches what the projection saw.
-    // Ascending order with a plain overwrite leaves the newest in the map,
-    // which avoids DISTINCT ON — unused anywhere else in this worker.
+    // Where each one sat. Check `source.cell.create` events first, and fall
+    // back to tombstoned/manifest units for virtual files (which had no
+    // per-cell `source.cell.create` event on import).
     const createPlaceholders = gone.map(() => '?').join(', ')
     const creates = await db
       .prepare(
@@ -138,10 +142,15 @@ export async function removedCellsForFile(
     const byCell = new Map<string, CreatePayload | null>()
     for (const row of creates.results ?? []) byCell.set(row.cell_id, parsePayload(row.payload))
 
+    const tombstonedByCell = vf
+      ? new Map(vf.tombstonedRows.map((r) => [r.cell_id, r]))
+      : null
+
     return gone.map((cellId) => {
       const payload = byCell.get(cellId) ?? null
-      const ref = payload?.canonicalRef
-      const meta = payload?.metadata
+      const tomb = tombstonedByCell?.get(cellId)
+      const ref = payload?.canonicalRef ?? tomb?.canonical_ref ?? null
+      const meta = payload?.metadata ?? tomb?.metadata ?? null
       return {
         cellId,
         canonicalRef: typeof ref === 'string' && ref !== '' ? ref : null,

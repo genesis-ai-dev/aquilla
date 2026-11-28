@@ -287,7 +287,7 @@ tools.get("/:projectId/tools/:toolId/activity", authMiddleware, async (c) => {
   if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
   const since = Number(c.req.query("since") ?? "0")
   if (!Number.isFinite(since) || since < 0) return err(c, 400, "validation_failed", "since must be epoch ms")
-  const activity = await readToolActivity(c.env.AQUILLA_PG, pid(c), tid(c), since)
+  const activity = await readToolActivity(c.env.AQUILLA_PG, pid(c), tid(c), since, c.env.SNAPSHOTS)
   return c.json(activity)
 })
 

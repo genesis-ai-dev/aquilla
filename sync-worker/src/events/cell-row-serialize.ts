@@ -13,6 +13,7 @@
 // byte-identity test in events-route.test.ts guards against drift meanwhile).
 
 import type { AiDraftProvenance } from "./types"
+import type { VirtualSourceRow } from "../../../db/shared/virtual-source-store"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 import { cellMetadataWireSql } from "../../../db/shared/cell-metadata-sql"
 
@@ -89,6 +90,8 @@ export interface CellRowOut {
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. Always
    *  emitted by {@link mapCellRow}; optional on hand-built fixtures. */
   laneId?: string | null
+  /** AQU-2459 Phase B: content hash of this source cell's text for hash-pinned staleness. */
+  sourceContentHash?: string
   /**
    * AQU-1422: true while this cell is parked. OMITTED (not `false`) on a visible
    * row, deliberately: a 30k-cell Bible file would otherwise pay ~15 bytes per
@@ -161,6 +164,40 @@ export function mapCellRow(row: CellRowRaw): CellRowOut {
     // Spread so the key is absent, not `undefined`, on a visible row — JSON.
     // stringify drops `undefined` too, but an absent key also keeps the two
     // serialisers' object shapes identical for the by-ids byte-identity test.
+    ...(row.hidden_at != null ? { hidden: true as const } : {}),
+  }
+}
+
+/** AQU-2459 Phase B: serialize a virtual source row into the exact wire shape
+ *  shared by GET …/cells and POST /events `applied[].rows`. */
+export function mapVirtualSourceRowToOut(row: VirtualSourceRow): CellRowOut {
+  return {
+    cellId: row.cell_id,
+    side: "source",
+    targetLang: "",
+    value: row.value,
+    valueHtml: row.value_html,
+    type: row.type,
+    canonicalRef: row.canonical_ref,
+    anchorCellId: row.anchor_cell_id,
+    eventId: row.event_id,
+    sourceEventId: null,
+    lastEditor: row.last_editor,
+    lastEditAt: row.last_edit_at,
+    validated: false,
+    aiDrafted: false,
+    aiDraft: null,
+    wordCount: row.word_count,
+    endorsementCount: 0,
+    startMs: row.start_ms,
+    endMs: row.end_ms,
+    medium: row.medium,
+    sequenceIndex: row.sequence_index,
+    transcription: row.transcription,
+    cameraState: row.camera_state,
+    metadata: row.metadata,
+    laneId: row.lane_id,
+    sourceContentHash: row.revision_content_hash,
     ...(row.hidden_at != null ? { hidden: true as const } : {}),
   }
 }

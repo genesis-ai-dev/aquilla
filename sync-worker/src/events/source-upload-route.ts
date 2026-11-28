@@ -12,7 +12,7 @@
 
 import { withCors } from "../cors"
 import { r2KeyPrefix, type AudioEnv } from "../audio"
-import { verifyTokenForDoc, type SyncTokenClaims } from "../auth"
+import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { ROLE } from "./role-policy"
 import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
 import {
@@ -24,6 +24,8 @@ import { blankTargetBridgeStmts, buildSourceArtifactPersistenceStatements } from
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-bindings$/
+const BATCH_BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/source-bindings\/batch$/
+const MAX_BATCH_BINDINGS = 500
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export const MAX_SOURCE_BYTES = MAX_SOURCE_ARTIFACT_BYTES
@@ -221,11 +223,142 @@ async function handleSourceBindingRequest(
   return withCors(Response.json({ ok: true, artifactId, fileId }), request)
 }
 
+async function handleBatchSourceBindingRequest(
+  request: Request,
+  env: SourceUploadEnv,
+  match: RegExpExecArray,
+): Promise<Response> {
+  if (!env.AQUILLA_PG) return withCors(new Response('AQUILLA_PG binding not configured', { status: 500 }), request)
+  const projectId = decodeURIComponent(match[1])
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const auth = await verifyTokenForProject(
+    authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null,
+    projectId,
+    env.SYNC_SECRET_KEY,
+  )
+  if (!auth.ok) return withCors(new Response(auth.reason, { status: auth.status }), request)
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return roleTooLowResponse(request, 'role too low for artifact binding', auth.claims)
+  }
+
+  let body: Record<string, unknown>
+  try {
+    const parsed = (await request.json()) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid')
+    body = parsed as Record<string, unknown>
+  } catch {
+    return withCors(new Response('invalid JSON body', { status: 400 }), request)
+  }
+  const artifactId = typeof body.artifactId === 'string' ? body.artifactId : ''
+  const profileId = typeof body.profileId === 'string' ? body.profileId : ''
+  const profileVersion = typeof body.profileVersion === 'string' ? body.profileVersion : ''
+  const fidelity = typeof body.fidelity === 'string' ? body.fidelity : ''
+  const bindingRole = typeof body.bindingRole === 'string' ? body.bindingRole : ''
+  const targetLang = typeof body.targetLang === 'string' ? body.targetLang : ''
+  const rawBindings = Array.isArray(body.bindings) ? body.bindings : null
+  if (
+    !UUID_RE.test(artifactId) ||
+    !['support', 'target'].includes(bindingRole) ||
+    (bindingRole !== 'target' && targetLang.length > 0) ||
+    !profileId ||
+    !profileVersion ||
+    profileId.length > 255 ||
+    profileVersion.length > 64 ||
+    !['native', 'verified-recipe', 'content-only', 'preserved-only'].includes(fidelity) ||
+    targetLang.length > 255 ||
+    !rawBindings ||
+    rawBindings.length === 0 ||
+    rawBindings.length > MAX_BATCH_BINDINGS
+  ) {
+    return withCors(new Response('invalid batch artifact binding', { status: 400 }), request)
+  }
+  const bindings: Array<{ fileId: string; memberPath: string }> = []
+  for (const item of rawBindings) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return withCors(new Response('invalid batch artifact binding entry', { status: 400 }), request)
+    }
+    const entry = item as Record<string, unknown>
+    const fileId = typeof entry.fileId === 'string' ? entry.fileId : ''
+    const memberPath = typeof entry.memberPath === 'string' ? entry.memberPath : ''
+    if (!fileId || memberPath.length > 1024) {
+      return withCors(new Response('invalid batch artifact binding entry', { status: 400 }), request)
+    }
+    bindings.push({ fileId, memberPath })
+  }
+
+  const artifact = await env.AQUILLA_PG.prepare(
+    `SELECT id FROM artifacts WHERE id::text = ? AND project_id = ? AND kind = 'source'`,
+  )
+    .bind(artifactId, projectId)
+    .first<{ id: string }>()
+  if (!artifact) return withCors(new Response('artifact not found', { status: 404 }), request)
+
+  const uniqueFileIds = [...new Set(bindings.map((b) => b.fileId))]
+  const fileCheck = await env.AQUILLA_PG.prepare(
+    `SELECT id FROM files WHERE project_id = ? AND id IN (${uniqueFileIds.map(() => '?').join(', ')})`,
+  )
+    .bind(projectId, ...uniqueFileIds)
+    .all<{ id: string }>()
+  if ((fileCheck.results?.length ?? 0) !== uniqueFileIds.length) {
+    return withCors(new Response('one or more files not found', { status: 404 }), request)
+  }
+
+  try {
+    const conflictColumn = await artifactBindingConflictColumn(env.AQUILLA_PG)
+    const stmts: AquillaStatement[] = [
+      ...blankTargetBridgeStmts(env.AQUILLA_PG, projectId, bindingRole, targetLang),
+    ]
+    const laneBinds = laneIdResolveBindingBinds(projectId, bindingRole, targetLang)
+    const rowPlaceholder = `(?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})`
+    const placeholders = bindings.map(() => rowPlaceholder).join(',\n')
+    const binds: unknown[] = []
+    for (const b of bindings) {
+      binds.push(
+        crypto.randomUUID(),
+        projectId,
+        artifactId,
+        b.fileId,
+        bindingRole,
+        b.memberPath,
+        profileId,
+        profileVersion,
+        fidelity,
+        ...laneBinds,
+      )
+    }
+    stmts.push(
+      env.AQUILLA_PG.prepare(
+        `INSERT INTO artifact_bindings (
+           id, project_id, artifact_id, file_id, binding_role,
+           member_path, profile_id, profile_version, fidelity, manifest, lane_id
+         ) VALUES ${placeholders}
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
+         DO UPDATE SET
+           profile_id = EXCLUDED.profile_id,
+           profile_version = EXCLUDED.profile_version,
+           fidelity = EXCLUDED.fidelity,
+           updated_at = now()`,
+      ).bind(...binds),
+    )
+    if (env.AQUILLA_PG.batchPipelined) await env.AQUILLA_PG.batchPipelined(stmts)
+    else await env.AQUILLA_PG.batch(stmts)
+  } catch (error) {
+    console.error('[source-upload] batch artifact binding failed:', error)
+    return withCors(Response.json({ error: 'Artifact binding failed' }, { status: 500 }), request)
+  }
+  return withCors(Response.json({ ok: true, artifactId, bound: bindings.length }), request)
+}
+
 export async function handleSourceUploadRequest(
   request: Request,
   env: SourceUploadEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url)
+  const batchBindingMatch = BATCH_BINDING_PATH_RE.exec(url.pathname)
+  if (batchBindingMatch) {
+    if (request.method !== 'POST') return null
+    return handleBatchSourceBindingRequest(request, env, batchBindingMatch)
+  }
   const bindingMatch = BINDING_PATH_RE.exec(url.pathname)
   if (bindingMatch) {
     if (request.method !== 'POST') return null

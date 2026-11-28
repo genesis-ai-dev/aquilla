@@ -210,13 +210,32 @@ export interface RevisionUnitInput {
   readonly type?: string
   readonly canonicalRef?: string
   readonly sequenceIndex: number
+  readonly medium?: "text" | "media"
+  readonly startMs?: number
+  readonly endMs?: number
+  readonly transcription?: string
+  readonly paragraphStart?: boolean
   readonly metadata?: Readonly<Record<string, unknown>>
+  /**
+   * Optional client-minted cell id, honored ONLY on revision 1 (`parent === null`).
+   * Lets fresh imports that carry paired target commits, morphology rows, or
+   * media attachments preserve their caller-known `cellId`s while still storing
+   * zero Postgres source rows and aligning normally on every later revision.
+   */
+  readonly cellId?: string
 }
 
 /** A unit that has been through alignment: it knows which cell it is. */
 export interface RevisionUnit extends RevisionUnitInput {
   readonly cellId: string
   readonly contentHash: string
+}
+
+/** A manifest unit stored in R2 also remembers which event its source carries. */
+export type StoredRevisionUnit = RevisionUnit & {
+  readonly eventId: string
+  /** Set on units moved to `tombstonedUnits` when deleted by a later revision. */
+  readonly tombstonedAt?: number
 }
 
 export interface RevisionManifest {
@@ -228,6 +247,18 @@ export interface RevisionManifest {
   readonly artifactSha256: string
   /** In document order. */
   readonly units: readonly RevisionUnit[]
+}
+
+export interface StoredRevisionManifest extends Omit<RevisionManifest, "units"> {
+  readonly units: readonly StoredRevisionUnit[]
+  /** True when revision 1 was written from a materialized file's cells. */
+  readonly adopted?: boolean
+  /**
+   * Units removed by this or an earlier revision, kept in the manifest so
+   * virtual files (zero Postgres source rows) still surface orphaned
+   * translations and tombstoned source text for review without touching `cells`.
+   */
+  readonly tombstonedUnits?: readonly StoredRevisionUnit[]
 }
 
 /**
@@ -390,9 +421,15 @@ export function alignRevision(
   }
 
   const counts: Record<UnitOutcome | "deleted", number> = { equal: 0, changed: 0, moved: 0, inserted: 0, deleted: 0 }
+  const usedCellIds = new Set<string>(parentUnits.map((p) => p.cellId))
   const units: AlignedUnit[] = hashed.map((h, i) => {
     const cont = continuation.get(i)
-    const cellId = cont ? cont.parent.cellId : revisionCellId(target.fileId, target.revisionN, h.input.unitKey)
+    const explicitCellId =
+      !cont && !parent && typeof h.input.cellId === "string" && h.input.cellId.length > 0 && !usedCellIds.has(h.input.cellId)
+        ? h.input.cellId
+        : null
+    const cellId = cont ? cont.parent.cellId : (explicitCellId ?? revisionCellId(target.fileId, target.revisionN, h.input.unitKey))
+    usedCellIds.add(cellId)
     const outcome: UnitOutcome = cont ? cont.outcome : "inserted"
     counts[outcome]++
     const unit: RevisionUnit = { ...h.input, cellId, contentHash: h.hash }

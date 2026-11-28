@@ -52,6 +52,8 @@ export interface BranchingSearchEnv {
    *  `(projectId, corpusEventMax, queryHash)` with a 60s TTL. Absence
    *  disables the cache; behavior is otherwise identical. */
   BRANCHING_SEARCH_KV?: KVNamespace
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/branching-search$/

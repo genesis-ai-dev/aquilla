@@ -12,6 +12,7 @@
 // behind a sync-worker read route.
 
 import type { ToolWrite, TouchedCellState } from "../../../../shared/tools/revert"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 
 export const MAX_ACTIVITY_EVENTS = 2000
 
@@ -72,6 +73,7 @@ export async function readToolActivity(
   projectId: string,
   toolId: string,
   sinceMs: number,
+  r2?: ManifestR2Bucket,
 ): Promise<ToolActivity> {
   const { results: rows } = await db
     .prepare(
@@ -200,6 +202,28 @@ export async function readToolActivity(
       .bind(projectId, ...cellIds)
       .all<{ cell_id: string; canonical_ref: string }>()
     const refs = new Map(results.map((r) => [r.cell_id, r.canonical_ref]))
+    if (r2) {
+      const missingFileIds = [
+        ...new Set(
+          activity
+            .filter((a) => a.fileId && a.cellId && !refs.has(a.cellId))
+            .map((a) => a.fileId as string),
+        ),
+      ]
+      if (missingFileIds.length > 0) {
+        const vFiles = await Promise.all(
+          missingFileIds.map((fid) => loadVirtualSourceFile(db, r2, projectId, fid)),
+        )
+        for (const vFile of vFiles) {
+          if (!vFile) continue
+          for (const row of vFile.rows) {
+            if (row.tombstoned_at == null && row.canonical_ref && !refs.has(row.cell_id)) {
+              refs.set(row.cell_id, row.canonical_ref)
+            }
+          }
+        }
+      }
+    }
     for (const a of activity) a.ref = a.cellId ? (refs.get(a.cellId) ?? null) : null
   }
 

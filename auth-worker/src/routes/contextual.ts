@@ -59,6 +59,7 @@ import {
   type SegmentationInput,
 } from "../../../db/shared/file-segmentation"
 import { selectCellPairs } from "../lib/agent/tools/select-cells"
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import { segmentWithModel } from "../lib/contextual/segment-model"
 import {
   createRun,
@@ -584,6 +585,7 @@ export async function selfTickLoop(
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(runEnv, { purpose: "triage", projectId, ...input }),
             bible,
+            r2: runEnv.SNAPSHOTS,
           })
           if (checkpoint.reused > 0) {
             console.log(
@@ -1412,6 +1414,7 @@ async function readinessCellCounts(
   db: AquillaDb,
   projectId: string,
   lane: LaneRef,
+  r2?: ManifestR2Bucket,
 ): Promise<{ validated: number; untranslated: number }> {
   const { laneId } = await resolveLane(db, projectId, lane)
   return getCachedContextualReadiness(`${projectId}\u0000${laneId ?? ""}`, async () => {
@@ -1430,10 +1433,36 @@ async function readinessCellCounts(
       )
       .bind(laneId, projectId)
       .first<{ validated: number; untranslated: number }>()
-    return {
-      validated: Number(counts?.validated ?? 0),
-      untranslated: Number(counts?.untranslated ?? 0),
+    let validated = Number(counts?.validated ?? 0)
+    let untranslated = Number(counts?.untranslated ?? 0)
+    if (r2) {
+      const vFiles = await loadProjectVirtualSourceFiles(db, r2, projectId)
+      if (vFiles.length > 0) {
+        const vFileIds = vFiles.map((vf) => vf.head.fileId)
+        const ph = vFileIds.map(() => "?").join(", ")
+        const tRes = await db
+          .prepare(
+            `SELECT file_id, cell_id, value, validated
+               FROM cells
+              WHERE project_id = ? AND side = 'target' AND lane_id = ?
+                AND file_id IN (${ph})`,
+          )
+          .bind(projectId, laneId, ...vFileIds)
+          .all<{ file_id: string; cell_id: string; value: string; validated: number }>()
+        const tByKey = new Map(
+          (tRes.results ?? []).map((t) => [`${t.file_id}\0${t.cell_id}`, t]),
+        )
+        for (const vf of vFiles) {
+          for (const s of vf.rows) {
+            if (s.hidden_at != null || s.tombstoned_at != null) continue
+            const t = tByKey.get(`${vf.head.fileId}\0${s.cell_id}`)
+            if (t && Number(t.validated) === 1 && t.value.trim() !== "") validated += 1
+            else if (!t || t.value === "") untranslated += 1
+          }
+        }
+      }
     }
+    return { validated, untranslated }
   })
 }
 
@@ -1459,7 +1488,7 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
     let readiness: ContextReadiness | null = null
     try {
       const context = await loadProjectContext(c.env.AQUILLA_PG, projectId, lane)
-      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId, lane)
+      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId, lane, c.env.SNAPSHOTS)
       readiness = computeContextReadiness({
         context,
         validatedExamples: counts.validated,
@@ -1714,7 +1743,7 @@ contextual.get("/:projectId/contextual/runs/:runId/activity", authMiddleware, as
       drafts: draftPage.drafts,
     }
     try {
-      const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
+      const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId, c.env.SNAPSHOTS)
       labelled = decorateActivityLabels(labelled, cells)
     } catch (err) {
       console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
@@ -2198,9 +2227,9 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
-    selectCellPairs(db, projectId, { fileId, targetLang: "" }),
+    selectCellPairs(db, projectId, { fileId, targetLang: "", r2: c.env.SNAPSHOTS }),
   ])
-  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
+  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview, c.env.SNAPSHOTS)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
   const spans = seeds.map((seed) => {
     const start = order.get(seed.startCellId)
@@ -2253,7 +2282,7 @@ contextual.put(
     // 'auto'/'fixed' do not need them, so only pay for the read when they do.
     const orderedCellIds =
       input.strategy === "explicit"
-        ? (await selectCellPairs(db, projectId, { fileId, targetLang: "" })).map((p) => p.cellId)
+        ? (await selectCellPairs(db, projectId, { fileId, targetLang: "", r2: c.env.SNAPSHOTS })).map((p) => p.cellId)
         : []
     const checked = validateSegmentationInput(input, orderedCellIds)
     if (!checked.ok) {
@@ -2346,7 +2375,7 @@ contextual.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    const pairs = await selectCellPairs(db, projectId, { fileId, targetLang: "" })
+    const pairs = await selectCellPairs(db, projectId, { fileId, targetLang: "", r2: c.env.SNAPSHOTS })
     if (pairs.length === 0) {
       const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
       return c.json(body, status)

@@ -55,6 +55,7 @@ import {
   type ReviewItem,
 } from "@/hooks/useUpstreamChangesReview"
 import { emitTargetCellRepin } from "@/lib/sync/events-emit"
+import { contentHashOf } from "../../../db/shared/file-revision"
 import { ROLE } from "@/lib/sync/role-policy"
 import type { FileReference } from "@/lib/parsers/types"
 
@@ -152,6 +153,7 @@ export function UpstreamChangesPanel({
       fileId: item.fileId,
       cellId: item.cellId,
       sourceEventId: newSourceEventId,
+      sourceContentHash: contentHashOf(item.newValue),
       expectedTargetEventId: item.target.eventId,
       // AQU-1902: repin the lane this target row belongs to. With no lane the
       // repin addressed the default lane, which projects created today lack.

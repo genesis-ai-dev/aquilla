@@ -58,12 +58,19 @@ beforeEach(async () => {
       if (init?.body instanceof ArrayBuffer) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 })
       }
-      const body = JSON.parse(String(init?.body)) as CapturedBody
+      const body = JSON.parse(String(init?.body)) as CapturedBody & { units?: unknown[]; virtual?: boolean }
       captured.push(body)
-      return new Response(JSON.stringify({ accepted: body.cells.length, fileId: body.fileId }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
+      return new Response(
+        JSON.stringify(
+          Array.isArray(body.units)
+            ? { noop: false, revisionN: 1, eventId: "rev-evt-1" }
+            : { accepted: body.cells?.length ?? 0, fileId: body.fileId },
+        ),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      )
     }),
   )
 })
@@ -135,17 +142,20 @@ describe("import — bulk upload", () => {
     expect(body.cells[0].value).toBe("In the beginning…")
   })
 
-  it("importFile dispatches on extension and uploads cells", async () => {
+  it("importFile dispatches on extension and uploads cells as a virtual revision", async () => {
     const file = new File([new Blob(["alpha\nbeta\ngamma\n"])], "notes.txt", { type: "text/plain" })
     const { refs } = await importFile(file, { projectId: "p-7", author: "carol", getToken })
 
     expect(refs).toHaveLength(1)
     expect(refs[0].cellCount).toBeGreaterThan(0)
-    // One cell-carrying chunk + the trailing finalize request.
-    expect(captured).toHaveLength(2)
-    expect(captured[1].complete).toBe(true)
+    // file.create (0 cells) → virtual revision (N units) → finalize (complete: true).
+    expect(captured).toHaveLength(3)
     expect(captured[0].file?.name).toBe("notes.txt")
-    expect(captured[0].cells.length).toBe(refs[0].cellCount)
+    expect(captured[0].cells).toHaveLength(0)
+    const revBody = captured[1] as unknown as { units: unknown[]; virtual?: boolean }
+    expect(revBody.virtual).toBe(true)
+    expect(revBody.units.length).toBe(refs[0].cellCount)
+    expect(captured[2].complete).toBe(true)
   })
 
   it("stores a multi-book USFM bundle once and publishes books only after every binding lands", async () => {

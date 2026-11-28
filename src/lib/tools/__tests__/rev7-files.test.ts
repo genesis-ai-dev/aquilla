@@ -49,17 +49,21 @@ vi.mock("@/lib/sync/source-upload", () => ({
   uploadSourceOriginal: vi.fn(async () => ({})),
   sha256Hex: vi.fn(async () => "e".repeat(64)),
 }))
-vi.mock("@/lib/sync/revision-import", () => ({
-  postFileRevision: vi.fn(async (args: Record<string, unknown>) => {
-    state.revisions.push(args)
-    return {
-      noop: false,
-      revisionN: 2,
-      counts: { equal: 1, changed: 1, moved: 0, inserted: 1, deleted: 1 },
-      cellIds: { abc1: "held-1", abc2: "held-2", abc3: "minted-by-the-revision" },
-    }
-  }),
-}))
+vi.mock("@/lib/sync/revision-import", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/revision-import")>()
+  return {
+    ...actual,
+    postFileRevision: vi.fn(async (args: Record<string, unknown>) => {
+      state.revisions.push(args)
+      return {
+        noop: false,
+        revisionN: 2,
+        counts: { equal: 1, changed: 1, moved: 0, inserted: 1, deleted: 1 },
+        cellIds: { abc1: "held-1", abc2: "held-2", abc3: "minted-by-the-revision" },
+      }
+    }),
+  }
+})
 
 import { LiveFilesData, extensionCellId, extensionDataFileId, extensionFileId, upsertHash } from "../live-data-files"
 import { createFilesHandlers } from "../host-handlers-files"

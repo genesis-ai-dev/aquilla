@@ -5,6 +5,7 @@
  */
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../db/shared/virtual-source-store"
 import {
   dismissKey,
   keepKey,
@@ -120,6 +121,7 @@ export async function loadScoreInputs(
   lane: string,
   candidates: readonly Candidate[],
   observations: readonly Observation[],
+  r2?: ManifestR2Bucket,
 ): Promise<ScoreInputs> {
   // Keeps — human-confirmed target cells that still contain the phrase (and,
   // for an anchored edit, whose source has the anchor tokens). A cell whose
@@ -156,6 +158,54 @@ export async function loadScoreInputs(
     })
     const res = await db.batch<{ n: number }>(stmts)
     specs.forEach(([k], i) => keeps.set(k, Number(res[i]?.results[0]?.n ?? 0)))
+
+    // AQU-2459 Phase B: anchored keep queries skipped virtual files because
+    // virtual source rows live in R2 rather than Postgres `cells`. Count
+    // matching target rows in virtual files whose virtual source text holds
+    // all anchor tokens.
+    const anchoredSpecs = specs.filter(([, s]) => s.anchors.map(tsWord).filter(Boolean).length > 0)
+    if (r2 && anchoredSpecs.length > 0) {
+      const vTargetStmts = anchoredSpecs.map(([, s]) =>
+        db
+          .prepare(
+            `SELECT t.file_id, t.cell_id FROM cells t
+               JOIN files f ON f.project_id = t.project_id AND f.id = t.file_id
+              WHERE t.project_id = ? AND t.side = 'target'
+                AND f.deleted_at IS NULL AND f.source_virtual = TRUE
+                AND t.lane_id = (SELECT id FROM public.lanes WHERE project_id = t.project_id AND role = 'target' AND legacy_tag = ?)
+                AND t.tombstoned_at IS NULL AND (t.validated > 0 OR t.ai_drafted = 0)
+                AND t.value_tsv @@ phraseto_tsquery('simple', ?)
+                AND NOT EXISTS (
+                  SELECT 1 FROM cells src WHERE src.project_id = t.project_id AND src.file_id = t.file_id
+                    AND src.cell_id = t.cell_id AND src.side = 'source'
+                )`,
+          )
+          .bind(projectId, lane, tsWord(s.oldNorm)),
+      )
+      const vRes = await db.batch<{ file_id: string; cell_id: string }>(vTargetStmts)
+      const neededFileIds = new Set<string>()
+      for (const batch of vRes) {
+        for (const row of batch.results ?? []) neededFileIds.add(row.file_id)
+      }
+      if (neededFileIds.size > 0) {
+        const vFiles = new Map(
+          await Promise.all(
+            [...neededFileIds].map(async (fid) => [fid, await loadVirtualSourceFile(db, r2, projectId, fid)] as const),
+          ),
+        )
+        anchoredSpecs.forEach(([k, s], i) => {
+          const anchorTokens = s.anchors.map((a) => a.toLowerCase().trim()).filter(Boolean)
+          let extra = 0
+          for (const row of vRes[i]?.results ?? []) {
+            const vRow = vFiles.get(row.file_id)?.byCellId.get(row.cell_id)
+            if (!vRow || vRow.tombstoned_at != null) continue
+            const hay = vRow.value.toLowerCase()
+            if (anchorTokens.every((tok) => hay.includes(tok))) extra++
+          }
+          if (extra > 0) keeps.set(k, (keeps.get(k) ?? 0) + extra)
+        })
+      }
+    }
   }
 
   // Reverts — an observation whose cell no longer contains its replacement.

@@ -12,10 +12,13 @@
 //                      with the upstream's sources by cell_id)
 
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../../events/lane-id-sql"
+import { loadProjectVirtualSourceFiles } from "../../../../db/shared/virtual-source-store"
 import type { CorpusCell } from "./algorithm"
 
 export interface CorpusLoaderEnv {
   AQUILLA_PG?: AquillaDb
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 /**
@@ -138,8 +141,10 @@ export async function loadCorpus(
     }>()
 
   const cells: CorpusCell[] = []
+  const seenKeys = new Set<string>()
   let maxEventId: string | null = null
   for (const row of res.results ?? []) {
+    seenKeys.add(`${row.file_id}\0${row.cell_id}`)
     cells.push({
       cellId: row.cell_id,
       fileId: row.file_id,
@@ -150,6 +155,67 @@ export async function loadCorpus(
     })
     if (maxEventId === null || row.source_event_id > maxEventId) {
       maxEventId = row.source_event_id
+    }
+  }
+
+  // AQU-2459 Phase B: include virtual source files from the effective source project.
+  if (env.SNAPSHOTS) {
+    const effectiveSourceProjectId = upstreamProjectId ?? args.projectId
+    const vFiles = await loadProjectVirtualSourceFiles(
+      env.AQUILLA_PG,
+      env.SNAPSHOTS,
+      effectiveSourceProjectId,
+    )
+    if (vFiles.length > 0) {
+      const vFileIds = vFiles.map((vf) => vf.head.fileId)
+      const ph = vFileIds.map(() => "?").join(", ")
+      const tRes = await env.AQUILLA_PG.prepare(
+        `SELECT file_id, cell_id, COALESCE(value, '') AS value, COALESCE(validated, 0) AS validated
+           FROM cells
+          WHERE project_id = ? AND side = 'target'
+            AND ${targetLaneDualReadSql("cells")}
+            AND file_id IN (${ph})`,
+      )
+        .bind(
+          args.projectId,
+          ...targetLaneDualReadBinds(args.projectId, args.targetLang ?? ""),
+          ...vFileIds,
+        )
+        .all<{ file_id: string; cell_id: string; value: string; validated: number }>()
+      const tByCell = new Map<string, { value: string; validated: number }>()
+      for (const t of tRes.results ?? []) {
+        tByCell.set(`${t.file_id}\0${t.cell_id}`, { value: t.value, validated: Number(t.validated) })
+        // Linked-target projects may pair across files by cell_id.
+        if (!tByCell.has(`\0${t.cell_id}`)) {
+          tByCell.set(`\0${t.cell_id}`, { value: t.value, validated: Number(t.validated) })
+        }
+      }
+      for (const vf of vFiles) {
+        if (maxEventId === null || vf.head.revisionEventId > maxEventId) {
+          maxEventId = vf.head.revisionEventId
+        }
+        for (const s of vf.rows) {
+          if (args.excludeCellId && s.cell_id === args.excludeCellId) continue
+          const k = `${vf.head.fileId}\0${s.cell_id}`
+          if (seenKeys.has(k)) continue
+          const t = tByCell.get(k) ?? (upstreamProjectId ? tByCell.get(`\0${s.cell_id}`) : undefined)
+          const validated = (t?.validated ?? 0) === 1
+          if (args.validatedOnly && !validated) continue
+          seenKeys.add(k)
+          cells.push({
+            cellId: s.cell_id,
+            fileId: vf.head.fileId,
+            anchorCellId: s.anchor_cell_id,
+            sourceText: s.value,
+            targetText: t?.value ?? "",
+            validated,
+          })
+          if (maxEventId === null || s.event_id > maxEventId) {
+            maxEventId = s.event_id
+          }
+        }
+      }
+      cells.sort((a, b) => a.cellId.localeCompare(b.cellId))
     }
   }
 

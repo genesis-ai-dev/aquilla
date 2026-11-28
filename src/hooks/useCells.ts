@@ -16,6 +16,7 @@ import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings }
 import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } from "@/lib/codex-editor/types"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
+import { contentHashOf } from "../../db/shared/file-revision"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { grantsVersionFromSyncToken, readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
 import { peekOutboxShared, subscribeToOutbox } from "@/lib/sync/outbox"
@@ -86,6 +87,9 @@ export interface CellData {
   targetSourceEventId?: string | null
   /** Source row's `event_id` — pinned into `target.cell.commit.payload.sourceEventId`. */
   sourceEventId?: string
+  /** AQU-2459 Phase B: 122-bit normalized source content hash — pinned into
+   *  `target.cell.commit.payload.sourceContentHash` for hash-based staleness. */
+  sourceContentHash?: string
   context: string
   group: string
   /** Optional section label for navigation/progress. */
@@ -265,6 +269,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.targetEventId === b.targetEventId &&
     a.targetSourceEventId === b.targetSourceEventId &&
     a.sourceEventId === b.sourceEventId &&
+    a.sourceContentHash === b.sourceContentHash &&
     a.context === b.context &&
     a.group === b.group &&
     a.section === b.section &&
@@ -451,6 +456,8 @@ export function buildCellData(
     aiDrafted: target?.aiDrafted ?? false,
     aiDraft: target?.aiDraft ?? undefined,
     sourceEventId: source?.eventId,
+    sourceContentHash:
+      source?.sourceContentHash ?? (source ? contentHashOf(source.value) : undefined),
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,
     context: cueContext,

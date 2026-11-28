@@ -173,7 +173,7 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
   if (!suggestLimit.allowed) return c.json({ suggestions: [], rateLimited: true })
 
   // A failed mining claim never blocks reading.
-  await mineIfDue(db, input.projectId, mineAfterResponse(c)).catch(logMineFailure)
+  await mineIfDue(db, input.projectId, mineAfterResponse(c), c.env.SNAPSHOTS).catch(logMineFailure)
 
   const cellsById = new Map(input.cells.map((cell) => [cellKeyOf(cell.fileId, cell.cellId, input.lane), cell]))
   const passage = [...cellsById.entries()].map(([id, cell]) => ({ id, source: cell.source, target: cell.target }))
@@ -188,7 +188,7 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
     observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys(asked.map((p) => p.target)))
     candidates = findCandidates(asked, observations)
     if (candidates.length === 0) return c.json({ suggestions: [], jev: "skipped" })
-    scoreInputs = await loadScoreInputs(db, input.projectId, input.lane, candidates, observations)
+    scoreInputs = await loadScoreInputs(db, input.projectId, input.lane, candidates, observations, c.env.SNAPSHOTS)
   } catch (err) {
     console.warn("[smart-edits] memory unavailable:", err)
     return c.json({ suggestions: [], unavailable: true })
@@ -325,7 +325,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(input.projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0
 
-  await mineIfDue(db, input.projectId, mineAfterResponse(c)).catch(logMineFailure)
+  await mineIfDue(db, input.projectId, mineAfterResponse(c), c.env.SNAPSHOTS).catch(logMineFailure)
   // The team's corrections are context, not a precondition: if the memory
   // cannot be read, the model still gets the source and the passage.
   let observations: Observation[] = []

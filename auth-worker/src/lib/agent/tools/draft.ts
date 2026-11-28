@@ -35,6 +35,7 @@ import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
+import type { ManifestR2Bucket } from "../../../../../db/shared/virtual-source-store"
 import type { FileCandidate, ToolOutcome } from "./types"
 import {
   logVendorTimeout,
@@ -109,6 +110,8 @@ export interface DraftGenerationContext {
    *  package size (MAX_LIMIT); the external DraftCells command passes the
    *  project's configured completion batch size instead. */
   maxCells?: number
+  /** AQU-2459 Phase B: R2 bucket for virtual source files. */
+  r2?: ManifestR2Bucket
 }
 
 export interface DraftContext extends DraftGenerationContext {
@@ -427,6 +430,7 @@ export async function generateDrafts(
     focusedFileId: ctx.focusedFileId,
     lane: ctx.lane,
     aliases: ctx.aliases,
+    r2: ctx.r2,
   })
   if (!scope.ok) return { ok: false, error: scope.error, ...(scope.candidates ? { candidates: scope.candidates } : {}) }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
@@ -439,7 +443,12 @@ export async function generateDrafts(
     : Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
   const resolvedLane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: resolvedLane.laneId })
+  const all = await selectCellPairs(db, ctx.projectId, {
+    fileId: scope.fileId,
+    range: scope.range,
+    laneId: resolvedLane.laneId,
+    r2: ctx.r2,
+  })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]
@@ -530,7 +539,7 @@ export async function generateDrafts(
   const examplesOutcome = await executeExamples(
     db,
     { text: work.map((p) => p.source).join(" "), n: EXAMPLES_N },
-    { projectId: ctx.projectId, lane: ctx.lane, aliases: ctx.aliases },
+    { projectId: ctx.projectId, lane: ctx.lane, aliases: ctx.aliases, r2: ctx.r2 },
   )
   const examplePairs = examplesOutcome.data?.examples ?? []
   const examplesBlock =

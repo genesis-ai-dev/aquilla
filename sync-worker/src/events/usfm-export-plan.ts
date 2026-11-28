@@ -29,6 +29,7 @@ import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { cellMetadataWireSql } from '../../../db/shared/cell-metadata-sql'
 import type { UsfmEdits } from '../lib/usfm-lossless'
 import { readUsfmNotes, reattachUsfmNotes } from '../lib/usfm-notes'
+import { loadVirtualSourceFile, type ManifestR2Bucket } from '../../../db/shared/virtual-source-store'
 
 /** How far an added cell may sit from a verse before we give up walking. Two
  *  cells added in a row chain through each other, so a handful of hops is
@@ -76,10 +77,80 @@ export async function buildUsfmExportPlan(
   fileId: string,
   lane: string,
   options: UsfmExportPlanOptions = {},
+  r2?: ManifestR2Bucket,
 ): Promise<UsfmExportPlan> {
   // AQU-1148: one extra predicate rather than a second query — `cells` is
   // already indexed on (project_id, file_id, side, validated).
   const validatedPredicate = options.validatedOnly ? `\n          AND t.validated <> 0` : ''
+
+  // AQU-2459 Phase B: virtual source files hold source refs & metadata in the
+  // R2 manifest rather than Postgres `cells`.
+  const virtualFile = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+  if (virtualFile) {
+    const overrides = new Map<string, string>()
+    const tRows = await db
+      .prepare(
+        `SELECT t.cell_id, t.value
+           FROM cells t
+          WHERE t.project_id = ?
+            AND t.file_id    = ?
+            AND t.side       = 'target'
+            AND ${targetLaneDualReadSql('t')}
+            AND t.value <> ''${validatedPredicate}`,
+      )
+      .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
+      .all<{ cell_id: string; value: string }>()
+    const targetByCell = new Map<string, string>()
+    for (const row of tRows.results ?? []) {
+      targetByCell.set(row.cell_id, row.value)
+      const src = virtualFile.byCellId.get(row.cell_id)
+      if (!src || !src.canonical_ref || src.hidden_at != null || src.tombstoned_at != null) continue
+      overrides.set(src.canonical_ref, reattachUsfmNotes(row.value, readUsfmNotes(src.metadata)))
+    }
+    const edits: UsfmEdits = {}
+    const removedSet = new Set<string>()
+    for (const r of virtualFile.rows) {
+      if (r.hidden_at != null && r.canonical_ref) removedSet.add(r.canonical_ref)
+    }
+    for (const r of virtualFile.tombstonedRows) {
+      if (r.canonical_ref) removedSet.add(r.canonical_ref)
+    }
+    try {
+      const removed = await removedCellsForFile(db, projectId, fileId, r2)
+      for (const r of removed) {
+        if (r.canonicalRef) removedSet.add(r.canonicalRef)
+      }
+    } catch {
+      /* fail soft */
+    }
+    if (removedSet.size > 0) edits.remove = removedSet
+
+    const addedByRef = new Map<string, string[]>()
+    for (const r of virtualFile.rows) {
+      if (r.canonical_ref || r.hidden_at != null || r.tombstoned_at != null) continue
+      const text = (targetByCell.get(r.cell_id) ?? r.value ?? '').trim()
+      if (!text) continue
+      let curAnchor = r.anchor_cell_id
+      let hops = 0
+      const visited = new Set<string>([r.cell_id])
+      while (curAnchor && hops < MAX_ANCHOR_HOPS && !visited.has(curAnchor)) {
+        visited.add(curAnchor)
+        const prev = virtualFile.byCellId.get(curAnchor)
+        if (!prev) break
+        if (prev.canonical_ref) {
+          const list = addedByRef.get(prev.canonical_ref) ?? []
+          list.push(text)
+          addedByRef.set(prev.canonical_ref, list)
+          break
+        }
+        curAnchor = prev.anchor_cell_id
+        hops++
+      }
+    }
+    if (addedByRef.size > 0) edits.appendAfter = addedByRef
+    return { overrides, edits }
+  }
+
   // 1. Translations. Every target cell paired with a source cell that has a
   //    canonical_ref (the verse address). The projection writes canonical_ref
   //    ONLY on the source side; the target side is paired by
@@ -149,7 +220,7 @@ export async function buildUsfmExportPlan(
   //    translation is dropped rather than emitted — the one ordering this relies
   //    on, and the reason nothing has to prune `overrides` above.
   const removedRefs = new Set<string>()
-  for (const removed of await removedCellsForFile(db, projectId, fileId)) {
+  for (const removed of await removedCellsForFile(db, projectId, fileId, r2)) {
     if (removed.canonicalRef) removedRefs.add(removed.canonicalRef)
   }
   for (const hidden of hiddenCells) {

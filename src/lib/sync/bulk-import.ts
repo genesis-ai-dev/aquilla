@@ -119,6 +119,8 @@ export interface BulkImportCell {
   sequenceIndex?: number
   /** Primary content kind. Absent ⇒ 'text'. */
   medium?: "text" | "media"
+  /** Supplied wording for a media segment cell (carried into virtual manifest). */
+  transcription?: string
   /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
    *  Drives paragraph grouping for multi-cell draft operations. */
   paragraphStart?: boolean
@@ -473,6 +475,84 @@ export async function reviseSourceImport(
  * the same worker transaction as `file.restore`, so collaborators can never
  * observe a published media file without its playable clip metadata.
  */
+export interface PublishStagedImportBatchArgs {
+  projectId: string
+  files: Array<{ fileId: string; publishEventId?: string }>
+  getToken: (fileId: string) => Promise<string | null>
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * AQU-2459 Phase B: publish a batch of staged files in one HTTP request
+ * (`POST /api/v1/projects/:projectId/import/publish-batch`), eliminating 66
+ * serial publish round-trips on a whole-Bible Paratext import.
+ */
+export async function publishStagedImportBatch(args: PublishStagedImportBatchArgs): Promise<void> {
+  if (args.files.length === 0) return
+  if (args.files.length === 1) {
+    return publishStagedImport({
+      projectId: args.projectId,
+      fileId: args.files[0].fileId,
+      publishEventId: args.files[0].publishEventId,
+      getToken: args.getToken,
+      signal: args.signal,
+      fetchImpl: args.fetchImpl,
+    })
+  }
+  const fetchFn = args.fetchImpl ?? fetch
+  let token = await args.getToken(args.files[0].fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  const body = JSON.stringify({
+    files: args.files.map((f) => ({
+      fileId: f.fileId,
+      publishEventId: f.publishEventId ?? uuidv7(),
+    })),
+    clientTs: Date.now(),
+  })
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}/import/publish-batch`
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body,
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      lastError = error instanceof Error ? error : new Error(String(error))
+    }
+
+    if (response) {
+      if (response.ok) return
+      const detail = await response.text().catch(() => "")
+      lastError = new Error(
+        `Batch import publication failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      )
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.files[0].fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+    }
+  }
+  throw lastError ?? new Error("Batch import publication failed")
+}
+
 export async function publishStagedImport(args: PublishStagedImportArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
   let token = await args.getToken(args.fileId)
@@ -593,7 +673,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
   const revision = args.revision
-  if (revision && !(sourceBytes && sourceFormat)) {
+  if (revision && !(sourceBytes && sourceFormat) && !revision.allowSyntheticArtifactHash) {
     throw new Error("A revision import needs the original bytes; import the file again from its source.")
   }
   let uploaded = 0
@@ -792,27 +872,120 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
     }
   }
 
-  // AQU-2459: the units land as one revision naming the artifact just stored.
-  // The artifact is not optional here: without it the revision has nothing to
-  // be a revision OF, so its failure is the import's failure. The checksum is
-  // computed here rather than read back, so a resumed session whose upload
-  // already landed can still name it.
-  if (revision && sourceBytes) {
+  // AQU-2459: the units land as one revision naming the artifact just stored
+  // (or, for importers without per-file original bytes, the hash of the
+  // serialized unit list). The artifact is not optional when bytes were
+  // supplied: its failure is the import's failure. The checksum is computed
+  // here rather than read back, so a resumed session whose upload already
+  // landed can still name it.
+  if (revision && (sourceBytes || revision.allowSyntheticArtifactHash)) {
     if (uploadFailure !== null) throw uploadFailure
-    await postFileRevision({
+    const artifactSha256 = sourceBytes
+      ? await sha256Hex(sourceBytes)
+      : await sha256Hex(new TextEncoder().encode(JSON.stringify(revision.units)).buffer as ArrayBuffer)
+    const revResult = await postFileRevision({
       projectId: args.projectId,
       fileId: args.fileId,
-      artifactSha256: await sha256Hex(sourceBytes),
+      artifactSha256,
       revision,
       origin: revision.origin ?? "import",
       // The finalize below recomputes the counters once for the whole file.
       finalizeFollows: true,
+      ...(args.toolOrigin !== undefined ? { toolOrigin: args.toolOrigin } : {}),
       getToken: args.getToken,
       fetchImpl: fetchFn,
       signal: args.signal,
     })
     uploaded = total
     args.onProgress?.(uploaded, total)
+
+    // AQU-2459 Phase B: bilingual virtual imports write zero Postgres source
+    // rows via POST .../revisions, then send target-only chunks to POST /import
+    // pinned to the revision's event id.
+    const rawTargets = args.targets ?? []
+    if (rawTargets.length > 0) {
+      const targetList = rawTargets.map((target) => ({
+        ...target,
+        ...(revResult.eventId ? { parentId: revResult.eventId } : {}),
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      }))
+      const targetOffsets: number[] = []
+      let tBytes = 0
+      let tCount = 0
+      targetOffsets.push(0)
+      for (let i = 0; i < targetList.length; i++) {
+        const size = utf8ByteLength(JSON.stringify(targetList[i])) + 1
+        if (tCount > 0 && (tCount >= CHUNK || tBytes + size > CHUNK_BODY_BUDGET)) {
+          targetOffsets.push(i)
+          tBytes = 0
+          tCount = 0
+        }
+        tBytes += size
+        tCount += 1
+      }
+      const sendTargetChunk = async (chunkIdx: number): Promise<void> => {
+        const start = targetOffsets[chunkIdx]!
+        const end = targetOffsets[chunkIdx + 1] ?? targetList.length
+        const targetsSlice = targetList.slice(start, end)
+        const payload: Record<string, unknown> = {
+          projectId: args.projectId,
+          fileId: args.fileId,
+          cells: [],
+          targets: targetsSlice,
+          clientTs: Date.now(),
+          ...(args.toolOrigin ? { toolOrigin: args.toolOrigin } : {}),
+        }
+        let lastError: Error | null = null
+        for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+          if (args.signal?.aborted) throw new Error("Import cancelled")
+          let response: Response | null = null
+          try {
+            response = await fetchFn(url, {
+              method: "POST",
+              headers: importHeaders(args, token),
+              body: JSON.stringify(payload),
+              signal: args.signal,
+            })
+          } catch (err) {
+            if (args.signal?.aborted) throw new Error("Import cancelled")
+            lastError = new Error(`Target upload failed: ${err instanceof Error ? err.message : "network error"}`)
+          }
+          if (response) {
+            if (response.ok) return
+            const detail = await response.text().catch(() => "")
+            lastError = new Error(
+              `Target upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+            )
+            if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+              const refreshed = await args.getToken(args.fileId)
+              if (refreshed) {
+                token = refreshed
+                continue
+              }
+            }
+            if (!isRetryableImportStatus(response.status)) throw lastError
+          }
+          if (attempt < IMPORT_ATTEMPTS - 1) {
+            await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+          }
+        }
+        throw lastError ?? new Error("Target upload failed")
+      }
+      let tCursor = 0
+      const targetWorker = async (): Promise<void> => {
+        while (uploadFailure === null && tCursor < targetOffsets.length) {
+          const idx = tCursor++
+          try {
+            await sendTargetChunk(idx)
+          } catch (err) {
+            uploadFailure ??= err
+          }
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(4, targetOffsets.length) }, () => targetWorker()),
+      )
+    }
   }
 
   // The remaining chunks are independent genesis source.cell.create batches:

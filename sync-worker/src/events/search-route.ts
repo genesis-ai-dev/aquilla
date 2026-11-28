@@ -56,6 +56,7 @@ import {
   // continue to compile without modification (Task 7 will migrate them).
   sanitizeFtsQuery,
 } from "./scoped-search"
+import { mergeVirtualSourceSearchPage } from "./virtual-search"
 
 export type { SearchResultOut, ParallelPassageRow, SearchPage } from "./scoped-search"
 
@@ -67,6 +68,8 @@ export interface SearchReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   LANE_READ_WALL?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 // /search must be anchored with $ so it does NOT match /search/passages.
@@ -210,7 +213,7 @@ export async function handleSearchReadRequest(
 
   try {
     const pattern = matchCase || wholeWord || useRegexp
-    const page = pattern
+    const pgPage = pattern
       ? await queryScopedPatternPage(env.AQUILLA_PG, verifiedProjectId, q, {
           side: sideFilter,
           limit,
@@ -226,6 +229,17 @@ export async function handleSearchReadRequest(
           laneIds,
           fileId,
         })
+    const page = await mergeVirtualSourceSearchPage(env.AQUILLA_PG, env.SNAPSHOTS, projectId, pgPage, {
+      q,
+      mode: pattern ? "pattern" : "fts",
+      side: sideFilter,
+      fileId,
+      limit,
+      laneIds,
+      matchCase,
+      wholeWord,
+      useRegexp,
+    })
     return Response.json(page)
   } catch (err) {
     return mapSearchError(err)
@@ -287,7 +301,14 @@ export async function handleSearchPassagesRequest(
   const { sideFilter, limit } = parsed
 
   try {
-    const page = await queryScopedExactPage(env.AQUILLA_PG, verifiedProjectId, q, {
+    const pgPage = await queryScopedExactPage(env.AQUILLA_PG, verifiedProjectId, q, {
+      side: sideFilter,
+      limit,
+      laneIds,
+    })
+    const page = await mergeVirtualSourceSearchPage(env.AQUILLA_PG, env.SNAPSHOTS, projectId, pgPage, {
+      q,
+      mode: "exact",
       side: sideFilter,
       limit,
       laneIds,

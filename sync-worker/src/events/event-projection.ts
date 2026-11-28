@@ -155,6 +155,7 @@ export function buildBulkTargetCellCommitStmt(
       payload.valueHtml ?? null,
       event.id,
       payload.sourceEventId ?? null,
+      payload.sourceContentHash ?? null,
       event.author,
       event.serverTs,
       countWords(value),
@@ -165,12 +166,12 @@ export function buildBulkTargetCellCommitStmt(
     )
   }
   const placeholders = Array(rows.length)
-    .fill(`(?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
+    .fill(`(?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
     .join(',\n')
   return db.prepare(
     `INSERT INTO cells (
       project_id, file_id, cell_id, side, value, value_html, type,
-      canonical_ref, anchor_cell_id, event_id, source_event_id,
+      canonical_ref, anchor_cell_id, event_id, source_event_id, source_content_hash,
       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
     ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
@@ -178,6 +179,7 @@ export function buildBulkTargetCellCommitStmt(
       value_html = excluded.value_html,
       event_id = excluded.event_id,
       source_event_id = excluded.source_event_id,
+      source_content_hash = excluded.source_content_hash,
       last_editor = excluded.last_editor,
       last_edit_at = excluded.last_edit_at,
       word_count = excluded.word_count,
@@ -453,6 +455,10 @@ function fileCountersSql(scope: FileCountersScope): string {
             AND s.cell_id = c.cell_id
             AND s.side = 'source'
           WHERE f.project_id = ?${narrow}
+            -- AQU-2459 Phase B: virtual source files have zero source rows in
+            -- cells and maintain their counters from the R2 manifest via
+            -- virtual-progress.ts. Never let a SQL counter sweep zero them out.
+            AND f.source_virtual = FALSE
             -- AQU-1424: every FILTERed counter above is gated here once rather than
             -- one by one. Alias s IS the shared source row, so its hidden_at answers for
             -- the whole cell; c.hidden_at would let every target row of a parked cell
@@ -647,6 +653,7 @@ export function buildBulkSourceCellCreateStmt(
         transcription  = excluded.transcription,
         camera_state   = excluded.camera_state,
         metadata       = excluded.metadata,
+        tombstoned_at  = NULL,
         lane_id        = COALESCE(excluded.lane_id, cells.lane_id)`,
     )
     .bind(...binds)
@@ -764,6 +771,14 @@ export function buildEventProjectionStmts(
      * cut-vote-archive.ts) is not written again from today's rows.
      */
     rebuild?: boolean
+    /**
+     * AQU-2459 Phase B: when deleting a source cell belonging to a virtual
+     * source file (`files.source_virtual = TRUE`), mark `tombstoned_at` on the
+     * sparse Postgres overlay instead of hard-deleting the row — otherwise
+     * reading the file would fall back to the immutable R2 manifest and
+     * resurrect the deleted cell.
+     */
+    virtualSourceTombstone?: boolean
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -905,6 +920,7 @@ export function buildEventProjectionStmts(
               transcription  = excluded.transcription,
               camera_state   = excluded.camera_state,
               metadata       = excluded.metadata,
+              tombstoned_at  = NULL,
               lane_id        = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
           )
           .bind(
@@ -1097,6 +1113,7 @@ export function buildEventProjectionStmts(
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
+        const sourceContentHash = tp.sourceContentHash ?? null
         // AQU-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
         // on any human commit (ai_suggestion absent). Human edit reclassifies the cell.
         const aiDrafted = tp.ai_suggestion ? 1 : 0
@@ -1125,23 +1142,25 @@ export function buildEventProjectionStmts(
               `INSERT INTO cells (
                 project_id, file_id, cell_id, side, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
+                source_content_hash,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
-              ) SELECT ?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
+              ) SELECT ?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
-                value             = excluded.value,
-                value_html        = excluded.value_html,
-                event_id          = excluded.event_id,
-                source_event_id   = excluded.source_event_id,
-                last_editor       = excluded.last_editor,
-                last_edit_at      = excluded.last_edit_at,
-                word_count        = excluded.word_count,
-                content_hash      = excluded.content_hash,
-                validated         = 0,
-                endorsement_count = 0,
-                ai_drafted        = excluded.ai_drafted,
-                ai_draft          = excluded.ai_draft,
-                lane_id           = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
+                value               = excluded.value,
+                value_html          = excluded.value_html,
+                event_id            = excluded.event_id,
+                source_event_id     = excluded.source_event_id,
+                source_content_hash = excluded.source_content_hash,
+                last_editor         = excluded.last_editor,
+                last_edit_at        = excluded.last_edit_at,
+                word_count          = excluded.word_count,
+                content_hash        = excluded.content_hash,
+                validated           = 0,
+                endorsement_count   = 0,
+                ai_drafted          = excluded.ai_drafted,
+                ai_draft            = excluded.ai_draft,
+                lane_id             = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
             )
             .bind(
               event.projectId,
@@ -1151,6 +1170,7 @@ export function buildEventProjectionStmts(
               valueHtml,
               event.id,
               sourceEventId,
+              sourceContentHash,
               event.author,
               event.serverTs,
               wordCount,
@@ -1560,22 +1580,46 @@ export function buildEventProjectionStmts(
 
       // LAST, deliberately: every statement above tests this row's head with
       // `HEAD_EXISTS`, and they run in batch order.
-      stmts.push(
-        db
-          .prepare(
-            `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
-               AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
-          )
-          .bind(
-            event.projectId,
-            event.fileId,
-            event.cellId,
-            side,
-            ...targetLaneDualReadBinds(event.projectId, lane),
-            ...gateBinds,
-          ),
-      )
+      if (opts?.virtualSourceTombstone && side === 'source') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+                  SET tombstoned_at = ?,
+                      event_id = ?,
+                      last_editor = ?,
+                      last_edit_at = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
+            )
+            .bind(
+              event.serverTs,
+              event.id,
+              event.author,
+              event.serverTs,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...gateBinds,
+            ),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cells
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+                 AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              side,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+              ...gateBinds,
+            ),
+        )
+      }
 
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -4226,12 +4270,14 @@ case 'cell.audio.attach': {
         db
           .prepare(
             `UPDATE cells
-                SET source_event_id = ?
+                SET source_event_id = ?,
+                    source_content_hash = COALESCE(?, source_content_hash)
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
                 AND event_id = ?`,
           )
           .bind(
             p.sourceEventId,
+            p.sourceContentHash ?? null,
             event.projectId,
             event.fileId,
             event.cellId,

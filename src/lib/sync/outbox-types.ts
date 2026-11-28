@@ -296,6 +296,8 @@ export interface OutboxEventPayloads {
      * time. Null when no source counterpart exists (target-owned cell).
      */
     sourceEventId?: string | null
+    /** AQU-2459 Phase B: 122-bit source content hash observed at commit time. */
+    sourceContentHash?: string | null
     /**
      * AQU-177 / search-and-replace: when true, the cell-service projector
      * re-anchors prior validations to the new head rather than dropping them
@@ -983,6 +985,8 @@ export interface OutboxEventPayloads {
   "target.cell.repin": {
     /** The (now-current) source row's event_id to pin the target to. */
     sourceEventId: string
+    /** AQU-2459 Phase B: the (now-current) source unit's 122-bit content hash. */
+    sourceContentHash?: string | null
     /** The target row's event_id as observed when the reviewer opened the
      *  review panel — the server no-ops if the head has since moved. */
     expectedTargetEventId: string

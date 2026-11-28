@@ -26,6 +26,8 @@ import { removedCellsForFile } from "./removed-cells"
 export interface RemovedCellsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/removed-cells$/
@@ -56,7 +58,7 @@ export async function handleRemovedCellsReadRequest(
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
 
-  const removed = await removedCellsForFile(env.AQUILLA_PG, projectId, fileId)
+  const removed = await removedCellsForFile(env.AQUILLA_PG, projectId, fileId, env.SNAPSHOTS)
 
   return withCors(
     new Response(JSON.stringify({ removed }), {

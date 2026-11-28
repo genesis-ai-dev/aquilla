@@ -51,6 +51,7 @@ import {
   enqueueTargetCommitBatch,
   bulkUploadMorphRows,
   publishStagedImport,
+  publishStagedImportBatch,
   reconcileSourceImport,
   reviseSourceImport,
   type MorphRow,
@@ -67,12 +68,20 @@ import type { PartnerImportEdition, PartnerImportProgress } from "./partners/typ
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
-import { canImportAsRevision, revisionUnitsFromCells } from "./sync/revision-import"
+import {
+  buildSyntheticRevision,
+  canImportAsRevision,
+  normalizeRevisionStamp,
+  REVISION_IMPORT_ENABLED,
+  revisionUnitsFromCells,
+  VIRTUAL_SOURCE_CELLS_ENABLED,
+} from "./sync/revision-import"
 import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  bindSourceArtifactBatch,
   isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
@@ -1067,27 +1076,51 @@ async function emitScriptureBooks(
     return [ref]
   }
 
-  const refs: FileReference[] = []
-  let enqueuedBefore = 0
-  for (const slice of slices) {
-    const { ref } = await emitParsedFile(
-      {
-        name: getBookName(slice.bookCode) ?? slice.bookCode,
-        strings: slice.strings,
-        rawSource: spec.bookRawSource(slice),
-        rawSourceFormat: spec.rawSourceFormat,
-        bookCode: slice.bookCode,
-        roundTripFidelity: "content-only",
-      },
-      spec.fileType,
-      {
-        ...ctx,
-        onCellEnqueued: (count) => onCellsEnqueued(enqueuedBefore + count, total),
-      },
-    )
-    refs.push(ref)
-    enqueuedBefore += slice.strings.length
-    onCellsEnqueued(enqueuedBefore, total)
+  const refs = new Array<FileReference>(slices.length)
+  const perBookEnqueued = new Array<number>(slices.length).fill(0)
+  const reportTotal = () => {
+    const sum = perBookEnqueued.reduce((acc, n) => acc + n, 0)
+    onCellsEnqueued(sum, total)
+  }
+  const deferPerBook = !ctx.deferPublication && slices.length > 1
+  const CONCURRENCY = Math.min(6, slices.length)
+  let nextIdx = 0
+  const worker = async (): Promise<void> => {
+    while (nextIdx < slices.length) {
+      const idx = nextIdx++
+      const slice = slices[idx]
+      const { ref } = await emitParsedFile(
+        {
+          name: getBookName(slice.bookCode) ?? slice.bookCode,
+          strings: slice.strings,
+          rawSource: spec.bookRawSource(slice),
+          rawSourceFormat: spec.rawSourceFormat,
+          bookCode: slice.bookCode,
+          roundTripFidelity: "content-only",
+        },
+        spec.fileType,
+        {
+          ...ctx,
+          ...(deferPerBook ? { deferPublication: true } : {}),
+          onCellEnqueued: (count) => {
+            perBookEnqueued[idx] = count
+            reportTotal()
+          },
+        },
+      )
+      refs[idx] = ref
+      perBookEnqueued[idx] = slice.strings.length
+      reportTotal()
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
+  if (deferPerBook) {
+    await publishStagedImportBatch({
+      projectId: ctx.projectId,
+      files: refs.map((ref) => ({ fileId: ref.id })),
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
   }
   return refs
 }
@@ -1347,6 +1380,14 @@ export async function importMacula(
     cells,
     rawBytes,
     rawSourceFormat: "macula-tsv",
+    ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+      ? {
+          revision: {
+            stamp: normalizeRevisionStamp("macula-tsv-v1", "macula-tsv"),
+            units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+          },
+        }
+      : {}),
     deferPublication: true,
     getToken: ctx.getToken,
     onProgress: (count, total) => {
@@ -1471,6 +1512,14 @@ export async function importTranslationNotes(
     cells,
     rawBytes,
     rawSourceFormat: "tn-tsv",
+    ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+      ? {
+          revision: {
+            stamp: normalizeRevisionStamp("tn-tsv-v1", "tn-tsv"),
+            units: revisionUnitsFromCells(cells),
+          },
+        }
+      : {}),
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total, skippedCount })
@@ -1932,7 +1981,12 @@ export async function emitParsedFile(
     hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
     cells,
   })
-    ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
+    ? {
+        stamp: normalizeRevisionStamp(shared.file.parserVersion, fileType),
+        units: revisionUnitsFromCells(cells, {
+          preserveCellIds: targets.length > 0 || speakerPairs.length > 0,
+        }),
+      }
     : undefined
 
   if (existingFileId && revision) {
@@ -2141,6 +2195,7 @@ export function createMediaFileCommit(
       value: file.name,
       medium: "media",
       sequenceIndex: i,
+      ...(s.transcription ? { transcription: s.transcription } : {}),
       ...(s.metadata ? { metadata: s.metadata } : {}),
       ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
     }))
@@ -2163,6 +2218,12 @@ export function createMediaFileCommit(
         orderedBy: "time",
       },
       cells,
+      revision: buildSyntheticRevision({
+        stamp: "workspace-import-v1",
+        fileType,
+        cells,
+        preserveCellIds: true,
+      }),
       deferPublication: true,
       getToken: ctx.getToken,
       onProgress: ctx.onCellEnqueued,
@@ -2462,12 +2523,12 @@ async function preserveParatextPackage(
     getToken: ctx.getToken,
     signal: ctx.signal,
   })
-  for (const binding of bindings.slice(1)) {
-    await bindSourceArtifact({
+  const remainingBindings = bindings.slice(1)
+  if (remainingBindings.length > 0) {
+    await bindSourceArtifactBatch({
       projectId: ctx.projectId,
-      fileId: binding.fileId,
       artifactId,
-      memberPath: binding.memberPath,
+      bindings: remainingBindings,
       profileId: "builtin:paratext-project",
       profileVersion: "1",
       fidelity: "preserved-only",
@@ -2478,6 +2539,10 @@ async function preserveParatextPackage(
     })
   }
 }
+
+/** Bounded concurrency for multi-book Paratext imports so 66 books overlap
+ *  network + R2 + revision latency instead of paying 66× serial round-trips. */
+const PARATEXT_BOOK_CONCURRENCY = 6
 
 export interface ParatextImportResult {
   refs: FileReference[]
@@ -2543,56 +2608,73 @@ export async function commitParatextProject(
   )
 
   let done = 0
-  let cellsUploaded = 0
   const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
-  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
-  for (const bookPlan of plan.books) {
-    const book = bookPlan.book
-    onProgress?.({
-      phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
-      cellsDone: cellsUploaded, cellsTotal,
-    })
-    // AQU-287 / preview toggles: honour skip decisions.
-    if (isSkipped(book.bookId)) {
-      skipped.push({ book: book.displayName, reason: "skipped by user" })
-      done++
-      onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
-      continue
-    }
-    try {
-      const cellsBefore = cellsUploaded
-      const bookCtx: ImportContext = {
-        ...baseCtx,
-        onCellEnqueued: (uploaded, totalForBook) => {
-          onProgress?.({
-            phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
-            cellsDone: cellsBefore + uploaded, cellsTotal,
-          })
-          ctx.onCellEnqueued?.(uploaded, totalForBook)
-        },
+  const perBookUploaded = new Array<number>(plan.books.length).fill(0)
+  const bookResults = new Array<{ ref: FileReference; binding: { fileId: string; memberPath: string } } | null>(
+    plan.books.length,
+  ).fill(null)
+  const totalUploadedNow = () => perBookUploaded.reduce((sum, n) => sum + n, 0)
+
+  let nextIdx = 0
+  const runBookWorker = async (): Promise<void> => {
+    while (nextIdx < plan.books.length) {
+      const idx = nextIdx++
+      const bookPlan = plan.books[idx]
+      const book = bookPlan.book
+      onProgress?.({
+        phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
+        cellsDone: totalUploadedNow(), cellsTotal,
+      })
+      // AQU-287 / preview toggles: honour skip decisions.
+      if (isSkipped(book.bookId)) {
+        skipped.push({ book: book.displayName, reason: "skipped by user" })
+        done++
+        onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: totalUploadedNow(), cellsTotal })
+        continue
       }
-      // USFM books have no speaker tags — ignore speakerPairs.
-      const { ref } = await emitParsedFile(
-        {
-          name: book.displayName,
-          strings: bookPlan.strings,
-          rawSource: book.rawSource,
-          rawSourceFormat: "usfm",
-          bookCode: book.bookId,
-          corpusMarker: book.corpusMarker,
-          originalName: book.fileName,
-        },
-        "usfm",
-        bookCtx,
-      )
-      refs.push(ref)
-      packageBindings.push({ fileId: ref.id, memberPath: book.fileName })
-      cellsUploaded = cellsBefore + bookPlan.cellCount
-    } catch (err) {
-      skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
+      try {
+        const bookCtx: ImportContext = {
+          ...baseCtx,
+          onCellEnqueued: (uploaded, totalForBook) => {
+            perBookUploaded[idx] = uploaded
+            onProgress?.({
+              phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
+              cellsDone: totalUploadedNow(), cellsTotal,
+            })
+            ctx.onCellEnqueued?.(uploaded, totalForBook)
+          },
+        }
+        // USFM books have no speaker tags — ignore speakerPairs.
+        const { ref } = await emitParsedFile(
+          {
+            name: book.displayName,
+            strings: bookPlan.strings,
+            rawSource: book.rawSource,
+            rawSourceFormat: "usfm",
+            bookCode: book.bookId,
+            corpusMarker: book.corpusMarker,
+            originalName: book.fileName,
+          },
+          "usfm",
+          bookCtx,
+        )
+        bookResults[idx] = { ref, binding: { fileId: ref.id, memberPath: book.fileName } }
+        perBookUploaded[idx] = bookPlan.cellCount
+      } catch (err) {
+        skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
+      }
+      done++
+      onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: totalUploadedNow(), cellsTotal })
     }
-    done++
-    onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PARATEXT_BOOK_CONCURRENCY, plan.books.length) }, () => runBookWorker()),
+  )
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
+  for (const r of bookResults) {
+    if (!r) continue
+    refs.push(r.ref)
+    packageBindings.push(r.binding)
   }
 
   let packagePreservationError: string | null = null
@@ -2612,28 +2694,27 @@ export async function commitParatextProject(
   for (const ref of refs) {
     if (existingFileIds.has(ref.id)) {
       visibleRefs.push(ref)
-      continue
-    }
-    if (packagePreservationError) {
+    } else if (packagePreservationError) {
       skipped.push({
         book: ref.name,
         reason: `not published because package preservation failed: ${packagePreservationError}`,
       })
-      continue
     }
+  }
+  if (!packagePreservationError && freshRefs.length > 0) {
     try {
-      await publishStagedImport({
+      await publishStagedImportBatch({
         projectId: ctx.projectId,
-        fileId: ref.id,
+        files: freshRefs.map((ref) => ({ fileId: ref.id })),
         getToken: ctx.getToken,
         signal: ctx.signal,
       })
-      visibleRefs.push(ref)
+      visibleRefs.push(...freshRefs)
     } catch (error) {
-      skipped.push({
-        book: ref.name,
-        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
-      })
+      const reason = `publication failed: ${error instanceof Error ? error.message : String(error)}`
+      for (const ref of freshRefs) {
+        skipped.push({ book: ref.name, reason })
+      }
     }
   }
 
@@ -2669,125 +2750,153 @@ export async function importParatextAsTarget(
       n + (isSkipped(p.bookId) ? 0 : p.cells.length + p.cells.filter((c) => c.targetText).length),
     0,
   )
-  let cellsUploaded = 0
   let done = 0
   const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
-  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
+  const perBookUploaded = new Array<number>(plans.length).fill(0)
+  const bookResults = new Array<{ ref: FileReference; binding: { fileId: string; memberPath: string } } | null>(
+    plans.length,
+  ).fill(null)
+  const totalUploadedNow = () => perBookUploaded.reduce((sum, n) => sum + n, 0)
 
-  for (const bookPlan of plans) {
-    onProgress?.({
-      phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
-      cellsDone: cellsUploaded, cellsTotal,
-    })
-    // AQU-287 / preview toggles: honour skip decisions.
-    if (isSkipped(bookPlan.bookId)) {
-      skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
-      done++
-      onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
-      continue
-    }
-    try {
-      const existingFileId = ctx.reimportFileIds?.get(bookPlan.bookId.toUpperCase())
-      const fileId = existingFileId ?? uuidv7()
-      const strings: TranslatableString[] = bookPlan.cells.map((cell) => ({
-        id: cell.cellId,
-        original: cell.sourceText,
-        translated: cell.targetText,
-        context: cell.ref,
-        group: cell.ref,
-        globalReferences: [cell.ref],
-        type: cell.type,
-        ...(cell.paragraphStart
-          ? {
-              paragraphStart: true,
-              metadata: {
-                paragraphStart: true,
-                // AQU-2184: poetry level for the HTML export's page.
-                ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
-              },
-            }
-          : {}),
-      }))
-      const normalized = normalizeTranslatableStrings(strings, {
-        fileName: bookPlan.displayName,
-        fileType: "usfm",
-        profileId: "builtin:paratext-bilingual",
-        profileVersion: "1",
+  let nextIdx = 0
+  const runBilingualBookWorker = async (): Promise<void> => {
+    while (nextIdx < plans.length) {
+      const idx = nextIdx++
+      const bookPlan = plans[idx]
+      onProgress?.({
+        phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
+        cellsDone: totalUploadedNow(), cellsTotal,
       })
-      // Compile source and target from one normalized unit list. Headings stay
-      // structural/unnumbered and both sides share the same semantic unit key.
-      const { cells } = buildBulkCellsWithSpeakers(strings, { normalizedFile: normalized })
-      const targets: TargetCommit[] = cells.flatMap((cell, index) => {
-        const value = bookPlan.cells[index].targetText
-        return value
-          ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
-          : []
-      })
-
-      const cellsBefore = cellsUploaded
-      const bookProgress = (uploaded: number) => {
-        onProgress?.({
-          phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
-          cellsDone: cellsBefore + uploaded, cellsTotal,
-        })
+      // AQU-287 / preview toggles: honour skip decisions.
+      if (isSkipped(bookPlan.bookId)) {
+        skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
+        done++
+        onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: totalUploadedNow(), cellsTotal })
+        continue
       }
-
-      const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
-      await upload({
-        projectId: ctx.projectId,
-        fileId,
-        file: {
-          id: uuidv7(),
-          name: bookPlan.displayName,
+      try {
+        const existingFileId = ctx.reimportFileIds?.get(bookPlan.bookId.toUpperCase())
+        const fileId = existingFileId ?? uuidv7()
+        const strings: TranslatableString[] = bookPlan.cells.map((cell) => ({
+          id: cell.cellId,
+          original: cell.sourceText,
+          translated: cell.targetText,
+          context: cell.ref,
+          group: cell.ref,
+          globalReferences: [cell.ref],
+          type: cell.type,
+          ...(cell.paragraphStart
+            ? {
+                paragraphStart: true,
+                metadata: {
+                  paragraphStart: true,
+                  // AQU-2184: poetry level for the HTML export's page.
+                  ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
+                },
+              }
+            : {}),
+        }))
+        const normalized = normalizeTranslatableStrings(strings, {
+          fileName: bookPlan.displayName,
           fileType: "usfm",
-          role: "target",
-          kind: "usfm",
-          importFormat: "usfm",
-          parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-          importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, bookPlan.displayName),
-          sourceLanguage: ctx.sourceLanguage,
-          targetLanguage: ctx.targetLanguage,
-          targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
-          bookCode: bookPlan.bookId,
-          ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
-        },
-        cells,
-        rawSource: bookPlan.rawSource,
-        rawSourceFormat: "usfm",
-        artifactBindingRole: "target",
-        artifactTargetLang: ctx.targetLang,
-        updateSourceSidecar: true,
-        artifactFidelity: "native",
-        targets,
-        targetLang: ctx.targetLang,
-        ...(!existingFileId ? { deferPublication: true } : {}),
-        getToken: ctx.getToken,
-        onProgress: (uploaded) => bookProgress(uploaded),
-        signal: ctx.signal,
-      })
+          profileId: "builtin:paratext-bilingual",
+          profileVersion: "1",
+        })
+        // Compile source and target from one normalized unit list. Headings stay
+        // structural/unnumbered and both sides share the same semantic unit key.
+        const { cells } = buildBulkCellsWithSpeakers(strings, { normalizedFile: normalized })
+        const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+          const value = bookPlan.cells[index].targetText
+          return value
+            ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+            : []
+        })
 
-      refs.push({
-        id: fileId,
-        name: bookPlan.displayName,
-        type: "usfm",
-        createdAt: new Date().toISOString(),
-        cellCount: cells.length,
-        ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
-        ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
-        ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
-        ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
-        bookCode: bookPlan.bookId,
-      })
-      packageBindings.push({
-        fileId,
-        memberPath: plan.project.books.find((book) => book.bookId === bookPlan.bookId)?.fileName ?? `${bookPlan.bookId}.SFM`,
-      })
-      cellsUploaded = cellsBefore + cells.length + targets.length
-    } catch (err) {
-      skipped.push({ book: bookPlan.displayName, reason: err instanceof Error ? err.message : String(err) })
+        const bookProgress = (uploaded: number) => {
+          perBookUploaded[idx] = uploaded
+          onProgress?.({
+            phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
+            cellsDone: totalUploadedNow(), cellsTotal,
+          })
+        }
+
+        const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
+        await upload({
+          projectId: ctx.projectId,
+          fileId,
+          file: {
+            id: uuidv7(),
+            name: bookPlan.displayName,
+            fileType: "usfm",
+            role: "target",
+            kind: "usfm",
+            importFormat: "usfm",
+            parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
+            importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, bookPlan.displayName),
+            sourceLanguage: ctx.sourceLanguage,
+            targetLanguage: ctx.targetLanguage,
+            targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
+            bookCode: bookPlan.bookId,
+            ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
+          },
+          cells,
+          rawSource: bookPlan.rawSource,
+          rawSourceFormat: "usfm",
+          artifactBindingRole: "target",
+          artifactTargetLang: ctx.targetLang,
+          updateSourceSidecar: true,
+          artifactFidelity: "native",
+          targets,
+          targetLang: ctx.targetLang,
+          ...(!existingFileId && REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+            ? {
+                revision: {
+                  stamp: normalizeRevisionStamp(`${normalized.profileId}@${normalized.profileVersion}`, "usfm"),
+                  units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+                },
+              }
+            : {}),
+          ...(!existingFileId ? { deferPublication: true } : {}),
+          getToken: ctx.getToken,
+          onProgress: (uploaded) => bookProgress(uploaded),
+          signal: ctx.signal,
+        })
+
+        const ref: FileReference = {
+          id: fileId,
+          name: bookPlan.displayName,
+          type: "usfm",
+          createdAt: new Date().toISOString(),
+          cellCount: cells.length,
+          ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+          ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
+          ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
+          ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
+          bookCode: bookPlan.bookId,
+        }
+        bookResults[idx] = {
+          ref,
+          binding: {
+            fileId,
+            memberPath: plan.project.books.find((book) => book.bookId === bookPlan.bookId)?.fileName ?? `${bookPlan.bookId}.SFM`,
+          },
+        }
+        perBookUploaded[idx] = cells.length + targets.length
+      } catch (err) {
+        skipped.push({ book: bookPlan.displayName, reason: err instanceof Error ? err.message : String(err) })
+      }
+      done++
+      onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: totalUploadedNow(), cellsTotal })
     }
-    done++
-    onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PARATEXT_BOOK_CONCURRENCY, plans.length) }, () => runBilingualBookWorker()),
+  )
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
+  for (const r of bookResults) {
+    if (!r) continue
+    refs.push(r.ref)
+    packageBindings.push(r.binding)
   }
 
   let packagePreservationError: string | null = null
@@ -2811,28 +2920,27 @@ export async function importParatextAsTarget(
   for (const ref of refs) {
     if (existingFileIds.has(ref.id)) {
       visibleRefs.push(ref)
-      continue
-    }
-    if (packagePreservationError) {
+    } else if (packagePreservationError) {
       skipped.push({
         book: ref.name,
         reason: `not published because package preservation failed: ${packagePreservationError}`,
       })
-      continue
     }
+  }
+  if (!packagePreservationError && freshRefs.length > 0) {
     try {
-      await publishStagedImport({
+      await publishStagedImportBatch({
         projectId: ctx.projectId,
-        fileId: ref.id,
+        files: freshRefs.map((ref) => ({ fileId: ref.id })),
         getToken: ctx.getToken,
         signal: ctx.signal,
       })
-      visibleRefs.push(ref)
+      visibleRefs.push(...freshRefs)
     } catch (error) {
-      skipped.push({
-        book: ref.name,
-        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
-      })
+      const reason = `publication failed: ${error instanceof Error ? error.message : String(error)}`
+      for (const ref of freshRefs) {
+        skipped.push({ book: ref.name, reason })
+      }
     }
   }
 

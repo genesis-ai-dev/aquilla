@@ -32,7 +32,9 @@ import {
   type ContentMatchCell,
   type MatchBand,
 } from './import-content-match'
-import { buildEventProjectionStmts, contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
+import { buildBulkSourceCellCreateStmt, buildEventProjectionStmts, contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
+import { loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
 import { assignDeclaredLanguages, readDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
@@ -53,6 +55,8 @@ export interface ReconcileRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   ProjectSync?: DurableObjectNamespace
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 export interface ReconcileFileMeta {
@@ -614,6 +618,7 @@ function appendProjectedEvents(
   statements: AquillaStatement[],
   events: PersistedEvent[],
   seqStart: number,
+  opts?: { virtualSourceTombstone?: boolean },
 ): void {
   if (events.length === 0) return
   const rows: SeqEventInsertRow[] = events.map((event, index) => ({
@@ -634,7 +639,10 @@ function appendProjectedEvents(
     statements.push(buildUngatedEventInsert(db, rows.slice(offset, offset + BULK_ROWS)))
   }
   for (const event of events) {
-    buildEventProjectionStmts(db, event, statements, { deferFileCounters: true })
+    buildEventProjectionStmts(db, event, statements, {
+      deferFileCounters: true,
+      virtualSourceTombstone: opts?.virtualSourceTombstone && event.kind === 'source.cell.delete',
+    })
   }
 }
 
@@ -697,6 +705,7 @@ function buildGatedSourceUpsert(
        start_ms = excluded.start_ms, end_ms = excluded.end_ms, medium = excluded.medium,
        sequence_index = excluded.sequence_index, transcription = excluded.transcription,
        camera_state = excluded.camera_state, metadata = excluded.metadata,
+       tombstoned_at = NULL,
        lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
   ).bind(...binds)
 }
@@ -707,6 +716,7 @@ function buildTargetEventInsert(
   laneByEventId: Map<string, string>,
   fileClaim: ChainSlot,
   fileEventId: string,
+  skipSourceRowCheck = false,
 ): AquillaStatement {
   const values = rows.map(() => `(${Array(13).fill('?').join(', ')})`).join(', ')
   const binds: unknown[] = []
@@ -718,6 +728,14 @@ function buildTargetEventInsert(
     )
   }
   binds.push(fileClaim.projectId, fileClaim.fileId, fileClaim.cellId, fileClaim.parentKey, fileEventId)
+  const sourceExistsClause = skipSourceRowCheck
+    ? ''
+    : `AND EXISTS (
+         SELECT 1 FROM cells source
+          WHERE source.project_id = v.project_id AND source.file_id = v.file_id
+            AND source.cell_id = v.cell_id AND source.side = 'source'
+            AND source.event_id = v.parent_id
+       )`
   return db.prepare(
     `INSERT INTO events (
        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
@@ -730,12 +748,7 @@ function buildTargetEventInsert(
        author, payload, client_ts, server_ts, server_seq, target_lang
      )
      WHERE ${fileClaimGate()}
-       AND EXISTS (
-         SELECT 1 FROM cells source
-          WHERE source.project_id = v.project_id AND source.file_id = v.file_id
-            AND source.cell_id = v.cell_id AND source.side = 'source'
-            AND source.event_id = v.parent_id
-       )
+       ${sourceExistsClause}
        AND NOT EXISTS (
          SELECT 1 FROM cells target
           WHERE target.project_id = v.project_id AND target.file_id = v.file_id
@@ -751,6 +764,7 @@ function buildGatedTargetInsert(
   events: PersistedEvent<'target.cell.commit'>[],
   fileClaim: ChainSlot,
   fileEventId: string,
+  skipSourceRowCheck = false,
 ): AquillaStatement {
   const values = events.map(() => `(${Array(12).fill('?').join(', ')})`).join(', ')
   const binds: unknown[] = []
@@ -764,6 +778,14 @@ function buildGatedTargetInsert(
     )
   }
   binds.push(fileClaim.projectId, fileClaim.fileId, fileClaim.cellId, fileClaim.parentKey, fileEventId)
+  const sourceExistsClause = skipSourceRowCheck
+    ? ''
+    : `AND EXISTS (
+         SELECT 1 FROM cells source
+          WHERE source.project_id = v.project_id AND source.file_id = v.file_id
+            AND source.cell_id = v.cell_id AND source.side = 'source'
+            AND source.event_id = v.source_event_id
+       )`
   return db.prepare(
     `INSERT INTO cells (
        project_id, file_id, cell_id, side, value, value_html, type,
@@ -780,12 +802,7 @@ function buildGatedTargetInsert(
        source_event_id, author, server_ts, word_count, content_hash
      )
      WHERE ${fileClaimGate()}
-       AND EXISTS (
-         SELECT 1 FROM cells source
-          WHERE source.project_id = v.project_id AND source.file_id = v.file_id
-            AND source.cell_id = v.cell_id AND source.side = 'source'
-            AND source.event_id = v.source_event_id
-       )
+       ${sourceExistsClause}
      ON CONFLICT(project_id, file_id, cell_id, lane_id) DO NOTHING`,
   ).bind(...binds)
 }
@@ -914,44 +931,68 @@ export async function handleImportReconcileRequest(
     if (destination) return withCors(new Response('fork destination already exists', { status: 409 }), request)
   }
 
-  const existingRows = await db.prepare(
-    `SELECT cell_id, event_id, value, value_html, type, canonical_ref, anchor_cell_id,
-            start_ms, end_ms, sequence_index, medium, metadata, hidden_at
-       FROM cells
-      WHERE project_id = ? AND file_id = ? AND side = 'source'`,
-  ).bind(body.projectId, originFileId).all<{
-    cell_id: string
-    event_id: string
-    value: string
-    value_html: string | null
-    type: string | null
-    canonical_ref: string | null
-    anchor_cell_id: string | null
-    start_ms: number | null
-    end_ms: number | null
-    sequence_index: number | null
-    medium: string | null
-    metadata: unknown
-    hidden_at: number | null
-  }>()
-  const hiddenAt = new Map(existingRows.results.map((row) => [
-    row.cell_id,
-    row.hidden_at == null ? null : Number(row.hidden_at),
-  ]))
-  const existing: ExistingImportCell[] = existingRows.results.map((row) => ({
-    cellId: row.cell_id,
-    eventId: row.event_id,
-    value: row.value,
-    valueHtml: row.value_html,
-    type: row.type,
-    canonicalRef: row.canonical_ref,
-    anchorCellId: row.anchor_cell_id,
-    startMs: row.start_ms == null ? null : Number(row.start_ms),
-    endMs: row.end_ms == null ? null : Number(row.end_ms),
-    sequenceIndex: row.sequence_index == null ? null : Number(row.sequence_index),
-    medium: row.medium,
-    metadata: objectRecord(row.metadata),
-  }))
+  const virtualExisting = env.SNAPSHOTS
+    ? await loadVirtualSourceFile(db, env.SNAPSHOTS, body.projectId, originFileId)
+    : null
+  const isVirtualDestination = !body.fork && virtualExisting !== null
+
+  const existingRows = virtualExisting
+    ? { results: [] }
+    : await db.prepare(
+        `SELECT cell_id, event_id, value, value_html, type, canonical_ref, anchor_cell_id,
+                start_ms, end_ms, sequence_index, medium, metadata, hidden_at
+           FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'source'`,
+      ).bind(body.projectId, originFileId).all<{
+        cell_id: string
+        event_id: string
+        value: string
+        value_html: string | null
+        type: string | null
+        canonical_ref: string | null
+        anchor_cell_id: string | null
+        start_ms: number | null
+        end_ms: number | null
+        sequence_index: number | null
+        medium: string | null
+        metadata: unknown
+        hidden_at: number | null
+      }>()
+  const hiddenAt = virtualExisting
+    ? new Map(virtualExisting.rows.map((row) => [row.cell_id, row.hidden_at]))
+    : new Map(existingRows.results.map((row) => [
+        row.cell_id,
+        row.hidden_at == null ? null : Number(row.hidden_at),
+      ]))
+  const existing: ExistingImportCell[] = virtualExisting
+    ? virtualExisting.rows.map((row) => ({
+        cellId: row.cell_id,
+        eventId: row.event_id,
+        value: row.value,
+        valueHtml: row.value_html,
+        type: row.type,
+        canonicalRef: row.canonical_ref,
+        anchorCellId: row.anchor_cell_id,
+        startMs: row.start_ms,
+        endMs: row.end_ms,
+        sequenceIndex: row.sequence_index,
+        medium: row.medium,
+        metadata: row.metadata ?? {},
+      }))
+    : existingRows.results.map((row) => ({
+        cellId: row.cell_id,
+        eventId: row.event_id,
+        value: row.value,
+        valueHtml: row.value_html,
+        type: row.type,
+        canonicalRef: row.canonical_ref,
+        anchorCellId: row.anchor_cell_id,
+        startMs: row.start_ms == null ? null : Number(row.start_ms),
+        endMs: row.end_ms == null ? null : Number(row.end_ms),
+        sequenceIndex: row.sequence_index == null ? null : Number(row.sequence_index),
+        medium: row.medium,
+        metadata: objectRecord(row.metadata),
+      }))
   const cloneSourceEventIds = new Map<string, string>()
   const cloneFileEventId = body.fork ? crypto.randomUUID() : null
   if (body.fork) {
@@ -1295,16 +1336,68 @@ export async function handleImportReconcileRequest(
       laneByTargetEvent,
       fileClaim,
       fileEvent.id,
+      isVirtualDestination,
     ))
   }
   for (let offset = 0; offset < targetEvents.length; offset += BULK_ROWS) {
-    statements.push(buildGatedTargetInsert(db, targetEvents.slice(offset, offset + BULK_ROWS), fileClaim, fileEvent.id))
+    statements.push(buildGatedTargetInsert(
+      db,
+      targetEvents.slice(offset, offset + BULK_ROWS),
+      fileClaim,
+      fileEvent.id,
+      isVirtualDestination,
+    ))
+  }
+  // AQU-2459 Phase B: if reviewEvents touch virtual source cells that were not
+  // just upserted by sourceEvents (e.g. `source.cell.delete` or
+  // `source.cell.metadata.patch` on an unchanged cell), seed their sparse
+  // overlay rows first so the review UPDATEs / virtual tombstones land.
+  if (isVirtualDestination && virtualExisting && reviewEvents.length > 0) {
+    const upsertedSourceIds = new Set(sourceEvents.map((e) => e.cellId).filter(Boolean) as string[])
+    const seedEvents: PersistedEvent<'source.cell.create'>[] = []
+    const seededIds = new Set<string>()
+    for (const ev of reviewEvents) {
+      if (!ev.cellId || !ev.kind.startsWith('source.cell.') || ev.kind === 'source.cell.create') continue
+      if (upsertedSourceIds.has(ev.cellId) || seededIds.has(ev.cellId)) continue
+      const row = virtualExisting.byCellId.get(ev.cellId)
+      if (!row) continue
+      seededIds.add(ev.cellId)
+      seedEvents.push({
+        id: row.event_id,
+        schemaVersion: 1,
+        projectId: body.projectId,
+        fileId: body.fileId,
+        cellId: row.cell_id,
+        parentId: null,
+        kind: 'source.cell.create',
+        author: row.last_editor ?? author,
+        payload: {
+          cellId: row.cell_id,
+          anchorCellId: row.anchor_cell_id,
+          value: row.value,
+          ...(row.value_html != null ? { valueHtml: row.value_html } : {}),
+          ...(row.type != null ? { type: row.type } : {}),
+          ...(row.canonical_ref != null ? { canonicalRef: row.canonical_ref } : {}),
+          ...(row.medium != null ? { medium: row.medium } : {}),
+          ...(row.start_ms != null ? { startMs: row.start_ms } : {}),
+          ...(row.end_ms != null ? { endMs: row.end_ms } : {}),
+          ...(row.sequence_index != null ? { sequenceIndex: row.sequence_index } : {}),
+          ...(row.metadata != null ? { metadata: row.metadata } : {}),
+        },
+        clientTs: row.last_edit_at,
+        serverTs: row.last_edit_at,
+      })
+    }
+    for (let offset = 0; offset < seedEvents.length; offset += BULK_ROWS) {
+      statements.push(buildBulkSourceCellCreateStmt(db, seedEvents.slice(offset, offset + BULK_ROWS)))
+    }
   }
   appendProjectedEvents(
     db,
     statements,
     reviewEvents,
     sourceSeq + sourceRows.length + targetEvents.length,
+    { virtualSourceTombstone: isVirtualDestination },
   )
   if (review) {
     const settingsRow = await db.prepare(
@@ -1341,8 +1434,10 @@ export async function handleImportReconcileRequest(
         WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'target'`,
     ).bind(validationCount, body.projectId, body.fileId))
   }
-  statements.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
-  statements.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))
+  if (!isVirtualDestination) {
+    statements.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
+    statements.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))
+  }
   statements.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
 
   try {
@@ -1357,6 +1452,14 @@ export async function handleImportReconcileRequest(
   const winners = await readClaimWinners(db, [fileClaim])
   if (winners.get(slotKey(fileClaim)) !== fileEvent.id) {
     return withCors(new Response('file changed during re-import; review and try again', { status: 409 }), request)
+  }
+  if (isVirtualDestination && env.SNAPSHOTS) {
+    const vStmts = await buildVirtualFileProgressStmts(db, env.SNAPSHOTS, {
+      projectId: body.projectId,
+      fileId: body.fileId,
+      updatedAt: serverTs,
+    })
+    if (vStmts && vStmts.length > 0) await runBatch(db, vStmts)
   }
 
   if (env.ProjectSync) {

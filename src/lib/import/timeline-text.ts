@@ -3,6 +3,13 @@ import type { ImportedTrackPublication } from "../../../shared/timeline-import"
 import { buildBulkCellsWithSpeakers } from "../import"
 import { TIMELINE_CONTENT_ROLE, type FileType } from "../parsers/types"
 import { bulkUploadSource, publishStagedImport } from "../sync/bulk-import"
+import {
+  buildSyntheticRevision,
+  normalizeRevisionStamp,
+  REVISION_IMPORT_ENABLED,
+  revisionUnitsFromCells,
+  VIRTUAL_SOURCE_CELLS_ENABLED,
+} from "../sync/revision-import"
 import { assertImportCellsWithinSizeLimit } from "./cell-size"
 import { createMediaCueSpecs, type MediaTextSource } from "./media-cues"
 import { normalizeTranslatableStrings, summarizeNormalizedImport } from "./normalized-manifest"
@@ -71,6 +78,21 @@ export function createTimelineTextTrackImporter(args: ImportTimelineTextTrackArg
         }, cells,
         ...(artifact ? { rawBytes: artifact.bytes, rawSourceFormat: artifact.format,
           artifactFidelity: "preserved-only" as const, updateSourceSidecar: true } : {}),
+        ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+          ? {
+              revision: artifact
+                ? {
+                    stamp: normalizeRevisionStamp("builtin:timeline-text@1", captionFormat),
+                    units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+                  }
+                : buildSyntheticRevision({
+                    stamp: "builtin:timeline-text@1",
+                    fileType: captionFormat,
+                    cells,
+                    preserveCellIds: true,
+                  }),
+            }
+          : {}),
         deferPublication: true, getToken: args.getToken,
         fetchImpl: args.fetchImpl, signal: args.signal, onProgress: args.onProgress,
       })
@@ -177,6 +199,21 @@ export function createCaptionRowsImporter(args: CaptionRowsImportArgs) {
         }, cells,
         ...(artifact ? { rawBytes: artifact.bytes, rawSourceFormat: artifact.format,
           artifactFidelity: normalized.fidelity, updateSourceSidecar: true } : {}),
+        ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED
+          ? {
+              revision: artifact
+                ? {
+                    stamp: normalizeRevisionStamp(`${normalized.profileId}@${normalized.profileVersion}`, format),
+                    units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+                  }
+                : buildSyntheticRevision({
+                    stamp: `${normalized.profileId}@${normalized.profileVersion}`,
+                    fileType: format,
+                    cells,
+                    preserveCellIds: true,
+                  }),
+            }
+          : {}),
         deferPublication: true, getToken: args.getToken,
         fetchImpl: args.fetchImpl, signal, onProgress,
       })

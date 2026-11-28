@@ -6,6 +6,8 @@ import { deriveTracksForFile } from '../timeline/tracks'
 import { handleBulkImportRequest } from '../../../sync-worker/src/events/import-route'
 import { handleSourceUploadRequest } from '../../../sync-worker/src/events/source-upload-route'
 import { handleOriginalDownloadRequest } from '../../../sync-worker/src/events/original-download-route'
+import { handleRevisionsRequest } from '../../../sync-worker/src/events/revisions-route'
+import { loadVirtualSourceFile } from '../../../db/shared/virtual-source-store'
 import { makeTestDb } from '../../../sync-worker/src/__tests__/helpers/pg-test-db'
 import { makeTestToken } from '../../../sync-worker/src/__tests__/helpers/auth'
 
@@ -31,7 +33,8 @@ describe('caption attachment producer and publication consumer', () => {
         async get(key) {
           const bytes = objects.get(key)
           return bytes ? { body: bytes, size: bytes.byteLength,
-            async arrayBuffer() { return bytes } } : null
+            async arrayBuffer() { return bytes },
+            async text() { return new TextDecoder().decode(bytes) } } : null
         },
       },
     }
@@ -40,6 +43,7 @@ describe('caption attachment producer and publication consumer', () => {
       const request = new Request(String(url), init)
       const response = await handleBulkImportRequest(request, env)
         ?? await handleSourceUploadRequest(request, env)
+        ?? await handleRevisionsRequest(request, env)
       if (!response) throw new Error(`Unhandled request: ${request.url}`)
       if (!publicationResponseLost && init.method === 'POST'
         && JSON.parse(init.body).trackPublication && response.ok) {
@@ -83,7 +87,9 @@ describe('caption attachment producer and publication consumer', () => {
       const cells = await store.rows('cells')
       expect(cells.filter(cell => cell.file_id === 'media'))
         .toEqual([expect.objectContaining({ cell_id: 'original', value: 'Existing wording' })])
-      expect(cells.filter(cell => cell.file_id === uploaded.fileId)
+      expect(cells.filter(cell => cell.file_id === uploaded.fileId)).toHaveLength(0)
+      const uploadedVirtual = await loadVirtualSourceFile(store.db, env.SNAPSHOTS, 'p', uploaded.fileId)
+      expect((uploadedVirtual?.rows ?? [])
         .sort((a, b) => a.sequence_index - b.sequence_index))
         .toEqual([
           expect.objectContaining({ value: 'First phrase.', start_ms: 500, end_ms: 1500 }),
@@ -136,10 +142,12 @@ describe('caption attachment producer and publication consumer', () => {
       expect(JSON.parse(currentParent.meta).trackOverrides[uploaded.trackId])
         .toMatchObject({ name: 'Later rename', contentFileId: replaced.fileId })
       const currentCells = await store.rows('cells')
-      expect(currentCells.filter(cell => cell.file_id === uploaded.fileId)).toHaveLength(2)
+      expect(currentCells.filter(cell => cell.file_id === uploaded.fileId)).toHaveLength(0)
+      expect((await loadVirtualSourceFile(store.db, env.SNAPSHOTS, 'p', uploaded.fileId))?.rows).toHaveLength(2)
       expect(currentCells.filter(cell => cell.file_id === 'media'))
         .toEqual([expect.objectContaining({ cell_id: 'original', value: 'Existing wording' })])
-      expect(currentCells.filter(cell => cell.file_id === replaced.fileId))
+      expect(currentCells.filter(cell => cell.file_id === replaced.fileId)).toHaveLength(0)
+      expect((await loadVirtualSourceFile(store.db, env.SNAPSHOTS, 'p', replaced.fileId))?.rows)
         .toEqual([expect.objectContaining({ value: 'Reviewed replacement.',
           start_ms: 1000, end_ms: 2500 })])
       expect((await store.rows('events')).filter(event => event.kind === 'file.track.set'))

@@ -8,6 +8,7 @@
 import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
 import { resolveLane, resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { loadProjectVirtualSourceFiles, type ManifestR2Bucket } from "../../../../../db/shared/virtual-source-store"
 import { renderingsForLane } from "../../../../../src/lib/terminology/rendering-lane"
 import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
@@ -28,6 +29,8 @@ export interface SearchContext {
    *  project's former default lane. */
   lane: string
   aliases: AliasMap
+  /** AQU-2459 Phase B: R2 bucket for virtual source files. */
+  r2?: ManifestR2Bucket
 }
 
 const SIDES = new Set(["cells", "source", "target", "comments", "terms"])
@@ -89,13 +92,67 @@ async function searchCells(
     )
     .bind(...binds.slice(0, -1), q, limit)
     .all<CellHit>()
-  return results.map((r) => ({
+  const out: SearchHit[] = results.map((r) => ({
     cellId: r.cell_id,
     fileId: r.file_id,
     ref: r.canonical_ref ?? undefined,
     side: r.side as "source" | "target",
     snippet: r.value.slice(0, 200),
   }))
+
+  // AQU-2459 Phase B: search virtual source files in JS and merge with Postgres hits.
+  if (ctx.r2 && (side === "source" || side === "both")) {
+    const vFiles = await loadProjectVirtualSourceFiles(db, ctx.r2, ctx.projectId, {
+      ...(fileId ? { fileIds: [fileId] } : {}),
+    })
+    if (vFiles.length > 0) {
+      const terms = q
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .map((t) => t.replace(/^["']+|["']+$/g, ""))
+        .filter(Boolean)
+      if (terms.length > 0) {
+        const seen = new Set(out.filter((h) => h.side === "source").map((h) => `${h.fileId}\0${h.cellId}`))
+        const vHits: Array<{ hit: SearchHit; score: number }> = []
+        for (const vf of vFiles) {
+          for (const row of vf.rows) {
+            if (row.hidden_at != null || row.tombstoned_at != null) continue
+            const k = `${vf.head.fileId}\0${row.cell_id}`
+            if (seen.has(k)) continue
+            const lower = row.value.toLowerCase()
+            let score = 0
+            let allMatch = true
+            for (const term of terms) {
+              if (!lower.includes(term)) {
+                allMatch = false
+                break
+              }
+              score += 1
+            }
+            if (!allMatch) continue
+            seen.add(k)
+            vHits.push({
+              score,
+              hit: {
+                cellId: row.cell_id,
+                fileId: vf.head.fileId,
+                ref: row.canonical_ref ?? undefined,
+                side: "source",
+                snippet: row.value.slice(0, 200),
+              },
+            })
+          }
+        }
+        vHits.sort((a, b) => b.score - a.score)
+        for (const item of vHits) {
+          if (out.length >= limit) break
+          out.push(item.hit)
+        }
+      }
+    }
+  }
+  return out.slice(0, limit)
 }
 
 async function searchComments(

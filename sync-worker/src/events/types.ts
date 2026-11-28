@@ -437,6 +437,12 @@ export interface EventPayloads {
      */
     sourceEventId?: string | null
     /**
+     * AQU-2459 Phase B: 122-bit content hash (`contentHashOf`) of the source
+     * unit observed at commit time. Stored on `cells.source_content_hash` so
+     * staleness works directly against virtual manifests (including revert-to-fresh).
+     */
+    sourceContentHash?: string | null
+    /**
      * AQU-292 / AI provenance: when true, tags this commit as machine-drafted
      * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
      * path (useCompletion → commitCompletedCell). Human edits omit this field
@@ -1069,6 +1075,8 @@ export interface EventPayloads {
     counts: { equal: number; changed: number; moved: number; inserted: number; deleted: number }
     /** import | reimport | adopt | drive | git | dcs | langquest */
     origin: string
+    /** AQU-2459 Phase B: true when source cells live solely in the R2 manifest (zero Postgres source rows). */
+    sourceVirtual?: boolean
   }
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────
@@ -1500,6 +1508,8 @@ export interface EventPayloads {
   'target.cell.repin': {
     /** The (now-current) source row's event_id to pin the target to. */
     sourceEventId: string
+    /** AQU-2459 Phase B: the (now-current) source unit's 122-bit contentHash. */
+    sourceContentHash?: string | null
     /** The target row's event_id as observed by the reviewer when they
      *  opened the review panel. The UPDATE's WHERE clause requires
      *  cells.event_id to still equal this — if a translator re-committed

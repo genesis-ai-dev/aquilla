@@ -64,6 +64,8 @@ export interface HandleCellEventOptions {
    * Default 1 (N=1 projects: byte-identical behavior).
    */
   validationCount?: number
+  /** AQU-2459 Phase B: tombstone virtual source overlays on source.cell.delete. */
+  virtualSourceTombstone?: boolean
 }
 
 /** Cell-level kinds that this handler accepts. */
@@ -200,6 +202,7 @@ export function handleCellEvent(
       deferFileCounters: opts.deferFileCounters,
       chainGate,
       validationCount: opts.validationCount,
+      virtualSourceTombstone: opts.virtualSourceTombstone,
     })
     if (
       opts.deferFileCounters &&

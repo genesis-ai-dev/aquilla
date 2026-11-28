@@ -178,9 +178,10 @@ describe("createMediaFileCommit", () => {
     const media = new File(["speech with pauses"], "sermon.mp3", { type: "audio/mpeg" })
     const result = await createMediaFileCommit(media, "audio", { projectId: "p1", author: "dev", getToken: async () => "token" })()
     const posts = requests.filter((r) => r.init.method === "POST").map((r) => JSON.parse(String(r.init.body)))
-    const cells = posts.flatMap((body) => body.cells ?? [])
-    expect(cells).toHaveLength(1)
-    expect(cells[0]).toMatchObject({ startMs: 0, endMs: 125_000 })
+    const revisionPost = posts.find((body) => Array.isArray(body.units))
+    expect(revisionPost?.virtual).toBe(true)
+    expect(revisionPost?.units).toHaveLength(1)
+    expect(revisionPost?.units[0]).toMatchObject({ startMs: 0, endMs: 125_000 })
     const attachments = posts.at(-1).attachments
     expect(attachments).toHaveLength(1)
     expect(attachments[0].trimStartMs).toBeUndefined()

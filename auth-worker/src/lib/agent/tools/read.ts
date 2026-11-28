@@ -9,6 +9,7 @@
 
 import { PLAN_UNIT_FILE_PREDICATE } from "../../../../../db/shared/plan-units"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../../../db/shared/virtual-source-store"
 import { AliasMap } from "../compress"
 import { lintDraft, loadLintRules, rulesForLane, type LintHit } from "../lint"
 import {
@@ -39,6 +40,8 @@ export interface ReadContext {
    *  project's former default lane. */
   lane: string
   aliases: AliasMap
+  /** AQU-2459 Phase B: R2 bucket for virtual source files. */
+  r2?: ManifestR2Bucket
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -342,16 +345,33 @@ export async function resolveScope(
       range.chapter === undefined
         ? [`${range.book} %`, `${range.book}:%`]
         : [`${range.book} %`]
-    const carries = await db
-      .prepare(
-        `SELECT 1 AS hit FROM cells
-         WHERE project_id = ? AND file_id = ? AND side = 'source'
-           AND (${refPatterns.map(() => "upper(canonical_ref) LIKE ?").join(" OR ")})
-         LIMIT 1`,
-      )
-      .bind(ctx.projectId, fileId, ...refPatterns)
-      .first<{ hit: number }>()
-    if (!carries) {
+    let hasRef = false
+    if (ctx.r2) {
+      const vf = await loadVirtualSourceFile(db, ctx.r2, ctx.projectId, fileId)
+      if (vf) {
+        const prefixSpace = `${range.book.toUpperCase()} `
+        const prefixColon = `${range.book.toUpperCase()}:`
+        hasRef = vf.rows.some((r) => {
+          const ref = (r.canonical_ref ?? "").toUpperCase()
+          return range!.chapter === undefined
+            ? ref.startsWith(prefixSpace) || ref.startsWith(prefixColon)
+            : ref.startsWith(prefixSpace)
+        })
+      }
+    }
+    if (!hasRef) {
+      const carries = await db
+        .prepare(
+          `SELECT 1 AS hit FROM cells
+           WHERE project_id = ? AND file_id = ? AND side = 'source'
+             AND (${refPatterns.map(() => "upper(canonical_ref) LIKE ?").join(" OR ")})
+           LIMIT 1`,
+        )
+        .bind(ctx.projectId, fileId, ...refPatterns)
+        .first<{ hit: number }>()
+      hasRef = Boolean(carries)
+    }
+    if (!hasRef) {
       range = undefined
       notice = await refNotice(db, ctx.projectId, fileId, String(args.ref))
     }
@@ -446,7 +466,12 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   const offset = Math.max(Number(args.offset) || 0, 0)
 
   const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: lane.laneId })
+  const all = await selectCellPairs(db, ctx.projectId, {
+    fileId: scope.fileId,
+    range: scope.range,
+    laneId: lane.laneId,
+    r2: ctx.r2,
+  })
   // Rules live in the project settings blob (can be megabytes), so only the
   // filter that needs them loads them; every other read is unchanged.
   const flags = filter === "flagged" ? await ruleFlags(db, ctx, scope.fileId, all, lane.targetLang) : new Map<string, LintHit[]>()

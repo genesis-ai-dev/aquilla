@@ -82,6 +82,7 @@ import {
 import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { buildVirtualFileProgressStmts } from './virtual-progress'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 import { withLongOperationTimeout } from '../../../db/shim/postgres'
 import {
@@ -530,26 +531,37 @@ async function rebuildProjection(
               `file.revision ${row.id} has no readable manifest in R2; a revisioned file cannot be rebuilt without it`,
             )
           }
-          let previous = new Set<string>()
-          if (manifest.parentRevisionN != null) {
-            const parent = manifestByRevision.get(`${row.file_id}:${manifest.parentRevisionN}`)
-            if (!parent) {
-              throw new RebuildFailed(
-                `file.revision ${row.id} names parent revision ${manifest.parentRevisionN} whose manifest is not readable in R2`,
-              )
+          const revPayload = payload as { sourceVirtual?: boolean }
+          if (revPayload.sourceVirtual === true) {
+            // Phase B (virtual): ZERO source rows inserted into `cells`; clear
+            // any prior sparse source overlays folded into this revision.
+            stmts.push(
+              tx
+                .prepare(`DELETE FROM cells WHERE project_id = ? AND file_id = ? AND side = 'source'`)
+                .bind(projectId, row.file_id),
+            )
+          } else {
+            let previous = new Set<string>()
+            if (manifest.parentRevisionN != null) {
+              const parent = manifestByRevision.get(`${row.file_id}:${manifest.parentRevisionN}`)
+              if (!parent) {
+                throw new RebuildFailed(
+                  `file.revision ${row.id} names parent revision ${manifest.parentRevisionN} whose manifest is not readable in R2`,
+                )
+              }
+              previous = new Set(parent.units.map((u) => u.cellId))
             }
-            previous = new Set(parent.units.map((u) => u.cellId))
+            stmts.push(
+              ...buildCellStmtsFromManifest(tx, {
+                projectId,
+                fileId: row.file_id,
+                manifest,
+                previousCellIds: previous,
+                author: row.author,
+                serverTs: row.server_ts,
+              }),
+            )
           }
-          stmts.push(
-            ...buildCellStmtsFromManifest(tx, {
-              projectId,
-              fileId: row.file_id,
-              manifest,
-              previousCellIds: previous,
-              author: row.author,
-              serverTs: row.server_ts,
-            }),
-          )
           // Later target commits chain on these source heads.
           replay.seedFromCellRows(
             manifest.units.map((u) => ({
@@ -620,10 +632,45 @@ async function rebuildProjection(
   const rebuiltSeq = Number(rebuiltSeqRaw ?? 0)
 
   const { results: files } = await tx
-    .prepare('SELECT id FROM files WHERE project_id = ?')
+    .prepare('SELECT id, head_revision_n, source_virtual FROM files WHERE project_id = ?')
     .bind(projectId)
-    .all<{ id: string }>()
+    .all<{ id: string; head_revision_n: number | null; source_virtual?: boolean | null }>()
   for (const file of files ?? []) {
+    if (file.source_virtual === true && file.head_revision_n != null) {
+      const manifest = manifestByRevision.get(`${file.id}:${file.head_revision_n}`)
+      const revRow = await tx
+        .prepare(
+          `SELECT manifest_r2_key, event_id, author, created_at FROM file_revisions
+            WHERE project_id = ? AND file_id = ? AND revision_n = ?`,
+        )
+        .bind(projectId, file.id, file.head_revision_n)
+        .first<{ manifest_r2_key: string; event_id: string; author: string; created_at: number | string }>()
+      if (manifest && revRow) {
+        const preloadedR2 = { get: async () => null }
+        const virtualStmts = await buildVirtualFileProgressStmts(tx, preloadedR2, {
+          projectId,
+          fileId: file.id,
+          updatedAt: Date.now(),
+          preloaded: {
+            head: {
+              projectId,
+              fileId: file.id,
+              headRevisionN: file.head_revision_n,
+              manifestR2Key: revRow.manifest_r2_key,
+              revisionEventId: revRow.event_id,
+              author: revRow.author,
+              createdAt: Number(revRow.created_at),
+            },
+            manifest,
+            revisionSeq: rebuiltSeq,
+          },
+        })
+        for (const stmt of virtualStmts ?? []) {
+          await stmt.run()
+        }
+        continue
+      }
+    }
     for (const stmt of fullProgressRecomputeStmts(tx, projectId, file.id, Date.now())) {
       await stmt.run()
     }

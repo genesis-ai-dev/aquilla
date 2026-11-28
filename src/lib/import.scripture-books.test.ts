@@ -97,12 +97,25 @@ beforeEach(async () => {
       if (init?.body instanceof ArrayBuffer) {
         // The raw original is uploaded as bytes, separately from the cell JSON.
         artifactUploads.push(new TextDecoder().decode(init.body))
-        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+        const headers = new Headers(init.headers)
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            artifactId: headers.get("X-Artifact-Id") ?? "artifact-1",
+            key: "source/test",
+            sha256: headers.get("X-Source-Sha256") ?? "a".repeat(64),
+          }),
+          { status: 200 },
+        )
       }
-      const body = JSON.parse(String(init?.body)) as CapturedUpload
+      const body = JSON.parse(String(init?.body)) as CapturedUpload & { units?: unknown[] }
       captured.push({ ...body, url: href })
       return new Response(
-        JSON.stringify({ accepted: body.cells.length, fileId: body.fileId }),
+        JSON.stringify(
+          Array.isArray(body.units)
+            ? { noop: false, revisionN: 1, eventId: "rev-evt-1" }
+            : { accepted: body.cells?.length ?? 0, fileId: body.fileId },
+        ),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
     }),

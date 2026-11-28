@@ -60,12 +60,22 @@ async function biblicaFile(paragraphs?: readonly string[]): Promise<File> {
 
 function importBodies(requests: Array<{ url: string; init?: RequestInit }>) {
   return requests
-    .filter((request) => request.url.endsWith("/import"))
-    .map((request) => JSON.parse(String(request.init?.body)) as {
-      file?: { fileType?: string; kind?: string; parserVersion?: string; bookCode?: string }
-      cells?: Array<{ cellId: string; value: string; metadata?: Record<string, unknown> }>
-      complete?: boolean
-      publishEventId?: string
+    .filter((request) => request.url.endsWith("/import") || request.url.endsWith("/revisions"))
+    .map((request) => {
+      const parsed = JSON.parse(String(request.init?.body)) as {
+        file?: { fileType?: string; kind?: string; parserVersion?: string; bookCode?: string }
+        cells?: Array<{ cellId: string; value: string; metadata?: Record<string, unknown> }>
+        units?: Array<{ cellId?: string; unitKey: string; text: string; metadata?: Record<string, unknown> }>
+        complete?: boolean
+        publishEventId?: string
+      }
+      if (Array.isArray(parsed.units)) {
+        return {
+          ...parsed,
+          cells: parsed.units.map((u) => ({ cellId: u.cellId ?? u.unitKey, value: u.text, metadata: u.metadata })),
+        }
+      }
+      return parsed
     })
 }
 

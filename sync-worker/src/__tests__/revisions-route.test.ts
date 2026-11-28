@@ -144,9 +144,11 @@ describe('POST /files/:f/revisions', () => {
 
   it('the same artifact + stamp again is a no-op', async () => {
     const { post, rows } = await setup()
-    await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One')] })
+    const first = (await (await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One')] }))!.json()) as {
+      eventId: string
+    }
     const res = await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One')] })
-    expect(await res!.json()).toEqual({ noop: true, revisionN: 1 })
+    expect(await res!.json()).toEqual({ noop: true, revisionN: 1, eventId: first.eventId })
     expect((await rows('events')).length).toBe(1)
   })
 

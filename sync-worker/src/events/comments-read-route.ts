@@ -23,10 +23,13 @@
 // token for project A cannot read comments from project B.
 
 import { verifyTokenForProject } from '../auth'
+import { loadProjectVirtualSourceFiles } from '../../../db/shared/virtual-source-store'
 
 export interface CommentsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-2459 Phase B: R2 bucket holding revision manifests for virtual source files. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface CommentRowRaw {
@@ -228,6 +231,29 @@ export async function handleCommentsReadRequest(
       rows.length > limit && last
         ? encodeCommentsCursor({ createdAt: Number(last.created_at), commentId: last.comment_id })
         : null
+    // AQU-2459 Phase B: hydrate `cell_ref` from virtual manifests when comments
+    // target a virtual file whose source rows do not live in Postgres `cells`.
+    if (env.SNAPSHOTS) {
+      const missingFileIds = [
+        ...new Set(
+          page
+            .filter((r) => r.cell_ref == null && r.file_id != null && r.cell_id != null)
+            .map((r) => r.file_id as string),
+        ),
+      ]
+      if (missingFileIds.length > 0) {
+        const vfiles = await loadProjectVirtualSourceFiles(env.AQUILLA_PG, env.SNAPSHOTS, projectId, {
+          fileIds: missingFileIds,
+        })
+        const byFile = new Map(vfiles.map((vf) => [vf.head.fileId, vf]))
+        for (const r of page) {
+          if (r.cell_ref == null && r.file_id && r.cell_id) {
+            const ref = byFile.get(r.file_id)?.byCellId.get(r.cell_id)?.canonical_ref
+            if (ref) r.cell_ref = ref
+          }
+        }
+      }
+    }
     const comments: CommentRowOut[] = page.map(toOut)
     return Response.json({ comments, nextCursor })
   } catch (err) {

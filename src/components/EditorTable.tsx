@@ -7543,6 +7543,7 @@ function EditorRow({
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
+        ...(cell.sourceContentHash ? { sourceContentHash: cell.sourceContentHash } : {}),
         value,
         valueHtml,
         author: username,

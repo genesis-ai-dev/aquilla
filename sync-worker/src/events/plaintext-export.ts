@@ -34,6 +34,7 @@
 
 import { walkAnchorChain } from "./cells-read-route"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
+import { loadVirtualSourceFile, type ManifestR2Bucket } from "../../../db/shared/virtual-source-store"
 import { decodeHtmlEntities } from "../../../src/lib/html-entities"
 import { semanticSourceText } from "../../../src/lib/semantic-source-text"
 import {
@@ -88,14 +89,30 @@ export async function buildPlainTextExport(
   fileId: string,
   lane: string,
   options: PlainTextExportOptions = {},
+  r2?: ManifestR2Bucket,
 ): Promise<PlainTextExportResult> {
-  const sources = await db
-    .prepare(
-      `SELECT ${COLUMNS} FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source'`,
-    )
-    .bind(projectId, fileId)
-    .all<CellRow>()
+  const virtualFile = r2 ? await loadVirtualSourceFile(db, r2, projectId, fileId) : null
+  const sources = virtualFile
+    ? {
+        results: virtualFile.rows.map((r): CellRow => ({
+          cell_id: r.cell_id,
+          anchor_cell_id: r.anchor_cell_id,
+          event_id: r.event_id,
+          value: r.value,
+          validated: 0,
+          canonical_ref: r.canonical_ref,
+          medium: r.medium,
+          transcription: r.transcription,
+          hidden_at: r.hidden_at,
+        })),
+      }
+    : await db
+        .prepare(
+          `SELECT ${COLUMNS} FROM cells
+            WHERE project_id = ? AND file_id = ? AND side = 'source'`,
+        )
+        .bind(projectId, fileId)
+        .all<CellRow>()
   const targets = await db
     .prepare(
       `SELECT ${COLUMNS} FROM cells

@@ -38,6 +38,7 @@
 // read the same on the plan board, the Team card and the org's Team workload.
 
 import type { Env } from "../types"
+import { ASSIGNMENT_MEMBER_CELLS_SQL } from "../../../db/shared/assignment-member-cells-sql"
 import { planKeysJoinSql, unitBookKeyExpr } from "../../../db/shared/plan-keys"
 import { audioLaneTagSql, takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 
@@ -138,7 +139,7 @@ export async function loadValidationProgress(
        LEFT JOIN lanes ln ON ln.project_id = a.project_id AND ln.id = a.lane_id
        LEFT JOIN project_settings ps ON ps.project_id = a.project_id
        -- The live SOURCE membership, as every assignment reader counts it.
-       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       JOIN ${ASSIGNMENT_MEMBER_CELLS_SQL} ac ON ac.assignment_id = a.assignment_id
        ${unitJoin}
        -- The line in the assignment's own lane, and the assignee's one vote on
        -- it there (cell_validators keys one row per person per cell per lane).

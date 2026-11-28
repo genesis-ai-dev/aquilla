@@ -30,7 +30,14 @@ import { bulkUploadSource, type BulkImportCell } from "@/lib/sync/bulk-import"
 import { fetchAllFileCells, fetchCellsByIds, fetchCellsByRef, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import { emitFileExtensionSet, emitFileRename, emitSourceCellCommit, emitSourceCellCreate, emitSourceCellDelete } from "@/lib/sync/events-emit"
-import { postFileRevision } from "@/lib/sync/revision-import"
+import {
+  buildSyntheticRevision,
+  normalizeRevisionStamp,
+  postFileRevision,
+  REVISION_IMPORT_ENABLED,
+  revisionUnitsFromCells,
+  VIRTUAL_SOURCE_CELLS_ENABLED,
+} from "@/lib/sync/revision-import"
 import { fetchRawOriginalSource } from "@/lib/sync/source-export"
 import { sha256Hex, uploadSourceOriginal } from "@/lib/sync/source-upload"
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
@@ -232,6 +239,21 @@ export class LiveFilesData implements ToolFilesHostData {
         },
         cells,
         ...(spec.raw ? { rawSource: spec.raw.text, rawSourceFormat: spec.raw.format as SourceArtifactFormat } : {}),
+        ...(REVISION_IMPORT_ENABLED && VIRTUAL_SOURCE_CELLS_ENABLED && cells.length > 0
+          ? {
+              revision: spec.raw
+                ? {
+                    stamp: normalizeRevisionStamp(`extension:${origin.toolId}@${origin.version}`, spec.format ?? "custom"),
+                    units: revisionUnitsFromCells(cells, { preserveCellIds: true }),
+                  }
+                : buildSyntheticRevision({
+                    stamp: `extension:${origin.toolId}@${origin.version}`,
+                    fileType: spec.format ?? "custom",
+                    cells,
+                    preserveCellIds: true,
+                  }),
+            }
+          : {}),
         getToken: (id) => this.opts.tokenFor(projectId, id),
         toolOrigin: origin,
       })
